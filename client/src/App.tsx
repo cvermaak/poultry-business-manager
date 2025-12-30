@@ -1,3 +1,4 @@
+import AuthGate from "./components/AuthGate";
 import { trpc } from "@/lib/trpc";
 import LoginPage from "./pages/Login";
 import { Toaster } from "@/components/ui/sonner";
@@ -99,7 +100,9 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+    <AuthGate>
+		<Router />
+		</AuthGate>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
