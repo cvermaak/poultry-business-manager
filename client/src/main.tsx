@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
 import AuthGate from "@/components/AuthGate";
+import AuthGate from "./AuthGate";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -30,3 +31,4 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </trpc.Provider>
 );
+
