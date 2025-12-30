@@ -34,6 +34,7 @@ export const appRouter = router({
     }))
     .mutation(async ({ input }) => {
       const user = await db.getUserByEmailOrUsername(input.identifier);
+
       if (!user || !user.passwordHash || !user.isActive) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
       }
@@ -70,48 +71,6 @@ export const appRouter = router({
   logout: publicProcedure.mutation(() => ({ success: true })),
 }),
 
-    
-    // Change Password
-    changePassword: protectedProcedure
-      .input(z.object({
-        currentPassword: z.string().optional(),
-        newPassword: z.string().min(8, "Password must be at least 8 characters"),
-      }))
-      .mutation(async ({ input, ctx }) => {
-        const user = await db.getUserById(ctx.user.id);
-        if (!user) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
-        }
-        
-        // If user has a password and it's not a forced change, verify current password
-        if (user.passwordHash && !user.mustChangePassword && input.currentPassword) {
-          const isValid = await verifyPassword(input.currentPassword, user.passwordHash);
-          if (!isValid) {
-            throw new TRPCError({ code: "UNAUTHORIZED", message: "Current password is incorrect" });
-          }
-        }
-        
-        // Validate new password strength
-        const strengthError = validatePasswordStrength(input.newPassword);
-        if (strengthError) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: strengthError });
-        }
-        
-        // Hash and save new password
-        const passwordHash = await hashPassword(input.newPassword);
-        await db.updateUserPassword(ctx.user.id, passwordHash, false);
-        
-        return { success: true };
-      }),
-    
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
-    }),
-  }),
 
   // ============================================================================
   // USER MANAGEMENT
