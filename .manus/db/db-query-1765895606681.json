@@ -1,0 +1,59 @@
+{
+  "query": "SELECT \n    TABLE_NAME,\n    COLUMN_NAME,\n    CONSTRAINT_NAME,\n    REFERENCED_TABLE_NAME,\n    REFERENCED_COLUMN_NAME\nFROM\n    INFORMATION_SCHEMA.KEY_COLUMN_USAGE\nWHERE\n    REFERENCED_TABLE_NAME = 'flocks'",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT \n    TABLE_NAME,\n    COLUMN_NAME,\n    CONSTRAINT_NAME,\n    REFERENCED_TABLE_NAME,\n    REFERENCED_COLUMN_NAME\nFROM\n    INFORMATION_SCHEMA.KEY_COLUMN_USAGE\nWHERE\n    REFERENCED_TABLE_NAME = 'flocks'",
+  "rows": [
+    {
+      "TABLE_NAME": "flock_daily_records",
+      "COLUMN_NAME": "flockId",
+      "CONSTRAINT_NAME": "flock_daily_records_flockId_flocks_id_fk",
+      "REFERENCED_TABLE_NAME": "flocks",
+      "REFERENCED_COLUMN_NAME": "id"
+    },
+    {
+      "TABLE_NAME": "health_records",
+      "COLUMN_NAME": "flockId",
+      "CONSTRAINT_NAME": "health_records_flockId_flocks_id_fk",
+      "REFERENCED_TABLE_NAME": "flocks",
+      "REFERENCED_COLUMN_NAME": "id"
+    },
+    {
+      "TABLE_NAME": "mortality_records",
+      "COLUMN_NAME": "flockId",
+      "CONSTRAINT_NAME": "mortality_records_flockId_flocks_id_fk",
+      "REFERENCED_TABLE_NAME": "flocks",
+      "REFERENCED_COLUMN_NAME": "id"
+    },
+    {
+      "TABLE_NAME": "procurement_schedules",
+      "COLUMN_NAME": "flockId",
+      "CONSTRAINT_NAME": "procurement_schedules_flockId_flocks_id_fk",
+      "REFERENCED_TABLE_NAME": "flocks",
+      "REFERENCED_COLUMN_NAME": "id"
+    },
+    {
+      "TABLE_NAME": "sales_order_items",
+      "COLUMN_NAME": "flockId",
+      "CONSTRAINT_NAME": "sales_order_items_flockId_flocks_id_fk",
+      "REFERENCED_TABLE_NAME": "flocks",
+      "REFERENCED_COLUMN_NAME": "id"
+    },
+    {
+      "TABLE_NAME": "vaccination_schedules",
+      "COLUMN_NAME": "flockId",
+      "CONSTRAINT_NAME": "vaccination_schedules_flockId_flocks_id_fk",
+      "REFERENCED_TABLE_NAME": "flocks",
+      "REFERENCED_COLUMN_NAME": "id"
+    },
+    {
+      "TABLE_NAME": "reminders",
+      "COLUMN_NAME": "flockId",
+      "CONSTRAINT_NAME": "reminders_flockId_flocks_id_fk",
+      "REFERENCED_TABLE_NAME": "flocks",
+      "REFERENCED_COLUMN_NAME": "id"
+    }
+  ],
+  "messages": [],
+  "stdout": "TABLE_NAME\tCOLUMN_NAME\tCONSTRAINT_NAME\tREFERENCED_TABLE_NAME\tREFERENCED_COLUMN_NAME\nflock_daily_records\tflockId\tflock_daily_records_flockId_flocks_id_fk\tflocks\tid\nhealth_records\tflockId\thealth_records_flockId_flocks_id_fk\tflocks\tid\nmortality_records\tflockId\tmortality_records_flockId_flocks_id_fk\tflocks\tid\nprocurement_schedules\tflockId\tprocurement_schedules_flockId_flocks_id_fk\tflocks\tid\nsales_order_items\tflockId\tsales_order_items_flockId_flocks_id_fk\tflocks\tid\nvaccination_schedules\tflockId\tvaccination_schedules_flockId_flocks_id_fk\tflocks\tid\nreminders\tflockId\treminders_flockId_flocks_id_fk\tflocks\tid\n",
+  "stderr": "",
+  "execution_time_ms": 50
+}

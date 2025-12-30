@@ -1,0 +1,94 @@
+{
+  "query": "SELECT id, name, reminderType, is_bundle FROM reminder_templates WHERE is_active = 1 ORDER BY is_bundle DESC, id",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT id, name, reminderType, is_bundle FROM reminder_templates WHERE is_active = 1 ORDER BY is_bundle DESC, id",
+  "rows": [
+    {
+      "id": "210010",
+      "name": "Test Bundle 1765824382868",
+      "reminderType": "routine_task",
+      "is_bundle": "1"
+    },
+    {
+      "id": "210014",
+      "name": "Test Bundle 1765824400299",
+      "reminderType": "routine_task",
+      "is_bundle": "1"
+    },
+    {
+      "id": "210001",
+      "name": "Test Template 1765824335775",
+      "reminderType": "routine_task",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210002",
+      "name": "Bundle Test Template 1 1765824335805",
+      "reminderType": "vaccination",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210003",
+      "name": "Bundle Test Template 2 1765824335816",
+      "reminderType": "feed_transition",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210004",
+      "name": "Test Template 1765824354364",
+      "reminderType": "routine_task",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210005",
+      "name": "Bundle Test Template 1 1765824354381",
+      "reminderType": "vaccination",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210006",
+      "name": "Bundle Test Template 2 1765824354391",
+      "reminderType": "feed_transition",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210007",
+      "name": "Test Template 1765824382829",
+      "reminderType": "routine_task",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210008",
+      "name": "Bundle Test Template 1 1765824382846",
+      "reminderType": "vaccination",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210009",
+      "name": "Bundle Test Template 2 1765824382858",
+      "reminderType": "feed_transition",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210011",
+      "name": "Test Template 1765824400261",
+      "reminderType": "routine_task",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210012",
+      "name": "Bundle Test Template 1 1765824400277",
+      "reminderType": "vaccination",
+      "is_bundle": "0"
+    },
+    {
+      "id": "210013",
+      "name": "Bundle Test Template 2 1765824400288",
+      "reminderType": "feed_transition",
+      "is_bundle": "0"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\treminderType\tis_bundle\n210010\tTest Bundle 1765824382868\troutine_task\t1\n210014\tTest Bundle 1765824400299\troutine_task\t1\n210001\tTest Template 1765824335775\troutine_task\t0\n210002\tBundle Test Template 1 1765824335805\tvaccination\t0\n210003\tBundle Test Template 2 1765824335816\tfeed_transition\t0\n210004\tTest Template 1765824354364\troutine_task\t0\n210005\tBundle Test Template 1 1765824354381\tvaccination\t0\n210006\tBundle Test Template 2 1765824354391\tfeed_transition\t0\n210007\tTest Template 1765824382829\troutine_task\t0\n210008\tBundle Test Template 1 1765824382846\tvaccination\t0\n210009\tBundle Test Template 2 1765824382858\tfeed_transition\t0\n210011\tTest Template 1765824400261\troutine_task\t0\n210012\tBundle Test Template 1 1765824400277\tvaccination\t0\n210013\tBundle Test Template 2 1765824400288\tfeed_transition\t0\n",
+  "stderr": "",
+  "execution_time_ms": 53
+}

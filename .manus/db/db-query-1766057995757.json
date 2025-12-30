@@ -1,0 +1,145 @@
+{
+  "query": "SELECT id, flockId, recordDate, dayNumber, mortality, feedConsumed, averageWeight FROM flock_daily_records ORDER BY recordDate DESC LIMIT 20;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT id, flockId, recordDate, dayNumber, mortality, feedConsumed, averageWeight FROM flock_daily_records ORDER BY recordDate DESC LIMIT 20;",
+  "rows": [
+    {
+      "id": "330003",
+      "flockId": "870001",
+      "recordDate": "2025-12-18 00:00:00",
+      "dayNumber": "1",
+      "mortality": "10",
+      "feedConsumed": "1120.00",
+      "averageWeight": "0.460"
+    },
+    {
+      "id": "330002",
+      "flockId": "870001",
+      "recordDate": "2025-12-17 00:00:00",
+      "dayNumber": "13",
+      "mortality": "10",
+      "feedConsumed": "760.00",
+      "averageWeight": "0.188"
+    },
+    {
+      "id": "330001",
+      "flockId": "870001",
+      "recordDate": "2025-12-16 00:00:00",
+      "dayNumber": "12",
+      "mortality": "7",
+      "feedConsumed": "760.00",
+      "averageWeight": "0.188"
+    },
+    {
+      "id": "300001",
+      "flockId": "870001",
+      "recordDate": "2025-12-15 00:00:00",
+      "dayNumber": "11",
+      "mortality": "5",
+      "feedConsumed": "840.00",
+      "averageWeight": "0.188"
+    },
+    {
+      "id": "270002",
+      "flockId": "870001",
+      "recordDate": "2025-12-14 00:00:00",
+      "dayNumber": "10",
+      "mortality": "13",
+      "feedConsumed": "720.00",
+      "averageWeight": "0.188"
+    },
+    {
+      "id": "270001",
+      "flockId": "870001",
+      "recordDate": "2025-12-13 00:00:00",
+      "dayNumber": "9",
+      "mortality": "10",
+      "feedConsumed": "640.00",
+      "averageWeight": "0.188"
+    },
+    {
+      "id": "240001",
+      "flockId": "870001",
+      "recordDate": "2025-12-12 00:00:00",
+      "dayNumber": "8",
+      "mortality": "13",
+      "feedConsumed": "480.00",
+      "averageWeight": "0.188"
+    },
+    {
+      "id": "210001",
+      "flockId": "870001",
+      "recordDate": "2025-12-11 00:00:00",
+      "dayNumber": "7",
+      "mortality": "19",
+      "feedConsumed": "640.00",
+      "averageWeight": "0.040"
+    },
+    {
+      "id": "180004",
+      "flockId": "870001",
+      "recordDate": "2025-12-10 00:00:00",
+      "dayNumber": "6",
+      "mortality": "25",
+      "feedConsumed": "240.00",
+      "averageWeight": "0.040"
+    },
+    {
+      "id": "180003",
+      "flockId": "870001",
+      "recordDate": "2025-12-09 00:00:00",
+      "dayNumber": "5",
+      "mortality": "40",
+      "feedConsumed": "560.00",
+      "averageWeight": "0.040"
+    },
+    {
+      "id": "180002",
+      "flockId": "870001",
+      "recordDate": "2025-12-08 00:00:00",
+      "dayNumber": "4",
+      "mortality": "46",
+      "feedConsumed": "600.00",
+      "averageWeight": "0.040"
+    },
+    {
+      "id": "180001",
+      "flockId": "870001",
+      "recordDate": "2025-12-07 00:00:00",
+      "dayNumber": "3",
+      "mortality": "82",
+      "feedConsumed": "760.00",
+      "averageWeight": "0.040"
+    },
+    {
+      "id": "150002",
+      "flockId": "870001",
+      "recordDate": "2025-12-06 00:00:00",
+      "dayNumber": "2",
+      "mortality": "70",
+      "feedConsumed": "400.00",
+      "averageWeight": "0.040"
+    },
+    {
+      "id": "90001",
+      "flockId": "870001",
+      "recordDate": "2025-12-05 00:00:00",
+      "dayNumber": "1",
+      "mortality": "44",
+      "feedConsumed": "600.00",
+      "averageWeight": "0.040"
+    },
+    {
+      "id": "120001",
+      "flockId": "870001",
+      "recordDate": "2025-12-04 00:00:00",
+      "dayNumber": "0",
+      "mortality": "0",
+      "feedConsumed": "0.00",
+      "averageWeight": "0.040"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tflockId\trecordDate\tdayNumber\tmortality\tfeedConsumed\taverageWeight\n330003\t870001\t2025-12-18 00:00:00\t1\t10\t1120.00\t0.460\n330002\t870001\t2025-12-17 00:00:00\t13\t10\t760.00\t0.188\n330001\t870001\t2025-12-16 00:00:00\t12\t7\t760.00\t0.188\n300001\t870001\t2025-12-15 00:00:00\t11\t5\t840.00\t0.188\n270002\t870001\t2025-12-14 00:00:00\t10\t13\t720.00\t0.188\n270001\t870001\t2025-12-13 00:00:00\t9\t10\t640.00\t0.188\n240001\t870001\t2025-12-12 00:00:00\t8\t13\t480.00\t0.188\n210001\t870001\t2025-12-11 00:00:00\t7\t19\t640.00\t0.040\n180004\t870001\t2025-12-10 00:00:00\t6\t25\t240.00\t0.040\n180003\t870001\t2025-12-09 00:00:00\t5\t40\t560.00\t0.040\n180002\t870001\t2025-12-08 00:00:00\t4\t46\t600.00\t0.040\n180001\t870001\t2025-12-07 00:00:00\t3\t82\t760.00\t0.040\n150002\t870001\t2025-12-06 00:00:00\t2\t70\t400.00\t0.040\n90001\t870001\t2025-12-05 00:00:00\t1\t44\t600.00\t0.040\n120001\t870001\t2025-12-04 00:00:00\t0\t0\t0.00\t0.040\n",
+  "stderr": "",
+  "execution_time_ms": 50
+}

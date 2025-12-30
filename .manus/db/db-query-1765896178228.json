@@ -1,0 +1,162 @@
+{
+  "query": "SELECT r.id, r.title, r.flockId, r.status, r.dueDate, f.flockNumber\nFROM reminders r \nLEFT JOIN flocks f ON r.flockId = f.id \nWHERE r.status = 'pending'\nORDER BY r.dueDate\nLIMIT 20",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT r.id, r.title, r.flockId, r.status, r.dueDate, f.flockNumber\nFROM reminders r \nLEFT JOIN flocks f ON r.flockId = f.id \nWHERE r.status = 'pending'\nORDER BY r.dueDate\nLIMIT 20",
+  "rows": [
+    {
+      "id": "780112",
+      "title": "Test biosecurity reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780113",
+      "title": "Test performance_alert reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780111",
+      "title": "Test milestone reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780109",
+      "title": "Test environmental_check reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780107",
+      "title": "Test feed_transition reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780110",
+      "title": "Test routine_task reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780106",
+      "title": "Test vaccination reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780108",
+      "title": "Test house_preparation reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 18:03:05",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810011",
+      "title": "Test biosecurity reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810010",
+      "title": "Test milestone reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810009",
+      "title": "Test routine_task reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810005",
+      "title": "Test vaccination reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810006",
+      "title": "Test feed_transition reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810012",
+      "title": "Test performance_alert reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810008",
+      "title": "Test environmental_check reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810007",
+      "title": "Test house_preparation reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810004",
+      "title": "Critical FCR Alert",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-16 19:38:19",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "780102",
+      "title": "Test Vaccination Reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-18 18:03:04",
+      "flockNumber": "NULL"
+    },
+    {
+      "id": "810001",
+      "title": "Test Vaccination Reminder",
+      "flockId": "NULL",
+      "status": "pending",
+      "dueDate": "2025-12-18 19:38:19",
+      "flockNumber": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\ttitle\tflockId\tstatus\tdueDate\tflockNumber\n780112\tTest biosecurity reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n780113\tTest performance_alert reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n780111\tTest milestone reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n780109\tTest environmental_check reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n780107\tTest feed_transition reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n780110\tTest routine_task reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n780106\tTest vaccination reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n780108\tTest house_preparation reminder\tNULL\tpending\t2025-12-16 18:03:05\tNULL\n810011\tTest biosecurity reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810010\tTest milestone reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810009\tTest routine_task reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810005\tTest vaccination reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810006\tTest feed_transition reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810012\tTest performance_alert reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810008\tTest environmental_check reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810007\tTest house_preparation reminder\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n810004\tCritical FCR Alert\tNULL\tpending\t2025-12-16 19:38:19\tNULL\n780102\tTest Vaccination Reminder\tNULL\tpending\t2025-12-18 18:03:04\tNULL\n810001\tTest Vaccination Reminder\tNULL\tpending\t2025-12-18 19:38:19\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 54
+}

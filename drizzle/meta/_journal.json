@@ -1,0 +1,111 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1764951723342,
+      "tag": "0000_bent_drax",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1765300267985,
+      "tag": "0001_brief_victor_mancha",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1765305620328,
+      "tag": "0002_bored_gideon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1765307149042,
+      "tag": "0003_spicy_shooting_star",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1765308718537,
+      "tag": "0004_smart_millenium_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1765311617464,
+      "tag": "0005_big_leopardon",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1765312246221,
+      "tag": "0006_last_lilandra",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1765312882066,
+      "tag": "0007_ordinary_darwin",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1765482159374,
+      "tag": "0008_cold_lester",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1765633575676,
+      "tag": "0009_majestic_black_bird",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1765640531083,
+      "tag": "0010_petite_mauler",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1765740163999,
+      "tag": "0011_thick_amazoness",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1765916781161,
+      "tag": "0012_marvelous_falcon",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1765977316652,
+      "tag": "0013_bright_spot",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1766145518592,
+      "tag": "0014_shocking_kabuki",
+      "breakpoints": true
+    }
+  ]
+}

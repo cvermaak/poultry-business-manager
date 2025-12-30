@@ -1,0 +1,15 @@
+{
+  "query": "SELECT id, flockNumber, status FROM flocks WHERE flockNumber LIKE '%TEST%'",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT id, flockNumber, status FROM flocks WHERE flockNumber LIKE '%TEST%'",
+  "rows": [
+    {
+      "id": "810001",
+      "flockNumber": "FL-M2-TEST-001",
+      "status": "cancelled"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tflockNumber\tstatus\n810001\tFL-M2-TEST-001\tcancelled\n",
+  "stderr": "",
+  "execution_time_ms": 50
+}

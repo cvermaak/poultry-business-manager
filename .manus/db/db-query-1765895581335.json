@@ -1,0 +1,13 @@
+{
+  "query": "SELECT COUNT(*) as cnt FROM sales_order_items WHERE flockId = 810001",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT COUNT(*) as cnt FROM sales_order_items WHERE flockId = 810001",
+  "rows": [
+    {
+      "cnt": "0"
+    }
+  ],
+  "messages": [],
+  "stdout": "cnt\n0\n",
+  "stderr": "",
+  "execution_time_ms": 52
+}

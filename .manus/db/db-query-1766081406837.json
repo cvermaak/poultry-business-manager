@@ -1,0 +1,13 @@
+{
+  "query": "SELECT id FROM flocks WHERE flockNumber = 'Clinton';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT id FROM flocks WHERE flockNumber = 'Clinton';",
+  "rows": [
+    {
+      "id": "1020001"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\n1020001\n",
+  "stderr": "",
+  "execution_time_ms": 54
+}

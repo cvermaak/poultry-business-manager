@@ -1,0 +1,127 @@
+{
+  "query": "SHOW TABLES",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SHOW TABLES",
+  "rows": [
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "__drizzle_migrations"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "chart_of_accounts"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "customer_addresses"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "customers"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "documents"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "feed_batches"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "feed_formulations"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "flock_daily_records"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "flock_stress_pack_schedules"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "flock_vaccination_schedules"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "flocks"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "general_ledger_entries"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "health_records"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "houses"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "inventory_items"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "inventory_locations"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "inventory_transactions"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "invoice_items"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "invoices"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "item_templates"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "mortality_records"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "payment_allocations"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "payments"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "procurement_order_items"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "procurement_orders"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "procurement_schedules"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "quality_control_records"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "raw_material_transactions"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "raw_materials"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "reminder_templates"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "reminders"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "sales_order_items"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "sales_orders"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "stress_packs"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "suppliers"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "user_activity_logs"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "users"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "vaccination_schedules"
+    },
+    {
+      "Tables_in_SwQCxo7pxW6R8kkqwZSJsv": "vaccines"
+    }
+  ],
+  "messages": [],
+  "stdout": "Tables_in_SwQCxo7pxW6R8kkqwZSJsv\n__drizzle_migrations\nchart_of_accounts\ncustomer_addresses\ncustomers\ndocuments\nfeed_batches\nfeed_formulations\nflock_daily_records\nflock_stress_pack_schedules\nflock_vaccination_schedules\nflocks\ngeneral_ledger_entries\nhealth_records\nhouses\ninventory_items\ninventory_locations\ninventory_transactions\ninvoice_items\ninvoices\nitem_templates\nmortality_records\npayment_allocations\npayments\nprocurement_order_items\nprocurement_orders\nprocurement_schedules\nquality_control_records\nraw_material_transactions\nraw_materials\nreminder_templates\nreminders\nsales_order_items\nsales_orders\nstress_packs\nsuppliers\nuser_activity_logs\nusers\nvaccination_schedules\nvaccines\n",
+  "stderr": "",
+  "execution_time_ms": 64
+}

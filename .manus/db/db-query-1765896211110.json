@@ -1,0 +1,9 @@
+{
+  "query": "DELETE FROM reminders WHERE flockId IS NULL AND title LIKE 'Test%'",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute DELETE FROM reminders WHERE flockId IS NULL AND title LIKE 'Test%'",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 64
+}

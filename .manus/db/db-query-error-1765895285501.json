@@ -1,0 +1,8 @@
+{
+  "query": "SELECT id, flock_number, status FROM flocks WHERE flock_number = 'FL-M2-TEST-001'",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT id, flock_number, status FROM flocks WHERE flock_number = 'FL-M2-TEST-001'",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'flock_number' in 'where clause'"
+  ]
+}

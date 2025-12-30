@@ -1,0 +1,16 @@
+{
+  "query": "SELECT id, flockNumber, initialCount, currentCount FROM flocks WHERE flockNumber = 'Clinton' LIMIT 1;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT id, flockNumber, initialCount, currentCount FROM flocks WHERE flockNumber = 'Clinton' LIMIT 1;",
+  "rows": [
+    {
+      "id": "1020001",
+      "flockNumber": "Clinton",
+      "initialCount": "10000",
+      "currentCount": "10000"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tflockNumber\tinitialCount\tcurrentCount\n1020001\tClinton\t10000\t10000\n",
+  "stderr": "",
+  "execution_time_ms": 942
+}

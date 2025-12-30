@@ -1,0 +1,136 @@
+{
+  "query": "SELECT id, name, reminderType, priority, day_offset, is_bundle, \n       CASE WHEN bundle_config IS NOT NULL THEN JSON_LENGTH(bundle_config) ELSE NULL END as bundle_categories\nFROM reminder_templates \nWHERE is_active = 1\nORDER BY is_bundle DESC, reminderType, day_offset",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4WYXdTZ2RFuJQah.8fcf44c6f992 --database SwQCxo7pxW6R8kkqwZSJsv --execute SELECT id, name, reminderType, priority, day_offset, is_bundle, \n       CASE WHEN bundle_config IS NOT NULL THEN JSON_LENGTH(bundle_config) ELSE NULL END as bundle_categories\nFROM reminder_templates \nWHERE is_active = 1\nORDER BY is_bundle DESC, reminderType, day_offset",
+  "rows": [
+    {
+      "id": "210014",
+      "name": "Test Bundle 1765824400299",
+      "reminderType": "routine_task",
+      "priority": "medium",
+      "day_offset": "0",
+      "is_bundle": "1",
+      "bundle_categories": "2"
+    },
+    {
+      "id": "210010",
+      "name": "Test Bundle 1765824382868",
+      "reminderType": "routine_task",
+      "priority": "medium",
+      "day_offset": "0",
+      "is_bundle": "1",
+      "bundle_categories": "2"
+    },
+    {
+      "id": "210012",
+      "name": "Bundle Test Template 1 1765824400277",
+      "reminderType": "vaccination",
+      "priority": "high",
+      "day_offset": "1",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210002",
+      "name": "Bundle Test Template 1 1765824335805",
+      "reminderType": "vaccination",
+      "priority": "high",
+      "day_offset": "1",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210005",
+      "name": "Bundle Test Template 1 1765824354381",
+      "reminderType": "vaccination",
+      "priority": "high",
+      "day_offset": "1",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210008",
+      "name": "Bundle Test Template 1 1765824382846",
+      "reminderType": "vaccination",
+      "priority": "high",
+      "day_offset": "1",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210003",
+      "name": "Bundle Test Template 2 1765824335816",
+      "reminderType": "feed_transition",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210006",
+      "name": "Bundle Test Template 2 1765824354391",
+      "reminderType": "feed_transition",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210013",
+      "name": "Bundle Test Template 2 1765824400288",
+      "reminderType": "feed_transition",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210009",
+      "name": "Bundle Test Template 2 1765824382858",
+      "reminderType": "feed_transition",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210004",
+      "name": "Test Template 1765824354364",
+      "reminderType": "routine_task",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210011",
+      "name": "Test Template 1765824400261",
+      "reminderType": "routine_task",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210007",
+      "name": "Test Template 1765824382829",
+      "reminderType": "routine_task",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    },
+    {
+      "id": "210001",
+      "name": "Test Template 1765824335775",
+      "reminderType": "routine_task",
+      "priority": "medium",
+      "day_offset": "7",
+      "is_bundle": "0",
+      "bundle_categories": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\treminderType\tpriority\tday_offset\tis_bundle\tbundle_categories\n210014\tTest Bundle 1765824400299\troutine_task\tmedium\t0\t1\t2\n210010\tTest Bundle 1765824382868\troutine_task\tmedium\t0\t1\t2\n210012\tBundle Test Template 1 1765824400277\tvaccination\thigh\t1\t0\tNULL\n210002\tBundle Test Template 1 1765824335805\tvaccination\thigh\t1\t0\tNULL\n210005\tBundle Test Template 1 1765824354381\tvaccination\thigh\t1\t0\tNULL\n210008\tBundle Test Template 1 1765824382846\tvaccination\thigh\t1\t0\tNULL\n210003\tBundle Test Template 2 1765824335816\tfeed_transition\tmedium\t7\t0\tNULL\n210006\tBundle Test Template 2 1765824354391\tfeed_transition\tmedium\t7\t0\tNULL\n210013\tBundle Test Template 2 1765824400288\tfeed_transition\tmedium\t7\t0\tNULL\n210009\tBundle Test Template 2 1765824382858\tfeed_transition\tmedium\t7\t0\tNULL\n210004\tTest Template 1765824354364\troutine_task\tmedium\t7\t0\tNULL\n210011\tTest Template 1765824400261\troutine_task\tmedium\t7\t0\tNULL\n210007\tTest Template 1765824382829\troutine_task\tmedium\t7\t0\tNULL\n210001\tTest Template 1765824335775\troutine_task\tmedium\t7\t0\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 58
+}

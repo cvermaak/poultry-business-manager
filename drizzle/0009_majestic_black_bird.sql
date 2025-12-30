@@ -1,0 +1,2 @@
+ALTER TABLE `reminders` ADD `templateId` int;--> statement-breakpoint
+ALTER TABLE `reminders` ADD CONSTRAINT `reminders_templateId_reminder_templates_id_fk` FOREIGN KEY (`templateId`) REFERENCES `reminder_templates`(`id`) ON DELETE no action ON UPDATE no action;

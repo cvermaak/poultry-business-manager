@@ -1,0 +1,2 @@
+ALTER TABLE `reminder_templates` MODIFY COLUMN `reminderType` enum('vaccination','feed_transition','house_preparation','environmental_check','routine_task','milestone','biosecurity','performance_alert','house_light_timing') NOT NULL;--> statement-breakpoint
+ALTER TABLE `reminders` MODIFY COLUMN `reminderType` enum('vaccination','feed_transition','house_preparation','environmental_check','routine_task','milestone','biosecurity','performance_alert','house_light_timing') NOT NULL;
