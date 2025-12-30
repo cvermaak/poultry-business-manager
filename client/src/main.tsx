@@ -4,8 +4,6 @@ import { httpBatchLink } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
-import AuthGate from "@/components/AuthGate";
-import AuthGate from "./AuthGate";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -16,7 +14,10 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       fetch(input, init) {
-        return fetch(input, { ...(init ?? {}), credentials: "include" });
+        return globalThis.fetch(input, {
+          ...(init ?? {}),
+          credentials: "include",
+        });
       },
     }),
   ],
@@ -25,10 +26,7 @@ const trpcClient = trpc.createClient({
 createRoot(document.getElementById("root")!).render(
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
-      <AuthGate>
-        <App />
-      </AuthGate>
+      <App />
     </QueryClientProvider>
   </trpc.Provider>
 );
-
