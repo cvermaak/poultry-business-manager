@@ -1,4 +1,4 @@
-import AuthGate from "./components/AuthGate";
+import AuthGate from "./AuthGate";
 import { trpc } from "@/lib/trpc";
 import LoginPage from "./pages/Login";
 import { Toaster } from "@/components/ui/sonner";
@@ -85,24 +85,14 @@ function Router() {
 }
 
 function App() {
-  const me = trpc.auth.me.useQuery();
-
-  if (me.isLoading) {
-    return <div className="p-6">Loading...</div>;
-  }
-
-  if (!me.data) {
-    return <LoginPage />;
-  }
-
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-    <AuthGate>
-		<Router />
-		</AuthGate>
+          <AuthGate>
+            <Router />
+          </AuthGate>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
