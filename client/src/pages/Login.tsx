@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { getLoginUrl } from "@/const";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,19 +19,16 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [error, setError] = useState<string | null>(null);
 
   const loginMutation = trpc.auth.login.useMutation({
-    onSuccess: (data) => {
-      if (data.mustChangePassword) {
-        // Redirect to change password page or show modal
-        window.location.href = "/?changePassword=true";
-      } else {
-        // Refresh the page to load authenticated state
-        window.location.href = "/";
-      }
-      onLoginSuccess?.();
-    },
-    onError: (err) => {
-      setError(err.message || "Login failed. Please check your credentials.");
-    },
+  onSuccess: async (data) => {
+    if (data.mustChangePassword) {
+      window.location.href = "/?changePassword=true";
+      return;
+    }
+
+    // 🔑 Re-sync session state instead of hard reload
+    await trpc.auth.me.invalidate();
+  },
+
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -45,10 +41,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     }
     
     loginMutation.mutate({ identifier: identifier.trim(), password });
-  };
-
-  const handleOAuthLogin = () => {
-    window.location.href = getLoginUrl();
   };
 
   return (

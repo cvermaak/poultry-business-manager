@@ -1,3 +1,5 @@
+import { trpc } from "@/lib/trpc";
+import LoginPage from "./pages/Login";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -82,6 +84,16 @@ function Router() {
 }
 
 function App() {
+  const me = trpc.auth.me.useQuery();
+
+  if (me.isLoading) {
+    return <div className="p-6">Loading...</div>;
+  }
+
+  if (!me.data) {
+    return <LoginPage />;
+  }
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light">
