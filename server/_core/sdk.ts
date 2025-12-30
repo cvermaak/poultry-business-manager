@@ -1,4 +1,5 @@
-import { verify } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
+const { verify } = jwt;
 import type { Request } from "express";
 import * as db from "../db";
 
