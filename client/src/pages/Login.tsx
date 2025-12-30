@@ -31,7 +31,9 @@ export default function LoginPage() {
       }
 
       // 🔐 Re-sync auth state so UI unlocks instantly
-      await utils.auth.me.invalidate();
+	  await utils.auth.me.invalidate();
+	  await utils.auth.me.refetch();   // 🔥 THIS LINE UNLOCKS YOUR APP
+
     },
     onError: (err) => {
       setError(err.message || "Invalid login credentials");
