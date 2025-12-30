@@ -8,5 +8,5 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (!user) return <LoginPage />;
 
-  return <>{children}</>;
+  return <div key={user.id}>{children}</div>;
 }
