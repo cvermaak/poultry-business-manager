@@ -1,7 +1,5 @@
-import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
@@ -27,59 +25,51 @@ export const appRouter = router({
   // AUTHENTICATION
   // ============================================================================
   auth: router({
-    me: publicProcedure.query((opts) => opts.ctx.user),
-    
-    // Email/Password Login
-    login: publicProcedure
-      .input(z.object({
-        identifier: z.string().min(1, "Email or username is required"),
-        password: z.string().min(1, "Password is required"),
-      }))
-      .mutation(async ({ input, ctx }) => {
-        // Find user by email or username
-        const user = await db.getUserByEmailOrUsername(input.identifier);
-        
-        if (!user) {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
-        }
-        
-        if (!user.isActive) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "Account is deactivated" });
-        }
-        
-        if (!user.passwordHash) {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "This account uses OAuth login" });
-        }
-        
-        // Verify password
-        const isValid = await verifyPassword(input.password, user.passwordHash);
-        if (!isValid) {
-          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
-        }
-        
-        // Update last sign in
-        await db.updateUserLastSignIn(user.id);
-        
-        // Create session token using a unique identifier for email users
-        const sessionToken = await sdk.createSessionToken(`email:${user.id}`, {
-          name: user.name || "",
-          expiresInMs: ONE_YEAR_MS,
-        });
-        
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
-        
-        return {
-          success: true,
-          mustChangePassword: user.mustChangePassword,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-          },
-        };
-      }),
+  me: publicProcedure.query(({ ctx }) => ctx.user),
+
+  login: publicProcedure
+    .input(z.object({
+      identifier: z.string(),
+      password: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const user = await db.getUserByEmailOrUsername(input.identifier);
+      if (!user || !user.passwordHash || !user.isActive) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+      }
+
+      const valid = await verifyPassword(input.password, user.passwordHash);
+      if (!valid) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+      }
+
+      await db.updateUserLastSignIn(user.id);
+
+      const token = await sdk.createSessionToken(user.id);
+
+      return {
+        token,
+        mustChangePassword: user.mustChangePassword,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
+      };
+    }),
+
+  changePassword: protectedProcedure
+    .input(z.object({ newPassword: z.string().min(8) }))
+    .mutation(async ({ input, ctx }) => {
+      const hash = await hashPassword(input.newPassword);
+      await db.updateUserPassword(ctx.user.id, hash, false);
+      return { success: true };
+    }),
+
+  logout: publicProcedure.mutation(() => ({ success: true })),
+}),
+
     
     // Change Password
     changePassword: protectedProcedure
