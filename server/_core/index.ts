@@ -30,6 +30,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
+  app.enable("trust proxy");
   app.set("trust proxy", 1);   // 👈 CRITICAL
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
