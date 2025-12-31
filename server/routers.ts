@@ -28,37 +28,45 @@ export const appRouter = router({
   me: publicProcedure.query(({ ctx }) => ctx.user),
 
   login: publicProcedure
-    .input(z.object({
-      identifier: z.string(),
-      password: z.string(),
-    }))
-    .mutation(async ({ input }) => {
-      const user = await db.getUserByEmailOrUsername(input.identifier);
+  .input(z.object({
+    identifier: z.string(),
+    password: z.string(),
+  }))
+  .mutation(async ({ input, ctx }) => {
+    const user = await db.getUserByEmailOrUsername(input.identifier);
 
-      if (!user || !user.passwordHash || !user.isActive) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
-      }
+    if (!user || !user.passwordHash || !user.isActive) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+    }
 
-      const valid = await verifyPassword(input.password, user.passwordHash);
-      if (!valid) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
-      }
+    const valid = await verifyPassword(input.password, user.passwordHash);
+    if (!valid) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+    }
 
-      await db.updateUserLastSignIn(user.id);
+    await db.updateUserLastSignIn(user.id);
 
-      const token = await sdk.createSessionToken(user.id);
+    const token = await sdk.createSessionToken(user.id);
 
-      return {
-        token,
-        mustChangePassword: user.mustChangePassword,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      };
-    }),
+    // 🔐 WRITE COOKIE SESSION
+    ctx.res.cookie("session", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      path: "/",
+      maxAge: ONE_YEAR_MS,
+    });
+
+    return {
+      mustChangePassword: user.mustChangePassword,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    };
+  }),
 
   changePassword: protectedProcedure
     .input(z.object({ newPassword: z.string().min(8) }))
