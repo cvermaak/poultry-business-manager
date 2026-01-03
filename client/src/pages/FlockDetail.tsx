@@ -358,6 +358,43 @@ export default function FlockDetail() {
     flock?.growingPeriod || 42
   );
 
+  // === ADWG vs Target Data ===
+  const adwgData = (() => {
+  if (!dailyRecords || !flock) return [];
+
+  const expectedDailyGain =
+    flock.targetWeight / flock.growingPeriod;
+
+  return dailyRecords
+    .filter(r => r.averageWeight !== null)
+    .map((record, index, arr) => {
+      if (index === 0) return null;
+
+      const prev = arr[index - 1];
+
+      const daysBetween =
+        (new Date(record.recordDate).getTime() -
+         new Date(prev.recordDate).getTime()) /
+        (1000 * 60 * 60 * 24);
+
+      if (daysBetween <= 0) return null;
+
+      const adwg =
+        (parseFloat(record.averageWeight!.toString()) -
+         parseFloat(prev.averageWeight!.toString())) / daysBetween;
+
+      const targetDay =
+        parseFloat(record.averageWeight!.toString()) / expectedDailyGain;
+
+      return {
+        targetDay: Number(targetDay.toFixed(2)),
+        actualADWG: Number(adwg.toFixed(2)),
+        targetADWG: Number(expectedDailyGain.toFixed(2)),
+      };
+    })
+    .filter(Boolean);
+})();
+
   const chartData: Array<{
     day: number;
     actualWeight: number | null;
@@ -519,6 +556,45 @@ export default function FlockDetail() {
                 </p>
               </CardContent>
             </Card>
+			<Card>
+  <CardHeader>
+    <CardTitle>Average Daily Weight Gain vs Target</CardTitle>
+    <CardDescription>
+      Actual ADWG plotted against derived target day
+    </CardDescription>
+  </CardHeader>
+  <CardContent>
+    <ResponsiveContainer width="100%" height={300}>
+      <LineChart data={adwgData}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis
+          dataKey="targetDay"
+          label={{ value: "Target Day", position: "insideBottom", offset: -5 }}
+        />
+        <YAxis
+          label={{ value: "ADWG (kg/day)", angle: -90, position: "insideLeft" }}
+        />
+        <Tooltip />
+        <Legend />
+        <Line
+          type="monotone"
+          dataKey="actualADWG"
+          name="Actual ADWG"
+          stroke="#2563eb"
+          strokeWidth={2}
+        />
+        <Line
+          type="monotone"
+          dataKey="targetADWG"
+          name="Target ADWG"
+          stroke="#16a34a"
+          strokeDasharray="5 5"
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  </CardContent>
+</Card>
+
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Total Feed Consumed</CardTitle>
