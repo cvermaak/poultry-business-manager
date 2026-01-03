@@ -1077,10 +1077,21 @@ export async function getFlockPerformanceMetrics(flockId: number) {
   );
 
   // Get latest weight sample
-  const latestRecord = dailyRecords[dailyRecords.length - 1];
-  const averageWeight = latestRecord?.averageWeight 
-    ? parseFloat(latestRecord.averageWeight.toString()) 
-    : 0;
+  //const latestRecord = dailyRecords[dailyRecords.length - 1];
+  //const averageWeight = latestRecord?.averageWeight 
+  //  ? parseFloat(latestRecord.averageWeight.toString()) 
+  //  : 0;
+  
+  // NEW CODE //
+  // Get latest weight sample (find the most recent record with a non-zero weight)
+  let averageWeight = 0;
+  for (let i = 0; i < dailyRecords.length; i++) {
+    const record = dailyRecords[i];
+    if (record.averageWeight && parseFloat(record.averageWeight.toString()) > 0) {
+      averageWeight = parseFloat(record.averageWeight.toString());
+    }
+  }
+  // END NEW CODE //
 
   // Calculate current count as initial count minus cumulative mortality
   const calculatedCurrentCount = flock.initialCount - totalMortality;

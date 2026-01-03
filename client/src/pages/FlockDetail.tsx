@@ -532,18 +532,18 @@ export default function FlockDetail() {
                 </p>
               </CardContent>
             </Card>
-            <Card>
+			            <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Latest Weight</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {dailyRecords && dailyRecords.length > 0 && dailyRecords[dailyRecords.length - 1]?.averageWeight
-                    ? `${parseFloat(dailyRecords[dailyRecords.length - 1].averageWeight!.toString()).toFixed(3)} kg`
+                  {performanceMetrics?.averageWeight && performanceMetrics.averageWeight > 0
+                    ? `${performanceMetrics.averageWeight.toFixed(3)} kg`
                     : "No data"}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {dailyRecords && dailyRecords.length > 0 ? `Day ${dailyRecords[dailyRecords.length - 1]?.dayNumber}` : "Record weights to track"}
+                  {performanceMetrics?.ageInDays !== undefined ? `Day ${performanceMetrics.ageInDays}` : "Record weights to track"}
                 </p>
               </CardContent>
             </Card>
@@ -553,17 +553,9 @@ export default function FlockDetail() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {(() => {
-                    const totalFeed = dailyRecords?.reduce((sum, r) => sum + (r.feedConsumed ? parseFloat(r.feedConsumed.toString()) : 0), 0) || 0;
-                    const latestWeight = dailyRecords && dailyRecords.length > 0 && dailyRecords[dailyRecords.length - 1]?.averageWeight
-                      ? parseFloat(dailyRecords[dailyRecords.length - 1].averageWeight!.toString())
-                      : 0;
-                    const currentCount = flock?.currentCount || 0;
-                    if (totalFeed > 0 && latestWeight > 0 && currentCount > 0) {
-                      return (totalFeed / (currentCount * latestWeight)).toFixed(2);
-                    }
-                    return "N/A";
-                  })()}
+                  {performanceMetrics?.fcr && performanceMetrics.fcr > 0
+                    ? performanceMetrics.fcr.toFixed(2)
+                    : "N/A"}
                 </div>
                 <p className="text-xs text-muted-foreground">Feed Conversion Ratio</p>
               </CardContent>
