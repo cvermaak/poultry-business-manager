@@ -1221,13 +1221,6 @@ return sortedRecords
               </div>
             </CardContent>
           </Card>
-		  
-		  {adwgData.length === 0 && (
-				<div className="text-sm text-muted-foreground text-center py-4">
-				ADWG requires at least two valid weight measurements.
-				</div>
-			)}
-		  
 		  <Card>
   <CardHeader>
     <CardTitle>Average Daily Weight Gain vs Target</CardTitle>
