@@ -375,10 +375,48 @@ export default function FlockDetail() {
 }
 
 
-  return dailyRecords
-    .filter(r => r.averageWeight !== null)
-    .map((record, index, arr) => {
-      if (index === 0) return null;
+  //return dailyRecords
+  //  .filter(r => r.averageWeight !== null)
+  //  .map((record, index, arr) => {
+  //    if (index === 0) return null;
+  
+	  // Sort records chronologically (oldest → newest)
+	const sortedRecords = [...dailyRecords]
+	  .filter(r => r.averageWeight && r.averageWeight > 0)
+	  .sort(
+      (a, b) =>
+      new Date(a.recordDate).getTime() -
+      new Date(b.recordDate).getTime()
+  );
+
+return sortedRecords
+  .map((record, index, arr) => {
+    if (index === 0) return null;
+
+    const prev = arr[index - 1];
+
+    const daysBetween =
+      (new Date(record.recordDate).getTime() -
+       new Date(prev.recordDate).getTime()) /
+      (1000 * 60 * 60 * 24);
+
+    if (daysBetween <= 0) return null;
+
+    const adwg =
+      (parseFloat(record.averageWeight!.toString()) -
+       parseFloat(prev.averageWeight!.toString())) / daysBetween;
+
+    const targetDay =
+      parseFloat(record.averageWeight!.toString()) / expectedDailyGain;
+
+    return {
+      targetDay: Number(targetDay.toFixed(2)),
+      actualADWG: Number(adwg.toFixed(3)),
+      targetADWG: Number(expectedDailyGain.toFixed(3)),
+    };
+  })
+  .filter(Boolean);
+
 
       const prev = arr[index - 1];
 
@@ -1183,6 +1221,13 @@ export default function FlockDetail() {
               </div>
             </CardContent>
           </Card>
+		  
+		  {adwgData.length === 0 && (
+				<div className="text-sm text-muted-foreground text-center py-4">
+				ADWG requires at least two valid weight measurements.
+				</div>
+			)}
+		  
 		  <Card>
   <CardHeader>
     <CardTitle>Average Daily Weight Gain vs Target</CardTitle>
