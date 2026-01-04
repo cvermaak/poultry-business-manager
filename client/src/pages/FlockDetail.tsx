@@ -411,31 +411,6 @@ const adwgData = (() => {
     .filter(Boolean);
 })();
 
-      const prev = arr[index - 1];
-
-      const daysBetween =
-        (new Date(record.recordDate).getTime() -
-         new Date(prev.recordDate).getTime()) /
-        (1000 * 60 * 60 * 24);
-
-      if (daysBetween <= 0) return null;
-
-      const adwg =
-        (parseFloat(record.averageWeight!.toString()) -
-         parseFloat(prev.averageWeight!.toString())) / daysBetween;
-
-      const targetDay =
-        parseFloat(record.averageWeight!.toString()) / expectedDailyGain;
-
-      return {
-        targetDay: Number(targetDay.toFixed(2)),
-        actualADWG: Number(adwg.toFixed(2)),
-        targetADWG: Number(expectedDailyGain.toFixed(2)),
-      };
-    })
-    .filter(Boolean);
-})();
-
   const chartData: Array<{
     day: number;
     actualWeight: number | null;
