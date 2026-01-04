@@ -359,28 +359,23 @@ export default function FlockDetail() {
   );
 
 // === ADWG vs Target Data ===
-const adwgData = (() => {
+  const adwgData = (() => {
   if (!dailyRecords || !flock) return [];
 
   const expectedDailyGain =
     Number(flock.target_weight) / Number(flock.target_age_days);
 
-  if (!expectedDailyGain || isNaN(expectedDailyGain)) {
-    console.warn("Invalid expectedDailyGain", {
-      target_weight: flock.target_weight,
-      target_age_days: flock.target_age_days,
-    });
-    return [];
-  }
+  if (!expectedDailyGain || isNaN(expectedDailyGain)) return [];
 
-  // Sort records chronologically (oldest → newest)
   const sortedRecords = [...dailyRecords]
-    .filter(r => r.averageWeight && r.averageWeight > 0)
+    .filter(r => typeof r.averageWeight === "number" && r.averageWeight > 0)
     .sort(
       (a, b) =>
         new Date(a.recordDate).getTime() -
         new Date(b.recordDate).getTime()
     );
+
+  if (sortedRecords.length < 2) return [];
 
   return sortedRecords
     .map((record, index, arr) => {
@@ -396,11 +391,10 @@ const adwgData = (() => {
       if (daysBetween <= 0) return null;
 
       const adwg =
-        (parseFloat(record.averageWeight!.toString()) -
-         parseFloat(prev.averageWeight!.toString())) / daysBetween;
+        (record.averageWeight - prev.averageWeight) / daysBetween;
 
       const targetDay =
-        parseFloat(record.averageWeight!.toString()) / expectedDailyGain;
+        record.averageWeight / expectedDailyGain;
 
       return {
         targetDay: Number(targetDay.toFixed(2)),
