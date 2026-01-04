@@ -363,7 +363,17 @@ export default function FlockDetail() {
   if (!dailyRecords || !flock) return [];
 
   const expectedDailyGain =
-    flock.targetWeight / flock.growingPeriod;
+    //flock.targetWeight / flock.growingPeriod;
+	flock.target_weight / flock.target_age_days;
+	
+	if (!expectedDailyGain || isNaN(expectedDailyGain)) {
+  console.warn("Invalid expectedDailyGain", {
+    target_weight: flock.target_weight,
+    target_age_days: flock.target_age_days,
+  });
+  return [];
+}
+
 
   return dailyRecords
     .filter(r => r.averageWeight !== null)
