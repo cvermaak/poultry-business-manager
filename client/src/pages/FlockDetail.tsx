@@ -368,7 +368,7 @@ export default function FlockDetail() {
   if (!expectedDailyGain || isNaN(expectedDailyGain)) return [];
 
   const sortedRecords = [...dailyRecords]
-    .filter(r => typeof r.averageWeight === "number" && r.averageWeight > 0)
+    .filter(r => Number(r.averageWeight) > 0)
     .sort(
       (a, b) =>
         new Date(a.recordDate).getTime() -
@@ -390,11 +390,11 @@ export default function FlockDetail() {
 
       if (daysBetween <= 0) return null;
 
-      const adwg =
-        (record.averageWeight - prev.averageWeight) / daysBetween;
+      const currentWeight = Number(record.averageWeight);
+      const prevWeight = Number(prev.averageWeight);
 
-      const targetDay =
-        record.averageWeight / expectedDailyGain;
+      const adwg = (currentWeight - prevWeight) / daysBetween;
+      const targetDay = currentWeight / expectedDailyGain;
 
       return {
         targetDay: Number(targetDay.toFixed(2)),
@@ -404,6 +404,7 @@ export default function FlockDetail() {
     })
     .filter(Boolean);
 })();
+
 
   const chartData: Array<{
     day: number;
