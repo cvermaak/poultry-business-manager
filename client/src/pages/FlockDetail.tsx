@@ -137,6 +137,7 @@ export default function FlockDetail() {
   const [vaccinationDialogOpen, setVaccinationDialogOpen] = useState(false);
   const [reminderActionDialog, setReminderActionDialog] = useState<{ open: boolean; reminderId: number | null; action: "complete" | "dismiss" | null }>({ open: false, reminderId: null, action: null });
   const [reminderActionNotes, setReminderActionNotes] = useState("");
+  const [activeTab, setActiveTab] = useState("daily");
 
   // Form states for daily record
   const [dailyRecordForm, setDailyRecordForm] = useState({
@@ -541,7 +542,7 @@ export default function FlockDetail() {
       </div>
 
       {/* Tabbed Content */}
-      <Tabs defaultValue="daily" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="daily">Daily Records</TabsTrigger>
           <TabsTrigger value="growth">Growth Performance</TabsTrigger>
@@ -1201,8 +1202,10 @@ export default function FlockDetail() {
     </CardDescription>
   </CardHeader>
   <CardContent>
+    {activeTab === "growth" && (
     <ResponsiveContainer width="100%" height={300}>
-      <LineChart data={adwgData}>
+    <LineChart data={adwgData}>
+
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis
           dataKey="targetDay"
