@@ -1194,44 +1194,45 @@ export default function FlockDetail() {
 				</div>
 			)}
 		  
-		  <Card>
+		<Card>
   <CardHeader>
     <CardTitle>Average Daily Weight Gain vs Target</CardTitle>
     <CardDescription>
       Actual ADWG plotted against derived target day
     </CardDescription>
   </CardHeader>
+
   <CardContent>
     {activeTab === "growth" && (
-    <ResponsiveContainer width="100%" height={300}>
-    <LineChart data={adwgData}>
-
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis
-          dataKey="targetDay"
-          label={{ value: "Target Day", position: "insideBottom", offset: -5 }}
-        />
-        <YAxis
-          label={{ value: "ADWG (kg/day)", angle: -90, position: "insideLeft" }}
-        />
-        <Tooltip />
-        <Legend />
-        <Line
-          type="monotone"
-          dataKey="actualADWG"
-          name="Actual ADWG"
-          stroke="#2563eb"
-          strokeWidth={2}
-        />
-        <Line
-          type="monotone"
-          dataKey="targetADWG"
-          name="Target ADWG"
-          stroke="#16a34a"
-          strokeDasharray="5 5"
-        />
-      </LineChart>
-    </ResponsiveContainer>
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={adwgData}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis
+            dataKey="targetDay"
+            label={{ value: "Target Day", position: "insideBottom", offset: -5 }}
+          />
+          <YAxis
+            label={{ value: "ADWG (kg/day)", angle: -90, position: "insideLeft" }}
+          />
+          <Tooltip />
+          <Legend />
+          <Line
+            type="monotone"
+            dataKey="actualADWG"
+            name="Actual ADWG"
+            stroke="#2563eb"
+            strokeWidth={2}
+          />
+          <Line
+            type="monotone"
+            dataKey="targetADWG"
+            name="Target ADWG"
+            stroke="#16a34a"
+            strokeDasharray="5 5"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    )}
   </CardContent>
 </Card>
         </TabsContent>
