@@ -1114,7 +1114,21 @@ export async function getFlockPerformanceMetrics(flockId: number) {
   const todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   const ageInDays = Math.floor((todayUTC - placementUTC) / (1000 * 60 * 60 * 24));
 
-  const targetWeight = flock.targetSlaughterWeight ? parseFloat(flock.targetSlaughterWeight) : 0;
+// Shrinkage (fixed for now, configurable later)
+  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
+
+// Delivered (slaughterhouse) target
+  const deliveredTargetWeight =
+  flock.targetSlaughterWeight
+    ? parseFloat(flock.targetSlaughterWeight)
+    : 0;
+
+// Convert to pre-catch (farm) target weight
+  const targetWeight =
+  deliveredTargetWeight > 0
+    ? deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100)
+    : 0;
+	
   const growingPeriod = flock.growingPeriod || 42;
 
   return {
@@ -1213,18 +1227,69 @@ function getTargetWeightLegacy(dayNumber: number): number {
  * Get target growth curve data for charting (breed-specific)
  * Returns array of {day, targetWeight} for the specified day range
  */
-export function getTargetGrowthCurve(startDay: number = 0, endDay: number = 42, breed: BreedType = 'ross_308'): Array<{ day: number; targetWeight: number }> {
+export function getTargetGrowthCurve(input: {
+  startDay: number;
+  endDay: number;
+  breed: BreedType;
+  deliveredTargetWeight: number;
+  growingPeriod: number;
+  shrinkagePercent?: number;
+}): Array<{ day: number; targetWeight: number }> {
+
+  const {
+    startDay,
+    endDay,
+    deliveredTargetWeight,
+    growingPeriod,
+    shrinkagePercent = 6.5,
+  } = input;
+
+  if (!deliveredTargetWeight || deliveredTargetWeight <= 0) {
+    throw new Error("Invalid delivered target weight");
+  }
+
+  if (!growingPeriod || growingPeriod <= 0) {
+    throw new Error("Invalid growing period");
+  }
+
+  // 1️⃣ Convert delivered weight → pre-catch live weight
+  const preCatchTargetWeight =
+    deliveredTargetWeight / (1 - shrinkagePercent / 100);
+
+  // 2️⃣ Expected average daily gain (kg/day)
+  const expectedDailyGain =
+    preCatchTargetWeight / growingPeriod;
+
+  // 3️⃣ Build curve
   const curve: Array<{ day: number; targetWeight: number }> = [];
-  
+
   for (let day = startDay; day <= endDay; day++) {
     curve.push({
       day,
-      targetWeight: getTargetWeight(day, breed),
+      targetWeight: Number((expectedDailyGain * day).toFixed(4)),
     });
   }
-  
+
   return curve;
 }
+
+  // Convert delivered → pre-catch target
+  const preCatchTargetWeight =
+    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
+
+  const dailyGain = preCatchTargetWeight / endDay;
+
+  const curve: Array<{ day: number; targetWeight: number }> = [];
+  for (let day = startDay; day <= endDay; day++) {
+    curve.push({
+      day,
+      targetWeight: Number((dailyGain * day).toFixed(3)),
+    });
+  }
+
+  return curve;
+}
+
 
 /**
  * Calculate performance deviation from target (breed-specific)

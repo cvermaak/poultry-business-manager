@@ -746,30 +746,32 @@ export const appRouter = router({
     }),
 
     getTargetGrowthCurve: protectedProcedure
-      .input(
-        z.object({
-          flockId: z.number().optional(),
-          breed: z.enum(['ross_308', 'cobb_500', 'arbor_acres']).optional(),
-          startDay: z.number().int().default(0),
-          endDay: z.number().int().default(42),
-        })
-      )
-      .query(async ({ input }) => {
-        let breed: 'ross_308' | 'cobb_500' | 'arbor_acres' = input.breed || 'ross_308';
-        
-        // If flockId is provided, get breed from the flock's house
-        if (input.flockId) {
-          const flock = await db.getFlockById(input.flockId);
-          if (flock) {
-            const house = await db.getHouseById(flock.houseId);
-            if (house && house.breed) {
-              breed = house.breed as 'ross_308' | 'cobb_500' | 'arbor_acres';
-            }
-          }
-        }
-        
-        return db.getTargetGrowthCurve(input.startDay, input.endDay, breed);
-      }),
+  .input(
+    z.object({
+      flockId: z.number(),
+      startDay: z.number().int().default(0),
+      endDay: z.number().int().default(42),
+    })
+  )
+  .query(async ({ input }) => {
+    const flock = await db.getFlockById(input.flockId);
+    if (!flock) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Flock not found" });
+    }
+
+    const house = await db.getHouseById(flock.houseId);
+
+    const breed =
+      (house?.breed as 'ross_308' | 'cobb_500' | 'arbor_acres') || 'ross_308';
+
+    return db.getTargetGrowthCurve({
+  startDay: input.startDay,
+  endDay: input.endDay,
+  breed,
+  deliveredTargetWeight: Number(flock.targetSlaughterWeight),
+  growingPeriod: flock.growingPeriod,
+  shrinkagePercent: 6.5, // fixed for now
+});
 
     getMortalityRecords: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
       return await db.getMortalityRecords(input.flockId);

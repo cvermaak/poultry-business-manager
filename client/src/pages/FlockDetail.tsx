@@ -360,25 +360,32 @@ export default function FlockDetail() {
   );
 
 // === ADWG vs Target Data ===
+  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
+
   const adwgData = (() => {
-  if (!dailyRecords || !targetGrowthCurve) return [];
+  if (!dailyRecords || !flock) return [];
 
-  // Build target ADWG from target growth curve
-  const targetADWGMap = new Map<number, number>();
+  const deliveredTargetWeight = Number(flock.targetWeight);
+  const growingPeriod = Number(flock.growingPeriod);
 
-  for (let i = 1; i < targetGrowthCurve.length; i++) {
-    const prev = targetGrowthCurve[i - 1];
-    const curr = targetGrowthCurve[i];
+  if (!deliveredTargetWeight || !growingPeriod) return [];
 
-    const gain = curr.targetWeight - prev.targetWeight;
-    if (gain > 0) {
-      targetADWGMap.set(curr.day, gain);
-    }
-  }
+  const preCatchTargetWeight =
+    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
+
+  const expectedDailyGain =
+    preCatchTargetWeight / growingPeriod;
 
   const sortedRecords = [...dailyRecords]
-    .filter(r => Number(r.averageWeight) > 0)
-    .sort((a, b) => a.dayNumber - b.dayNumber);
+    .filter(r => {
+      const w = parseFloat(r.averageWeight?.toString() ?? "0");
+      return !isNaN(w) && w > 0;
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.recordDate).getTime() -
+        new Date(b.recordDate).getTime()
+    );
 
   if (sortedRecords.length < 2) return [];
 
@@ -387,25 +394,29 @@ export default function FlockDetail() {
       if (index === 0) return null;
 
       const prev = arr[index - 1];
-      const daysBetween = record.dayNumber - prev.dayNumber;
+
+      const daysBetween =
+        (new Date(record.recordDate).getTime() -
+         new Date(prev.recordDate).getTime()) /
+        (1000 * 60 * 60 * 24);
+
       if (daysBetween <= 0) return null;
 
-      const actualADWG =
-        (Number(record.averageWeight) - Number(prev.averageWeight)) /
-        daysBetween;
+      const currentWeight = parseFloat(record.averageWeight!.toString());
+      const prevWeight = parseFloat(prev.averageWeight!.toString());
 
-      const targetADWG = targetADWGMap.get(record.dayNumber);
-
-      if (!targetADWG) return null;
+      const adwg = (currentWeight - prevWeight) / daysBetween;
+      const targetDay = currentWeight / expectedDailyGain;
 
       return {
-        targetDay: record.dayNumber,
-        actualADWG: Number(actualADWG.toFixed(3)),
-        targetADWG: Number(targetADWG.toFixed(3)),
+        targetDay: Number(targetDay.toFixed(2)),
+        actualADWG: Number(adwg.toFixed(3)),
+        targetADWG: Number(expectedDailyGain.toFixed(3)),
       };
     })
     .filter(Boolean);
 })();
+
 
 
   const chartData: Array<{
