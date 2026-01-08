@@ -1288,8 +1288,6 @@ export function getTargetGrowthCurve(input: {
   }
 
   return curve;
-}
-
 
 /**
  * Calculate performance deviation from target (breed-specific)
