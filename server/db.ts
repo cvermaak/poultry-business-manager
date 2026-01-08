@@ -1273,22 +1273,6 @@ export function getTargetGrowthCurve(input: {
   return curve;
 }
 
-  // Convert delivered → pre-catch target
-  const preCatchTargetWeight =
-    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
-
-  const dailyGain = preCatchTargetWeight / endDay;
-
-  const curve: Array<{ day: number; targetWeight: number }> = [];
-  for (let day = startDay; day <= endDay; day++) {
-    curve.push({
-      day,
-      targetWeight: Number((dailyGain * day).toFixed(3)),
-    });
-  }
-
-  return curve;
-
 /**
  * Calculate performance deviation from target (breed-specific)
  * Returns percentage deviation (positive = ahead of target, negative = behind target)
