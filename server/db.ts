@@ -1286,8 +1286,9 @@ const deviation =
     ? ((averageWeight - targetWeightAtDay) / targetWeightAtDay) * 100
     : 0;
 	
-  return performanceDeviation: Number(deviation.toFixed(1))
-}
+  return {
+	  performanceDeviation: Number(deviation.toFixed(1))
+};
 
 /**
  * Get performance status based on deviation from target
