@@ -1273,27 +1273,6 @@ export function getTargetGrowthCurve(input: {
   return curve;
 }
 
-/**
- * Calculate performance deviation from target (breed-specific)
- * Returns percentage deviation (positive = ahead of target, negative = behind target)
- */
-export function calculatePerformanceDeviation(actualWeight: number, dayNumber: number, breed: BreedType = 'ross_308'): number {
-  const targetWeightAtDay =
-  expectedDailyGain * ageInDays;
-
-const deviation =
-  targetWeightAtDay > 0
-    ? ((averageWeight - targetWeightAtDay) / targetWeightAtDay) * 100
-    : 0;
-	
-  return {
-	  performanceDeviation: Number(deviation.toFixed(1))
-};
-
-/**
- * Get performance status based on deviation from target
- * Returns: 'ahead' | 'on-track' | 'behind' | 'critical'
- */
 export function getPerformanceStatus(deviation: number): 'ahead' | 'on-track' | 'behind' | 'critical' {
   if (deviation >= 5) return 'ahead';           // 5% or more ahead
   if (deviation >= -5) return 'on-track';       // Within ±5%
@@ -1301,6 +1280,41 @@ export function getPerformanceStatus(deviation: number): 'ahead' | 'on-track' | 
   return 'critical';                             // -10% or more behind
 }
 
+/**
+ * Calculate performance deviation from target (breed-specific)
+ * Returns percentage deviation (positive = ahead of target, negative = behind target)
+ */
+export function calculatePerformanceDeviation(
+  actualWeight: number,
+  dayNumber: number,
+  deliveredTargetWeight: number,
+  growingPeriod: number,
+  shrinkagePercent: number = 6.5
+): number {
+  if (
+    actualWeight <= 0 ||
+    deliveredTargetWeight <= 0 ||
+    growingPeriod <= 0
+  ) {
+    return 0;
+  }
+
+  const preCatchTargetWeight =
+    deliveredTargetWeight / (1 - shrinkagePercent / 100);
+
+  const expectedDailyGain =
+    preCatchTargetWeight / growingPeriod;
+
+  const targetWeightAtDay =
+    expectedDailyGain * dayNumber;
+
+  const deviation =
+    targetWeightAtDay > 0
+      ? ((actualWeight - targetWeightAtDay) / targetWeightAtDay) * 100
+      : 0;
+
+  return Number(deviation.toFixed(1));
+}
 
 /**
  * Validate if target weight is realistic for given breed and growing period
