@@ -765,13 +765,15 @@ export const appRouter = router({
       (house?.breed as 'ross_308' | 'cobb_500' | 'arbor_acres') || 'ross_308';
 
     return db.getTargetGrowthCurve({
-  startDay: input.startDay,
-  endDay: input.endDay,
-  breed,
-  deliveredTargetWeight: Number(flock.targetSlaughterWeight),
-  growingPeriod: flock.growingPeriod,
-  shrinkagePercent: 6.5, // fixed for now
-});
+      startDay: input.startDay,
+      endDay: input.endDay,
+      breed,
+      deliveredTargetWeight: Number(flock.targetSlaughterWeight),
+      growingPeriod: flock.growingPeriod,
+      shrinkagePercent: 6.5, // fixed for now
+    });
+  }),
+
 
     getMortalityRecords: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
       return await db.getMortalityRecords(input.flockId);
