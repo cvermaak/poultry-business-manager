@@ -365,7 +365,7 @@ export default function FlockDetail() {
   const adwgData = (() => {
   if (!dailyRecords || !flock) return [];
 
-  const deliveredTargetWeight = Number(flock.targetWeight);
+  const deliveredTargetWeight = Number(flock.targetSlaughterWeight);
   const growingPeriod = Number(flock.growingPeriod);
 
   if (!deliveredTargetWeight || !growingPeriod) return [];
@@ -532,8 +532,12 @@ export default function FlockDetail() {
           <CardContent>
             <div className="text-2xl font-bold">{performanceMetrics?.averageWeight || 0} kg</div>
             <p className="text-xs text-muted-foreground">
-              Target: {performanceMetrics?.targetWeight || 0} kg
-            </p>
+			  Target (pre-catch): {(
+				(performanceMetrics?.targetWeight || 0) /
+				(1 - 0.065)
+			).toFixed(3)} kg
+		</p>
+
           </CardContent>
         </Card>
 
@@ -1130,14 +1134,15 @@ export default function FlockDetail() {
                       orientation="right" 
                       label={{ value: "Feed (kg)", angle: 90, position: "insideRight" }} 
                     />
-                    <Tooltip 
-                      formatter={(value: any, name: string) => {
-                        if (name === "Actual Weight" || name === "Target Weight") {
-                          return value ? `${parseFloat(value).toFixed(3)} kg` : 'No data';
-                        }
-                        return value ? `${parseFloat(value).toFixed(2)} kg` : 'No data';
-                      }}
-                    />
+                    <Tooltip
+						formatter={(value: number, name: string) => {
+						 if (name === "Target Weight") {
+						     return [`${value.toFixed(3)} kg`, "Target Weight (farm, pre-catch)"];
+						}
+						return [`${value}`, name];
+						}}
+					/>
+
                     <Legend />
                     {/* Target weight line (dashed) */}
                     <Line 

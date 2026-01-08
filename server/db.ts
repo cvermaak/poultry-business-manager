@@ -1278,11 +1278,15 @@ export function getTargetGrowthCurve(input: {
  * Returns percentage deviation (positive = ahead of target, negative = behind target)
  */
 export function calculatePerformanceDeviation(actualWeight: number, dayNumber: number, breed: BreedType = 'ross_308'): number {
-  const targetWeight = getTargetWeight(dayNumber, breed);
-  if (targetWeight === 0) return 0;
-  
-  const deviation = ((actualWeight - targetWeight) / targetWeight) * 100;
-  return Math.round(deviation * 10) / 10; // Round to 1 decimal place
+  const targetWeightAtDay =
+  expectedDailyGain * ageInDays;
+
+const deviation =
+  targetWeightAtDay > 0
+    ? ((averageWeight - targetWeightAtDay) / targetWeightAtDay) * 100
+    : 0;
+	
+  return performanceDeviation: Number(deviation.toFixed(1))
 }
 
 /**
