@@ -343,6 +343,62 @@ export default function FlockDetail() {
       </div>
     );
   }
+  
+  // === ADWG vs Target Data (frontend-derived, temporary) ===
+  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
+
+  const adwgData = (() => {
+  if (!dailyRecords || !flock) return [];
+
+  const deliveredTargetWeight = Number(flock.targetSlaughterWeight);
+  const growingPeriod = Number(flock.growingPeriod);
+
+  if (!deliveredTargetWeight || !growingPeriod) return [];
+
+  const preCatchTargetWeight =
+    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
+
+  const expectedDailyGain = preCatchTargetWeight / growingPeriod;
+
+  const sortedRecords = [...dailyRecords]
+    .filter(r => {
+      const w = Number(r.averageWeight ?? 0);
+      return w > 0;
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.recordDate).getTime() -
+        new Date(b.recordDate).getTime()
+    );
+
+  if (sortedRecords.length < 2) return [];
+
+  return sortedRecords
+    .map((record, index, arr) => {
+      if (index === 0) return null;
+
+      const prev = arr[index - 1];
+
+      const daysBetween =
+        (new Date(record.recordDate).getTime() -
+          new Date(prev.recordDate).getTime()) /
+        (1000 * 60 * 60 * 24);
+
+      if (daysBetween <= 0) return null;
+
+      const currentWeight = Number(record.averageWeight);
+      const prevWeight = Number(prev.averageWeight);
+
+      const adwg = (currentWeight - prevWeight) / daysBetween;
+
+      return {
+        targetDay: Number((currentWeight / expectedDailyGain).toFixed(2)),
+        actualADWG: Number(adwg.toFixed(3)),
+        targetADWG: Number(expectedDailyGain.toFixed(3)),
+      };
+    })
+    .filter(Boolean);
+})();
 
   if (!flock) {
     return (
