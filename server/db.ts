@@ -1293,6 +1293,62 @@ export function getTargetGrowthCurve(input: {
   return curve;
 }
 
+export async function getGrowthPerformanceData(flockId: number) {
+  const flock = await getFlockById(flockId);
+  if (!flock) throw new Error("Flock not found");
+
+  const dailyRecords = await getFlockDailyRecords(flockId);
+
+  const breed: BreedType = "ross_308"; // TODO: make configurable later
+  const growingPeriod = flock.growingPeriod || 42;
+
+  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
+  const deliveredTargetWeight = Number(flock.targetSlaughterWeight || 0);
+
+  if (!deliveredTargetWeight) {
+    throw new Error("Target slaughter weight not set");
+  }
+
+  // Pre-catch (farm) target
+  const preCatchTargetWeight =
+    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
+
+  // 1️⃣ Benchmark curve (breed standard)
+  const benchmark = [];
+  for (let day = 0; day <= growingPeriod; day++) {
+    benchmark.push({
+      day,
+      weightKg: Number(getTargetWeight(day, breed).toFixed(4)),
+    });
+  }
+
+  // 2️⃣ Farm-scaled target curve
+  const breedFinal = getTargetWeight(growingPeriod, breed);
+
+  const farmTarget = benchmark.map(b => ({
+    day: b.day,
+    targetWeightKg:
+      breedFinal > 0
+        ? Number(((b.weightKg / breedFinal) * preCatchTargetWeight).toFixed(4))
+        : 0,
+  }));
+
+  // 3️⃣ Actual weights
+  const actuals = dailyRecords
+    .filter(r => r.averageWeight && Number(r.averageWeight) > 0)
+    .map(r => ({
+      day: r.dayNumber,
+      weightKg: Number(r.averageWeight),
+      feedKg: r.feedConsumed ? Number(r.feedConsumed) : undefined,
+    }));
+
+  return {
+    benchmark,
+    farmTarget,
+    actuals,
+  };
+}
+
 export function getPerformanceStatus(deviation: number): 'ahead' | 'on-track' | 'behind' | 'critical' {
   if (deviation >= 5) return 'ahead';           // 5% or more ahead
   if (deviation >= -5) return 'on-track';       // Within ±5%

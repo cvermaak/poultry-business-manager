@@ -31,19 +31,8 @@ export default function FlockDetail() {
   const { data: healthRecords } = trpc.flocks.getHealthRecords.useQuery({ flockId });
   const { data: vaccinationSchedule } = trpc.flocks.getVaccinationSchedule.useQuery({ flockId });
   const { data: performanceMetrics } = trpc.flocks.getPerformanceMetrics.useQuery({ flockId });
-  const { data: targetGrowthCurve } =
-  trpc.flocks.getTargetGrowthCurve.useQuery(
-    flock && flock.targetSlaughterWeight && flock.growingPeriod
-      ? {
-          startDay: 0,
-          endDay: flock.growingPeriod,
-          growingPeriod: flock.growingPeriod,
-          deliveredTargetWeight: Number(flock.targetSlaughterWeight),
-          breed: "ross_308", // later make configurable
-        }
-      : undefined,
-    { enabled: !!flock }
-  );
+  const { data: growthData } =
+  trpc.flocks.getGrowthPerformanceData.useQuery({ flockId });
 
   const { data: vaccinationSchedules } = trpc.flocks.getVaccinationSchedules.useQuery({ flockId });
   const { data: stressPackSchedules } = trpc.flocks.getStressPackSchedules.useQuery({ flockId });
@@ -348,136 +337,35 @@ export default function FlockDetail() {
       </div>
     );
   }
+  
+// === Growth Performance Data (from backend) ===
+  const benchmark = growthData?.benchmark ?? [];
+  const farmTarget = growthData?.farmTarget ?? [];
+  const actuals = growthData?.actuals ?? [];
 
-  // Prepare chart data - merge actual and target data
-  // Treat weight of 0 as "not weighed" (null) so chart skips those days
-  const actualData = dailyRecords?.map((record) => {
-    const weight = record.averageWeight ? parseFloat(record.averageWeight.toString()) : 0;
-    return {
-      day: record.dayNumber,
-      actualWeight: weight > 0 ? weight : null, // Only plot actual measurements, not zeros
-      mortality: record.mortality,
-      feed: record.feedConsumed ? parseFloat(record.feedConsumed.toString()) : 0,
-    };
-  }) || [];
+// === Chart Data (merged by day) ===
+  const chartData = (() => {
+  const days = new Set<number>();
 
-  // Create a complete dataset combining actual and target data
-  const maxDay = Math.max(
-    ...(actualData.map(d => d.day)),
-    ...(targetGrowthCurve?.map(d => d.day) || []),
-    flock?.growingPeriod || 42
-  );
+  benchmark.forEach(b => days.add(b.day));
+  farmTarget.forEach(t => days.add(t.day));
+  actuals.forEach(a => days.add(a.day));
 
-// === ADWG vs Target Data ===
-  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
-
-  const adwgData = (() => {
-  if (!dailyRecords || !flock) return [];
-
-  const deliveredTargetWeight = Number(flock.targetSlaughterWeight);
-  const growingPeriod = Number(flock.growingPeriod);
-
-  if (!deliveredTargetWeight || !growingPeriod) return [];
-
-  const preCatchTargetWeight =
-    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
-
-  const expectedDailyGain =
-    preCatchTargetWeight / growingPeriod;
-
-  const sortedRecords = [...dailyRecords]
-    .filter(r => {
-      const w = parseFloat(r.averageWeight?.toString() ?? "0");
-      return !isNaN(w) && w > 0;
-    })
-    .sort(
-      (a, b) =>
-        new Date(a.recordDate).getTime() -
-        new Date(b.recordDate).getTime()
-    );
-
-  if (sortedRecords.length < 2) return [];
-
-  return sortedRecords
-    .map((record, index, arr) => {
-      if (index === 0) return null;
-
-      const prev = arr[index - 1];
-
-      const daysBetween =
-        (new Date(record.recordDate).getTime() -
-         new Date(prev.recordDate).getTime()) /
-        (1000 * 60 * 60 * 24);
-
-      if (daysBetween <= 0) return null;
-
-      const currentWeight = parseFloat(record.averageWeight!.toString());
-      const prevWeight = parseFloat(prev.averageWeight!.toString());
-
-      const adwg = (currentWeight - prevWeight) / daysBetween;
-      const targetDay = currentWeight / expectedDailyGain;
-
-      return {
-        targetDay: Number(targetDay.toFixed(2)),
-        actualADWG: Number(adwg.toFixed(3)),
-        targetADWG: Number(expectedDailyGain.toFixed(3)),
-      };
-    })
-    .filter(Boolean);
-})();
-
-
-
-  const chartData: Array<{
-    day: number;
-    actualWeight: number | null;
-    targetWeight: number;
-    feed: number | null;
-  }> = [];
-
-  for (let day = 0; day <= maxDay; day++) {
-    const actual = actualData.find(d => d.day === day);
-    const target = targetGrowthCurve?.find(d => d.day === day);
-
-    chartData.push({
+  return Array.from(days)
+    .sort((a, b) => a - b)
+    .map(day => ({
       day,
-      actualWeight: actual?.actualWeight || null,
-      targetWeight: target?.targetWeight ?? null,
-      feed: actual?.feed || null,
-    });
-  }
-
-  // Calculate performance status
-  // Find the latest record that has an actual weight measurement (not null)
-  const latestActual = [...actualData].reverse().find(d => d.actualWeight !== null);
-  const performanceDeviation = latestActual && latestActual.actualWeight && targetGrowthCurve
-    ? ((latestActual.actualWeight - (targetGrowthCurve.find(t => t.day === latestActual.day)?.targetWeight || 0)) / 
-       (targetGrowthCurve.find(t => t.day === latestActual.day)?.targetWeight || 1)) * 100
-    : 0;
-
-  const getPerformanceStatus = (deviation: number) => {
-    if (deviation >= 5) return { label: 'Ahead of Target', color: 'text-green-600', bgColor: 'bg-green-50' };
-    if (deviation >= -5) return { label: 'On Track', color: 'text-blue-600', bgColor: 'bg-blue-50' };
-    if (deviation >= -10) return { label: 'Behind Target', color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
-    return { label: 'Critical - Action Required', color: 'text-red-600', bgColor: 'bg-red-50' };
-  };
-
-  const performanceStatus = getPerformanceStatus(performanceDeviation);
-
-  const getStatusColor = (status: string): "default" | "secondary" | "destructive" | "outline" | "warning" | "success" => {
-    switch (status) {
-      case "active":
-        return "warning"; // Amber/orange - in progress
-      case "completed":
-        return "success"; // Green - success
-      case "planned":
-        return "outline"; // No color - neutral
-      case "cancelled":
-        return "destructive"; // Red - terminated
-      default:
-        return "outline";
-    }
-  };
+      benchmarkWeight:
+        benchmark.find(b => b.day === day)?.weightKg ?? null,
+      targetWeight:
+        farmTarget.find(t => t.day === day)?.targetWeightKg ?? null,
+      actualWeight:
+        actuals.find(a => a.day === day)?.weightKg ?? null,
+      feedKg:
+        actuals.find(a => a.day === day)?.feedKg ?? null,
+    }));
+})();
+  
 
   return (
     <div className="container py-8">
@@ -1102,24 +990,7 @@ export default function FlockDetail() {
 
         {/* Growth Performance Tab */}
         <TabsContent value="growth" className="space-y-4">
-          {/* Performance Status Card */}
-          {latestActual && (
-            <Card className={performanceStatus.bgColor}>
-              <CardHeader>
-                <CardTitle className={performanceStatus.color}>Performance Status: {performanceStatus.label}</CardTitle>
-                <CardDescription>
-                  Current deviation from target: {performanceDeviation.toFixed(1)}%
-                  {latestActual && latestActual.actualWeight && (
-                    <span className="ml-2">
-                      (Day {latestActual.day}: {latestActual.actualWeight.toFixed(3)}kg actual vs {targetGrowthCurve?.find(t => t.day === latestActual.day)?.targetWeight.toFixed(3)}kg target)
-                    </span>
-                  )}
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          )}
-
-          <Card>
+           <Card>
             <CardHeader>
               <CardTitle>Growth Performance</CardTitle>
               <CardDescription>Actual weight progression vs. industry standard target (Ross 308/Cobb 500 benchmark)</CardDescription>
@@ -1179,7 +1050,7 @@ export default function FlockDetail() {
                     <Line 
                       yAxisId="right" 
                       type="monotone" 
-                      dataKey="feed" 
+                      dataKey="feedKg" 
                       stroke="#2563eb" 
                       strokeWidth={2} 
                       name="Feed Consumed" 

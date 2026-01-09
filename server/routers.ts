@@ -740,6 +740,13 @@ export const appRouter = router({
         );
         return { success: true };
       }),
+	  
+	getGrowthPerformance: protectedProcedure
+	  .input(z.object({ flockId: z.number() }))
+		.query(async ({ input }) => {
+      return await db.getGrowthPerformanceData(input.flockId);
+    }),
+
 
     getPerformanceMetrics: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
       return await db.getFlockPerformanceMetrics(input.flockId);
