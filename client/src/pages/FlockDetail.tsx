@@ -1105,25 +1105,31 @@ export default function FlockDetail() {
 					<YAxis
 					  yAxisId="right"
 					  orientation="right"
-					  domain={[0, "dataMax + 200"]}
-					  allowDataOverflow
-					  tickFormatter={(v) => v.toLocaleString()}
+					  domain={["auto", "auto"]}
+					  tickFormatter={(v) => `${v.toLocaleString()} kg`}
 					  label={{
-						value: "Feed (g/day)",
+						value: "Feed (kg/day)",
 						angle: 90,
 						position: "insideRight",
 					  }}
 					/>
-
                     <Tooltip
-						formatter={(value: number, name: string) => {
-						 if (name === "Farm Target Weight") {
-						     return [`${value.toFixed(3)} kg`, "Target Weight (farm, pre-catch)"];
+					  formatter={(value: number, name: string) => {
+						if (name === "Industry Benchmark") {
+						  return [`${value.toFixed(3)} kg`, name];
 						}
-						return [`${value}`, name];
-						}}
+						if (name === "Farm Target Weight") {
+						  return [`${value.toFixed(3)} kg`, "Target Weight (farm, pre-catch)"];
+						}
+						if (name === "Actual Weight") {
+						  return [`${value.toFixed(3)} kg`, name];
+						}
+						if (name === "Feed Consumed") {
+						  return [`${value.toLocaleString()} kg`, "Feed Consumed"];
+						}
+						return [value, name];
+					  }}
 					/>
-
                     <Legend />
 					<Line
 					  yAxisId="left"
@@ -1193,7 +1199,7 @@ export default function FlockDetail() {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 bg-blue-600"></div>
-                  <span>Daily Feed Consumption</span>
+                  <span>Daily Feed Consumption (kg)</span>
                 </div>
               </div>
             </CardContent>
