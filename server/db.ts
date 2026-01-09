@@ -1113,6 +1113,7 @@ export async function getFlockPerformanceMetrics(flockId: number) {
   const placementUTC = Date.UTC(placementDate.getUTCFullYear(), placementDate.getUTCMonth(), placementDate.getUTCDate());
   const todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   const ageInDays = Math.floor((todayUTC - placementUTC) / (1000 * 60 * 60 * 24));
+  const growingPeriod = flock.growingPeriod || 42;
 
 // Shrinkage (fixed for now, configurable later)
   const DEFAULT_SHRINKAGE_PERCENT = 6.5;
@@ -1129,25 +1130,41 @@ export async function getFlockPerformanceMetrics(flockId: number) {
     ? deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100)
     : 0;
 	
-  const growingPeriod = flock.growingPeriod || 42;
+	const breed: BreedType = 'ross_308'; // later configurable
 
-  return {
-    flockId: flock.id,
-    flockNumber: flock.flockNumber,
-    ageInDays,
-    currentCount: calculatedCurrentCount,
-    initialCount: flock.initialCount,
-    totalMortality,
-    mortalityRate: parseFloat(mortalityRate.toFixed(2)),
-    totalFeedConsumed: parseFloat(totalFeedConsumed.toFixed(2)),
-    averageWeight: parseFloat(averageWeight.toFixed(3)),
-    fcr: parseFloat(fcr.toFixed(2)),
-    targetWeight,
-    growingPeriod,
-    daysRemaining: growingPeriod - ageInDays,
-  };
+	const breedWeightAtDay = getTargetWeight(ageInDays, breed);
+	const breedWeightAtEnd = getTargetWeight(growingPeriod, breed);
+
+	const targetWeightAtDay =
+	  breedWeightAtEnd > 0
+	  ? (breedWeightAtDay / breedWeightAtEnd) * targetWeight
+	  : 0;
+
+	const deviation =
+  targetWeightAtDay > 0
+    ? ((averageWeight - targetWeightAtDay) / targetWeightAtDay) * 100
+    : 0;
+
+return {
+  flockId: flock.id,
+  flockNumber: flock.flockNumber,
+  ageInDays,
+  currentCount: calculatedCurrentCount,
+  initialCount: flock.initialCount,
+  totalMortality,
+  mortalityRate: parseFloat(mortalityRate.toFixed(2)),
+  totalFeedConsumed: parseFloat(totalFeedConsumed.toFixed(2)),
+  averageWeight: parseFloat(averageWeight.toFixed(3)),
+  fcr: parseFloat(fcr.toFixed(2)),
+  targetWeight,                     // pre-catch final target
+  targetWeightAtDay: Number(targetWeightAtDay.toFixed(3)),
+  performanceDeviation: Number(deviation.toFixed(1)),
+  performanceStatus: getPerformanceStatus(deviation),
+  growingPeriod,
+  daysRemaining: growingPeriod - ageInDays,
+};
+
 }
-
 
 // ============================================================================
 // Breed-Specific Target Growth Curve Functions
@@ -1252,21 +1269,24 @@ export function getTargetGrowthCurve(input: {
     throw new Error("Invalid growing period");
   }
 
-  // 1️⃣ Convert delivered weight → pre-catch live weight
+  // Convert delivered → pre-catch live weight
   const preCatchTargetWeight =
     deliveredTargetWeight / (1 - shrinkagePercent / 100);
 
-  // 2️⃣ Expected average daily gain (kg/day)
-  const expectedDailyGain =
-    preCatchTargetWeight / growingPeriod;
-
-  // 3️⃣ Build curve
   const curve: Array<{ day: number; targetWeight: number }> = [];
 
   for (let day = startDay; day <= endDay; day++) {
+    const breedWeight = getTargetWeight(day, breed);
+    const breedWeightFinal = getTargetWeight(growingPeriod, breed);
+
+    const scaledTarget =
+      breedWeightFinal > 0
+        ? (breedWeight / breedWeightFinal) * preCatchTargetWeight
+        : 0;
+
     curve.push({
       day,
-      targetWeight: Number((expectedDailyGain * day).toFixed(4)),
+      targetWeight: Number(scaledTarget.toFixed(4)),
     });
   }
 
@@ -1278,42 +1298,6 @@ export function getPerformanceStatus(deviation: number): 'ahead' | 'on-track' | 
   if (deviation >= -5) return 'on-track';       // Within ±5%
   if (deviation > -10) return 'behind';         // 5-10% behind (not including -10%)
   return 'critical';                             // -10% or more behind
-}
-
-/**
- * Calculate performance deviation from target (breed-specific)
- * Returns percentage deviation (positive = ahead of target, negative = behind target)
- */
-export function calculatePerformanceDeviation(
-  actualWeight: number,
-  dayNumber: number,
-  deliveredTargetWeight: number,
-  growingPeriod: number,
-  shrinkagePercent: number = 6.5
-): number {
-  if (
-    actualWeight <= 0 ||
-    deliveredTargetWeight <= 0 ||
-    growingPeriod <= 0
-  ) {
-    return 0;
-  }
-
-  const preCatchTargetWeight =
-    deliveredTargetWeight / (1 - shrinkagePercent / 100);
-
-  const expectedDailyGain =
-    preCatchTargetWeight / growingPeriod;
-
-  const targetWeightAtDay =
-    expectedDailyGain * dayNumber;
-
-  const deviation =
-    targetWeightAtDay > 0
-      ? ((actualWeight - targetWeightAtDay) / targetWeightAtDay) * 100
-      : 0;
-
-  return Number(deviation.toFixed(1));
 }
 
 /**
