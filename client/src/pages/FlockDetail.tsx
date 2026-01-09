@@ -351,8 +351,9 @@ export default function FlockDetail() {
   actuals.forEach(a => days.add(a.day));
 
   return Array.from(days)
-    .sort((a, b) => a - b)
-    .map(day => ({
+  .sort((a, b) => a - b)
+  .map(day => {
+    const row = {
       day,
       benchmarkWeight:
         benchmark.find(b => b.day === day)?.weightKg ?? null,
@@ -362,7 +363,17 @@ export default function FlockDetail() {
         actuals.find(a => a.day === day)?.weightKg ?? null,
       feedKg:
         actuals.find(a => a.day === day)?.feedKg ?? null,
-    }));
+    };
+
+    // 🔑 Keep row ONLY if at least one weight exists
+    return row.benchmarkWeight !== null ||
+      row.targetWeight !== null ||
+      row.actualWeight !== null
+      ? row
+      : null;
+  })
+  .filter(Boolean);
+
 })();
 
   if (flockLoading) {
@@ -1103,9 +1114,9 @@ export default function FlockDetail() {
 					  yAxisId="left"
 					  type="monotone"
 					  dataKey="benchmarkWeight"
-					  stroke="#9ca3af"
+					  stroke="#6b7280"
 					  strokeWidth={1.5}
-					  strokeDasharray="3 3"
+					  strokeDasharray="2 2"
 					  name="Industry Benchmark"
 					  dot={false}
 					/>
@@ -1115,9 +1126,9 @@ export default function FlockDetail() {
                       yAxisId="left" 
                       type="monotone" 
                       dataKey="targetWeight" 
-                      stroke="#9ca3af" 
+                      stroke="#f59e0b" 
                       strokeWidth={2} 
-                      strokeDasharray="5 5"
+                      strokeDasharray="6 4"
                       name="Farm Target Weight" 
                       dot={false}
                     />
@@ -1188,36 +1199,35 @@ export default function FlockDetail() {
   </CardHeader>
 
   <CardContent>
-    {activeTab === "growth" && (
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={adwgData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis
-            dataKey="targetDay"
-            label={{ value: "Target Day", position: "insideBottom", offset: -5 }}
-          />
-          <YAxis
-            label={{ value: "ADWG (kg/day)", angle: -90, position: "insideLeft" }}
-          />
-          <Tooltip />
-          <Legend />
-          <Line
-            type="monotone"
-            dataKey="actualADWG"
-            name="Actual ADWG"
-            stroke="#2563eb"
-            strokeWidth={2}
-          />
-          <Line
-            type="monotone"
-            dataKey="targetADWG"
-            name="Target ADWG"
-            stroke="#16a34a"
-            strokeDasharray="5 5"
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    )}
+  <LineChart data={adwgData}>
+    <CartesianGrid strokeDasharray="3 3" />
+    <XAxis
+      dataKey="targetDay"
+      label={{ value: "Target Day", position: "insideBottom", offset: -5 }}
+    />
+    <YAxis
+      label={{ value: "ADWG (kg/day)", angle: -90, position: "insideLeft" }}
+    />
+    <Tooltip />
+    <Legend />
+    <Line
+      type="monotone"
+      dataKey="actualADWG"
+      name="Actual ADWG"
+      stroke="#2563eb"
+      strokeWidth={2}
+    />
+    <Line
+      type="monotone"
+      dataKey="targetADWG"
+      name="Target ADWG"
+      stroke="#16a34a"
+      strokeDasharray="5 5"
+    />
+  </LineChart>
+</ResponsiveContainer>
+
   </CardContent>
 </Card>
         </TabsContent>
