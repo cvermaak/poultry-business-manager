@@ -362,7 +362,9 @@ export default function FlockDetail() {
       actualWeight:
         actuals.find(a => a.day === day)?.weightKg ?? null,
       feedKg:
-        actuals.find(a => a.day === day)?.feedKg ?? null,
+		actuals.find(a => a.day === day)?.feedKg
+		? actuals.find(a => a.day === day)!.feedKg * 1000
+		: null,
     };
 
     // 🔑 Keep row ONLY if at least one weight exists
@@ -1090,16 +1092,29 @@ export default function FlockDetail() {
                       dataKey="day" 
                       label={{ value: "Age (Days)", position: "insideBottom", offset: -5 }} 
                     />
-                    <YAxis 
-                      yAxisId="left" 
-                      label={{ value: "Weight (kg)", angle: -90, position: "insideLeft" }} 
-                      domain={[0, 'auto']}
-                    />
-                    <YAxis 
-                      yAxisId="right" 
-                      orientation="right" 
-                      label={{ value: "Feed (kg)", angle: 90, position: "insideRight" }} 
-                    />
+                    <YAxis
+					  yAxisId="left"
+					  domain={[0, "dataMax + 0.2"]}
+					  allowDataOverflow
+					  label={{
+						value: "Weight (kg)",
+						angle: -90,
+						position: "insideLeft",
+					  }}
+					/>
+					<YAxis
+					  yAxisId="right"
+					  orientation="right"
+					  domain={[0, "dataMax + 200"]}
+					  allowDataOverflow
+					  tickFormatter={(v) => v.toLocaleString()}
+					  label={{
+						value: "Feed (g/day)",
+						angle: 90,
+						position: "insideRight",
+					  }}
+					/>
+
                     <Tooltip
 						formatter={(value: number, name: string) => {
 						 if (name === "Farm Target Weight") {
