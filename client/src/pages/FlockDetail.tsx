@@ -136,6 +136,24 @@ export default function FlockDetail() {
   const [reminderActionDialog, setReminderActionDialog] = useState<{ open: boolean; reminderId: number | null; action: "complete" | "dismiss" | null }>({ open: false, reminderId: null, action: null });
   const [reminderActionNotes, setReminderActionNotes] = useState("");
   const [activeTab, setActiveTab] = useState("daily");
+  
+  // UI helper: status → badge variant
+  const getStatusColor = (
+    status: string
+  ): "default" | "secondary" | "destructive" | "outline" | "warning" | "success" => {
+   switch (status) {
+    case "active":
+      return "warning";
+    case "completed":
+      return "success";
+    case "cancelled":
+      return "destructive";
+    case "planned":
+      return "outline";
+    default:
+      return "outline";
+  }
+};
 
   // Form states for daily record
   const [dailyRecordForm, setDailyRecordForm] = useState({
