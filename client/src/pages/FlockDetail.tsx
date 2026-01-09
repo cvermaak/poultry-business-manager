@@ -344,7 +344,38 @@ export default function FlockDetail() {
     );
   }
   
-  // === ADWG vs Target Data (frontend-derived, temporary) ===
+// =====================================================
+// GROWTH PERFORMANCE DATA (single source of truth)
+// =====================================================
+
+const benchmark = growthData?.benchmark ?? [];
+const farmTarget = growthData?.farmTarget ?? [];
+const actuals = growthData?.actuals ?? [];
+
+// --- Chart data (merged by day) ---
+const chartData = (() => {
+  const days = new Set<number>();
+
+  benchmark.forEach(b => days.add(b.day));
+  farmTarget.forEach(t => days.add(t.day));
+  actuals.forEach(a => days.add(a.day));
+
+  return Array.from(days)
+    .sort((a, b) => a - b)
+    .map(day => ({
+      day,
+      benchmarkWeight:
+        benchmark.find(b => b.day === day)?.weightKg ?? null,
+      targetWeight:
+        farmTarget.find(t => t.day === day)?.targetWeightKg ?? null,
+      actualWeight:
+        actuals.find(a => a.day === day)?.weightKg ?? null,
+      feedKg:
+        actuals.find(a => a.day === day)?.feedKg ?? null,
+    }));
+})();
+
+// --- ADWG (frontend-derived, temporary) ---
   const DEFAULT_SHRINKAGE_PERCENT = 6.5;
 
   const adwgData = (() => {
@@ -361,10 +392,7 @@ export default function FlockDetail() {
   const expectedDailyGain = preCatchTargetWeight / growingPeriod;
 
   const sortedRecords = [...dailyRecords]
-    .filter(r => {
-      const w = Number(r.averageWeight ?? 0);
-      return w > 0;
-    })
+    .filter(r => Number(r.averageWeight ?? 0) > 0)
     .sort(
       (a, b) =>
         new Date(a.recordDate).getTime() -
@@ -412,35 +440,6 @@ export default function FlockDetail() {
     );
   }
   
-// === Growth Performance Data (from backend) ===
-  const benchmark = growthData?.benchmark ?? [];
-  const farmTarget = growthData?.farmTarget ?? [];
-  const actuals = growthData?.actuals ?? [];
-
-// === Chart Data (merged by day) ===
-  const chartData = (() => {
-  const days = new Set<number>();
-
-  benchmark.forEach(b => days.add(b.day));
-  farmTarget.forEach(t => days.add(t.day));
-  actuals.forEach(a => days.add(a.day));
-
-  return Array.from(days)
-    .sort((a, b) => a - b)
-    .map(day => ({
-      day,
-      benchmarkWeight:
-        benchmark.find(b => b.day === day)?.weightKg ?? null,
-      targetWeight:
-        farmTarget.find(t => t.day === day)?.targetWeightKg ?? null,
-      actualWeight:
-        actuals.find(a => a.day === day)?.weightKg ?? null,
-      feedKg:
-        actuals.find(a => a.day === day)?.feedKg ?? null,
-    }));
-})();
-  
-
   return (
     <div className="container py-8">
       {/* Header */}
