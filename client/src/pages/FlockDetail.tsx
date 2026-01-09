@@ -31,11 +31,20 @@ export default function FlockDetail() {
   const { data: healthRecords } = trpc.flocks.getHealthRecords.useQuery({ flockId });
   const { data: vaccinationSchedule } = trpc.flocks.getVaccinationSchedule.useQuery({ flockId });
   const { data: performanceMetrics } = trpc.flocks.getPerformanceMetrics.useQuery({ flockId });
-  const { data: targetGrowthCurve } = trpc.flocks.getTargetGrowthCurve.useQuery({ 
-    flockId, 
-    startDay: 0, 
-    endDay: flock?.growingPeriod || 42 
-  });
+  const { data: targetGrowthCurve } =
+  trpc.flocks.getTargetGrowthCurve.useQuery(
+    flock && flock.targetSlaughterWeight && flock.growingPeriod
+      ? {
+          startDay: 0,
+          endDay: flock.growingPeriod,
+          growingPeriod: flock.growingPeriod,
+          deliveredTargetWeight: Number(flock.targetSlaughterWeight),
+          breed: "ross_308", // later make configurable
+        }
+      : undefined,
+    { enabled: !!flock }
+  );
+
   const { data: vaccinationSchedules } = trpc.flocks.getVaccinationSchedules.useQuery({ flockId });
   const { data: stressPackSchedules } = trpc.flocks.getStressPackSchedules.useQuery({ flockId });
   const { data: flockReminders } = trpc.reminders.list.useQuery({ flockId });
@@ -433,7 +442,7 @@ export default function FlockDetail() {
     chartData.push({
       day,
       actualWeight: actual?.actualWeight || null,
-      targetWeight: target?.targetWeight || 0,
+      targetWeight: target?.targetWeight ?? null,
       feed: actual?.feed || null,
     });
   }
