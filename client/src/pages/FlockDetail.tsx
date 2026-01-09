@@ -153,7 +153,7 @@ export default function FlockDetail() {
     default:
       return "outline";
   }
-};
+ };
 
   // Form states for daily record
   const [dailyRecordForm, setDailyRecordForm] = useState({
@@ -1118,7 +1118,7 @@ export default function FlockDetail() {
                       stroke="#9ca3af" 
                       strokeWidth={2} 
                       strokeDasharray="5 5"
-                      name="Target Weight" 
+                      name="Farm Target Weight" 
                       dot={false}
                     />
                     {/* Actual weight line (solid) */}
@@ -1160,7 +1160,10 @@ export default function FlockDetail() {
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 border-t-2 border-dashed border-gray-400"></div>
                   <span>Farm Target Weight (pre-catch)</span>
-				  <span>Industry Benchmark (breed)</span>
+				  </div>
+				  <div className="flex items-center gap-2">
+					<div className="h-0.5 w-8 border-t-2 border-dashed border-gray-500"></div>
+				    <span>Industry Benchmark (breed)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 bg-blue-600"></div>
