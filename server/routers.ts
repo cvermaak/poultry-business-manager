@@ -741,14 +741,7 @@ export const appRouter = router({
         return { success: true };
       }),
 	  
-	getGrowthPerformance: protectedProcedure
-	  .input(z.object({ flockId: z.number() }))
-		.query(async ({ input }) => {
-      return await db.getGrowthPerformanceData(input.flockId);
-    }),
-
-
-    getPerformanceMetrics: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
+	getPerformanceMetrics: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
       return await db.getFlockPerformanceMetrics(input.flockId);
     }),
 
@@ -785,6 +778,12 @@ export const appRouter = router({
     getMortalityRecords: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
       return await db.getMortalityRecords(input.flockId);
     }),
+	getGrowthPerformanceData: protectedProcedure
+	.input(z.object({ flockId: z.number() }))
+	.query(async ({ input }) => {
+    return await db.getGrowthPerformanceData(input.flockId);
+  }),
+
 
     getVaccinationSchedules: protectedProcedure
       .input(z.object({ flockId: z.number() }))
