@@ -333,27 +333,17 @@ export default function FlockDetail() {
       notes: vaccinationForm.notes || undefined,
     });
   };
-
-  if (flockLoading) {
-    return (
-      <div className="container py-8">
-        <div className="flex items-center justify-center">
-          <div className="text-muted-foreground">Loading flock details...</div>
-        </div>
-      </div>
-    );
-  }
   
 // =====================================================
 // GROWTH PERFORMANCE DATA (single source of truth)
 // =====================================================
 
-const benchmark = growthData?.benchmark ?? [];
-const farmTarget = growthData?.farmTarget ?? [];
-const actuals = growthData?.actuals ?? [];
+  const benchmark = growthData?.benchmark ?? [];
+  const farmTarget = growthData?.farmTarget ?? [];
+  const actuals = growthData?.actuals ?? [];
 
 // --- Chart data (merged by day) ---
-const chartData = (() => {
+  const chartData = (() => {
   const days = new Set<number>();
 
   benchmark.forEach(b => days.add(b.day));
@@ -374,6 +364,18 @@ const chartData = (() => {
         actuals.find(a => a.day === day)?.feedKg ?? null,
     }));
 })();
+
+  if (flockLoading) {
+    return (
+      <div className="container py-8">
+        <div className="flex items-center justify-center">
+          <div className="text-muted-foreground">Loading flock details...</div>
+        </div>
+      </div>
+    );
+  }
+  
+
 
 // --- ADWG (frontend-derived, temporary) ---
   const DEFAULT_SHRINKAGE_PERCENT = 6.5;
@@ -1089,7 +1091,7 @@ const chartData = (() => {
                     />
                     <Tooltip
 						formatter={(value: number, name: string) => {
-						 if (name === "Target Weight") {
+						 if (name === "Farm Target Weight") {
 						     return [`${value.toFixed(3)} kg`, "Target Weight (farm, pre-catch)"];
 						}
 						return [`${value}`, name];
@@ -1097,6 +1099,17 @@ const chartData = (() => {
 					/>
 
                     <Legend />
+					<Line
+					  yAxisId="left"
+					  type="monotone"
+					  dataKey="benchmarkWeight"
+					  stroke="#9ca3af"
+					  strokeWidth={1.5}
+					  strokeDasharray="3 3"
+					  name="Industry Benchmark"
+					  dot={false}
+					/>
+
                     {/* Target weight line (dashed) */}
                     <Line 
                       yAxisId="left" 
@@ -1146,7 +1159,8 @@ const chartData = (() => {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 border-t-2 border-dashed border-gray-400"></div>
-                  <span>Target Weight (industry standard)</span>
+                  <span>Farm Target Weight (pre-catch)</span>
+				  <span>Industry Benchmark (breed)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 bg-blue-600"></div>
