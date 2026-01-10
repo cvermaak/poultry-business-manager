@@ -24,7 +24,7 @@ export function useAuth(options?: UseAuthOptions) {
     },
   });
 
-  const logout = useCallback(async () => {
+    const logout = useCallback(async () => {
     try {
       await logoutMutation.mutateAsync();
     } catch (error: unknown) {
@@ -32,12 +32,17 @@ export function useAuth(options?: UseAuthOptions) {
         error instanceof TRPCClientError &&
         error.data?.code === "UNAUTHORIZED"
       ) {
-        return;
+        // Already logged out, proceed to redirect
+      } else {
+        throw error;
       }
-      throw error;
     } finally {
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
+      // Clear localStorage
+      localStorage.removeItem("manus-runtime-user-info");
+      // Redirect to login page
+      window.location.href = getLoginUrl();
     }
   }, [logoutMutation, utils]);
 
