@@ -42,7 +42,7 @@ export function useAuth(options?: UseAuthOptions) {
       // Clear localStorage
       localStorage.removeItem("manus-runtime-user-info");
       // Redirect to login page
-      window.location.href = getLoginUrl();
+      window.location.href = "/login";  // NEW - redirects to login page
     }
   }, [logoutMutation, utils]);
 

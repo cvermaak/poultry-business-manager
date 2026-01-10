@@ -19,6 +19,8 @@ import Suppliers from "./pages/Suppliers";
 import Users from "./pages/Users";
 import HealthManagement from "./pages/HealthManagement";
 import ReminderTemplates from "./pages/ReminderTemplates";
+import ChangePassword from "./pages/ChangePassword";
+import LoginPage from "./pages/Login";
 
 function Router() {
   return (
@@ -77,6 +79,16 @@ function Router() {
           <ReminderTemplates />
         </DashboardLayout>
       </Route>
+	  
+	  <Route path="/change-password">
+        <ChangePassword />
+      </Route>
+
+      <Route path="/login">
+        <LoginPage />
+      </Route>
+
+      <Route path="/404" component={NotFound} />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
