@@ -363,7 +363,7 @@ export default function FlockDetail() {
         actuals.find(a => a.day === day)?.weightKg ?? null,
       feedKg:
 		actuals.find(a => a.day === day)?.feedKg
-		? actuals.find(a => a.day === day)!.feedKg * 1000
+		? actuals.find(a => a.day === day)!.feedKg ?? null,
 		: null,
     };
 
