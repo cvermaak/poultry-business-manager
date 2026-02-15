@@ -1,5 +1,7 @@
+import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
@@ -7,6 +9,12 @@ import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, 
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
 import { sdk } from "./_core/sdk";
+import { slaughterRouter } from "./procedures/slaughter";
+import { harvestRouter } from "./procedures/harvest";
+import { processorRouter } from "./procedures/processor";
+import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
+import { catchRouter } from "./procedures/catch";
+import { densityRouter } from "./procedures/density";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -25,60 +33,101 @@ export const appRouter = router({
   // AUTHENTICATION
   // ============================================================================
   auth: router({
-  me: publicProcedure.query(({ ctx }) => ctx.user),
-
-  login: publicProcedure
-  .input(z.object({
-    identifier: z.string(),
-    password: z.string(),
-  }))
-  .mutation(async ({ input, ctx }) => {
-    const user = await db.getUserByEmailOrUsername(input.identifier);
-
-    if (!user || !user.passwordHash || !user.isActive) {
-      throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
-    }
-
-    const valid = await verifyPassword(input.password, user.passwordHash);
-    if (!valid) {
-      throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
-    }
-
-    await db.updateUserLastSignIn(user.id);
-
-    const token = await sdk.createSessionToken(user.id);
-
-    // 🔐 WRITE COOKIE SESSION
-    ctx.res.cookie("session", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      path: "/",
-      maxAge: ONE_YEAR_MS,
-    });
-
-    return {
-      mustChangePassword: user.mustChangePassword,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-    };
-  }),
-
-  changePassword: protectedProcedure
-    .input(z.object({ newPassword: z.string().min(8) }))
-    .mutation(async ({ input, ctx }) => {
-      const hash = await hashPassword(input.newPassword);
-      await db.updateUserPassword(ctx.user.id, hash, false);
-      return { success: true };
+    me: publicProcedure.query((opts) => opts.ctx.user),
+    
+    // Email/Password Login
+    login: publicProcedure
+      .input(z.object({
+        identifier: z.string().min(1, "Email or username is required"),
+        password: z.string().min(1, "Password is required"),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        // Find user by email or username
+        const user = await db.getUserByEmailOrUsername(input.identifier);
+        
+        if (!user) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+        }
+        
+        if (!user.isActive) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Account is deactivated" });
+        }
+        
+        if (!user.passwordHash) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "This account uses OAuth login" });
+        }
+        
+        // Verify password
+        const isValid = await verifyPassword(input.password, user.passwordHash);
+        if (!isValid) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
+        }
+        
+        // Update last sign in
+        await db.updateUserLastSignIn(user.id);
+        
+        // Create session token using a unique identifier for email users
+        const sessionToken = await sdk.createSessionToken(`email:${user.id}`, {
+          name: user.name || "",
+          expiresInMs: ONE_YEAR_MS,
+        });
+        
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        
+        return {
+          success: true,
+          mustChangePassword: user.mustChangePassword,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          },
+        };
+      }),
+    
+    // Change Password
+    changePassword: protectedProcedure
+      .input(z.object({
+        currentPassword: z.string().optional(),
+        newPassword: z.string().min(8, "Password must be at least 8 characters"),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const user = await db.getUserById(ctx.user.id);
+        if (!user) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+        }
+        
+        // If user has a password and it's not a forced change, verify current password
+        if (user.passwordHash && !user.mustChangePassword && input.currentPassword) {
+          const isValid = await verifyPassword(input.currentPassword, user.passwordHash);
+          if (!isValid) {
+            throw new TRPCError({ code: "UNAUTHORIZED", message: "Current password is incorrect" });
+          }
+        }
+        
+        // Validate new password strength
+        const strengthError = validatePasswordStrength(input.newPassword);
+        if (strengthError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: strengthError });
+        }
+        
+        // Hash and save new password
+        const passwordHash = await hashPassword(input.newPassword);
+        await db.updateUserPassword(ctx.user.id, passwordHash, false);
+        
+        return { success: true };
+      }),
+    
+    logout: publicProcedure.mutation(({ ctx }) => {
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      return {
+        success: true,
+      } as const;
     }),
-
-  logout: publicProcedure.mutation(() => ({ success: true })),
-}),
-
+  }),
 
   // ============================================================================
   // USER MANAGEMENT
@@ -215,8 +264,21 @@ export const appRouter = router({
     // Activate user
     activate: adminProcedure
       .input(z.object({ userId: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.activateUser(input.userId);
+        await db.logUserActivity(ctx.user.id, "activate_user", "user", input.userId, `Activated user`);
+        return { success: true };
+      }),
+    
+    // Delete user permanently
+    delete: adminProcedure
+      .input(z.object({ userId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        if (input.userId === ctx.user.id) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot delete your own account" });
+        }
+        await db.deleteUser(input.userId);
+        await db.logUserActivity(ctx.user.id, "delete_user", "user", input.userId, `Permanently deleted user`);
         return { success: true };
       }),
   }),
@@ -352,6 +414,8 @@ export const appRouter = router({
           placementDate: z.date(),
           initialCount: z.number().int().positive(),
           targetSlaughterWeight: z.number().positive().default(1.7),
+          targetDeliveredWeight: z.number().positive().optional(),
+          targetCatchingWeight: z.number().positive().optional(),
           growingPeriod: z.number().int().default(42),
           weightUnit: z.enum(["grams", "kg"]).default("kg"),
           starterFeedType: z.enum(["premium", "value", "econo"]).optional(),
@@ -386,6 +450,8 @@ export const appRouter = router({
         const result = await db.createFlock({
           ...input,
           targetSlaughterWeight: input.targetSlaughterWeight.toString(),
+          targetDeliveredWeight: input.targetDeliveredWeight?.toString(),
+          targetCatchingWeight: input.targetCatchingWeight?.toString(),
           currentCount: input.initialCount,
           status: "planned",
           createdBy: ctx.user.id,
@@ -440,6 +506,8 @@ export const appRouter = router({
           placementDate: z.date().optional(),
           initialCount: z.number().optional(),
           targetSlaughterWeight: z.number().optional(),
+          targetDeliveredWeight: z.number().positive().optional(),
+          targetCatchingWeight: z.number().positive().optional(),
           growingPeriod: z.number().optional(),
           weightUnit: z.enum(["kg", "lbs"]).optional(),
           starterFeedType: z.string().optional(),
@@ -740,50 +808,48 @@ export const appRouter = router({
         );
         return { success: true };
       }),
-	  
-	getPerformanceMetrics: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
+
+    getPerformanceMetrics: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
       return await db.getFlockPerformanceMetrics(input.flockId);
     }),
 
+    getAdvancedGrowthMetrics: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
+      return await db.getAdvancedGrowthMetrics(input.flockId);
+    }),
+
+    getFeedEfficiencyMetrics: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
+      return await db.getFeedEfficiencyMetrics(input.flockId);
+    }),
+
     getTargetGrowthCurve: protectedProcedure
-  .input(
-    z.object({
-      flockId: z.number(),
-      startDay: z.number().int().default(0),
-      endDay: z.number().int().default(42),
-    })
-  )
-  .query(async ({ input }) => {
-    const flock = await db.getFlockById(input.flockId);
-    if (!flock) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "Flock not found" });
-    }
-
-    const house = await db.getHouseById(flock.houseId);
-
-    const breed =
-      (house?.breed as 'ross_308' | 'cobb_500' | 'arbor_acres') || 'ross_308';
-
-    return db.getTargetGrowthCurve({
-      startDay: input.startDay,
-      endDay: input.endDay,
-      breed,
-      deliveredTargetWeight: Number(flock.targetSlaughterWeight),
-      growingPeriod: flock.growingPeriod,
-      shrinkagePercent: 6.5, // fixed for now
-    });
-  }),
-
+      .input(
+        z.object({
+          flockId: z.number().optional(),
+          breed: z.enum(['ross_308', 'cobb_500', 'arbor_acres']).optional(),
+          startDay: z.number().int().default(0),
+          endDay: z.number().int().default(42),
+        })
+      )
+      .query(async ({ input }) => {
+        let breed: 'ross_308' | 'cobb_500' | 'arbor_acres' = input.breed || 'ross_308';
+        
+        // If flockId is provided, get breed from the flock's house
+        if (input.flockId) {
+          const flock = await db.getFlockById(input.flockId);
+          if (flock) {
+            const house = await db.getHouseById(flock.houseId);
+            if (house && house.breed) {
+              breed = house.breed as 'ross_308' | 'cobb_500' | 'arbor_acres';
+            }
+          }
+        }
+        
+        return db.getTargetGrowthCurve(input.startDay, input.endDay, breed);
+      }),
 
     getMortalityRecords: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
       return await db.getMortalityRecords(input.flockId);
     }),
-	getGrowthPerformanceData: protectedProcedure
-	.input(z.object({ flockId: z.number() }))
-	.query(async ({ input }) => {
-    return await db.getGrowthPerformanceData(input.flockId);
-  }),
-
 
     getVaccinationSchedules: protectedProcedure
       .input(z.object({ flockId: z.number() }))
@@ -797,6 +863,29 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const { getFlockStressPackSchedules } = await import("./db-health-helpers");
         return await getFlockStressPackSchedules(input.flockId);
+      }),
+
+    updateStressPackSchedule: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          status: z.enum(["scheduled", "active", "completed", "cancelled"]).optional(),
+          quantityUsed: z.string().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...data } = input;
+        const { updateFlockStressPackSchedule } = await import("./db-health-helpers");
+        await updateFlockStressPackSchedule(id, data);
+        await db.logUserActivity(
+          ctx.user.id,
+          "update_stress_pack_schedule",
+          "flock_stress_pack_schedule",
+          id,
+          `Updated stress pack schedule: ${id}`
+        );
+        return { success: true };
       }),
 
     validateTargetWeight: protectedProcedure
@@ -1345,6 +1434,24 @@ export const appRouter = router({
         return { success: true, templateId: newTemplate.id };
       }),
   }),
+
+  // ============================================================================
+  // CATCH OPERATIONS
+  // ============================================================================
+  catch: catchRouter,
+  density: densityRouter,
+
+  // ============================================================================
+  // SLAUGHTER TRACKING
+  // ============================================================================
+  slaughter: slaughterRouter,
+
+  // ============================================================================
+  // HARVEST MANAGEMENT
+  // ============================================================================
+  harvest: harvestRouter,
+  processor: processorRouter,
+  harvestAnalytics: harvestAnalyticsRouter,
 
   // ============================================================================
   // ANALYTICS & DASHBOARD
