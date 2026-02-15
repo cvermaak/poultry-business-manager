@@ -1,6 +1,5 @@
 import AuthGate from "./AuthGate";
 import { trpc } from "@/lib/trpc";
-import LoginPage from "./pages/Login";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -21,6 +20,13 @@ import HealthManagement from "./pages/HealthManagement";
 import ReminderTemplates from "./pages/ReminderTemplates";
 import ChangePassword from "./pages/ChangePassword";
 import LoginPage from "./pages/Login";
+
+// New Manus Features
+import Harvests from "./pages/Harvests";
+import Processors from "./pages/Processors";
+import CrateTypes from "./pages/CrateTypes";
+import SlaughterManagement from "./pages/SlaughterManagement";
+import CatchOperations from "./pages/CatchOperations";
 
 function Router() {
   return (
@@ -79,16 +85,45 @@ function Router() {
           <ReminderTemplates />
         </DashboardLayout>
       </Route>
-	  
-	  <Route path="/change-password">
+
+      {/* New Manus Features */}
+      <Route path="/harvests">
+        <DashboardLayout>
+          <Harvests />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/processors">
+        <DashboardLayout>
+          <Processors />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/crate-types">
+        <DashboardLayout>
+          <CrateTypes />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/slaughter-management">
+        <DashboardLayout>
+          <SlaughterManagement />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/catch-operations">
+        <DashboardLayout>
+          <CatchOperations />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/change-password">
         <ChangePassword />
       </Route>
 
       <Route path="/login">
         <LoginPage />
       </Route>
-
-      <Route path="/404" component={NotFound} />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, Box, Scissors } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -43,6 +43,10 @@ const menuItems: MenuItem[] = [
   { icon: Activity, label: "Flocks", path: "/flocks", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Syringe, label: "Health", path: "/health", roles: ["admin", "farm_manager"] },
   { icon: Bell, label: "Reminder Templates", path: "/reminder-templates", roles: ["admin", "farm_manager"] },
+  { icon: TrendingUp, label: "Harvests", path: "/harvests", roles: ["admin", "farm_manager", "production_worker"] },
+  { icon: Building2, label: "Processors", path: "/processors", roles: ["admin", "farm_manager"] },
+  { icon: Box, label: "Crate Types", path: "/crate-types", roles: ["admin", "farm_manager"] },
+  { icon: Scissors, label: "Slaughter", path: "/slaughter-management", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Users, label: "Customers", path: "/customers", roles: ["admin", "sales_staff"] },
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
