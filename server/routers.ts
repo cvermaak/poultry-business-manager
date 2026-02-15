@@ -9,7 +9,7 @@ import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, 
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
 import { sdk } from "./_core/sdk";
-import { slaughterRouter } from "./procedures/slaughter";
+
 import { harvestRouter } from "./procedures/harvest";
 import { processorRouter } from "./procedures/processor";
 import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
@@ -1440,11 +1440,6 @@ export const appRouter = router({
   // ============================================================================
   catch: catchRouter,
   density: densityRouter,
-
-  // ============================================================================
-  // SLAUGHTER TRACKING
-  // ============================================================================
-  slaughter: slaughterRouter,
 
   // ============================================================================
   // HARVEST MANAGEMENT
