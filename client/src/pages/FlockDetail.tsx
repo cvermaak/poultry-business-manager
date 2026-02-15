@@ -15,7 +15,7 @@ import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
   const [, params] = useRoute("/flocks/:id");
@@ -31,15 +31,20 @@ export default function FlockDetail() {
   const { data: healthRecords } = trpc.flocks.getHealthRecords.useQuery({ flockId });
   const { data: vaccinationSchedule } = trpc.flocks.getVaccinationSchedule.useQuery({ flockId });
   const { data: performanceMetrics } = trpc.flocks.getPerformanceMetrics.useQuery({ flockId });
-  const { data: growthData } =
-  trpc.flocks.getGrowthPerformanceData.useQuery({ flockId });
-
+  const { data: advancedGrowthMetrics } = trpc.flocks.getAdvancedGrowthMetrics.useQuery({ flockId });
+  const { data: feedEfficiencyMetrics } = trpc.flocks.getFeedEfficiencyMetrics.useQuery({ flockId });
+  const { data: targetGrowthCurve } = trpc.flocks.getTargetGrowthCurve.useQuery({ 
+    flockId, 
+    startDay: 0, 
+    endDay: flock?.growingPeriod || 42 
+  });
   const { data: vaccinationSchedules } = trpc.flocks.getVaccinationSchedules.useQuery({ flockId });
   const { data: stressPackSchedules } = trpc.flocks.getStressPackSchedules.useQuery({ flockId });
   const { data: flockReminders } = trpc.reminders.list.useQuery({ flockId });
   const { data: allTemplates } = trpc.reminderTemplates.list.useQuery();
   const { data: appliedTemplates } = trpc.reminderTemplates.getAppliedTemplates.useQuery({ flockId });
   const { data: statusHistory } = trpc.flocks.getStatusHistory.useQuery({ flockId });
+  const { data: harvests } = trpc.harvest.getByFlock.useQuery({ flockId });
   const addTemplate = trpc.reminderTemplates.addToFlock.useMutation();
   const removeTemplate = trpc.reminderTemplates.removeFromFlock.useMutation();
   const syncFromTemplate = trpc.reminders.syncFromTemplate.useMutation();
@@ -112,6 +117,30 @@ export default function FlockDetail() {
     },
   });
 
+  const updateVaccinationSchedule = trpc.flocks.updateVaccinationSchedule.useMutation({
+    onSuccess: () => {
+      utils.flocks.getVaccinationSchedules.invalidate({ flockId });
+      toast.success("Vaccination updated successfully");
+      setVaccinationUpdateDialog({ open: false, scheduleId: null });
+      setVaccinationUpdateForm({ actualDate: format(new Date(), "yyyy-MM-dd"), dosageUsed: "", notes: "" });
+    },
+    onError: (error) => {
+      toast.error(`Failed to update vaccination: ${error.message}`);
+    },
+  });
+
+  const updateStressPackSchedule = trpc.flocks.updateStressPackSchedule.useMutation({
+    onSuccess: () => {
+      utils.flocks.getStressPackSchedules.invalidate({ flockId });
+      toast.success("Stress pack usage recorded successfully");
+      setStressPackUpdateDialog({ open: false, scheduleId: null });
+      setStressPackUpdateForm({ status: "active", quantityUsed: "", notes: "" });
+    },
+    onError: (error) => {
+      toast.error(`Failed to update stress pack: ${error.message}`);
+    },
+  });
+
   // Reminder update mutation
   const updateReminderStatus = trpc.reminders.updateStatus.useMutation({
     onSuccess: () => {
@@ -133,27 +162,10 @@ export default function FlockDetail() {
   const [recordToDelete, setRecordToDelete] = useState<{ id: number; dayNumber: number; date: string } | null>(null);
   const [healthRecordDialogOpen, setHealthRecordDialogOpen] = useState(false);
   const [vaccinationDialogOpen, setVaccinationDialogOpen] = useState(false);
+  const [vaccinationUpdateDialog, setVaccinationUpdateDialog] = useState<{ open: boolean; scheduleId: number | null }>({ open: false, scheduleId: null });
+  const [stressPackUpdateDialog, setStressPackUpdateDialog] = useState<{ open: boolean; scheduleId: number | null }>({ open: false, scheduleId: null });
   const [reminderActionDialog, setReminderActionDialog] = useState<{ open: boolean; reminderId: number | null; action: "complete" | "dismiss" | null }>({ open: false, reminderId: null, action: null });
   const [reminderActionNotes, setReminderActionNotes] = useState("");
-  const [activeTab, setActiveTab] = useState("daily");
-  
-  // UI helper: status → badge variant
-  const getStatusColor = (
-    status: string
-  ): "default" | "secondary" | "destructive" | "outline" | "warning" | "success" => {
-   switch (status) {
-    case "active":
-      return "warning";
-    case "completed":
-      return "success";
-    case "cancelled":
-      return "destructive";
-    case "planned":
-      return "outline";
-    default:
-      return "outline";
-  }
- };
 
   // Form states for daily record
   const [dailyRecordForm, setDailyRecordForm] = useState({
@@ -190,6 +202,20 @@ export default function FlockDetail() {
     scheduledDayNumber: 1,
     dosage: "",
     administrationMethod: "",
+    notes: "",
+  });
+
+  // Form states for vaccination update
+  const [vaccinationUpdateForm, setVaccinationUpdateForm] = useState({
+    actualDate: format(new Date(), "yyyy-MM-dd"),
+    dosageUsed: "",
+    notes: "",
+  });
+
+  // Form states for stress pack update
+  const [stressPackUpdateForm, setStressPackUpdateForm] = useState({
+    status: "active" as "scheduled" | "active" | "completed" | "cancelled",
+    quantityUsed: "",
     notes: "",
   });
 
@@ -333,50 +359,6 @@ export default function FlockDetail() {
       notes: vaccinationForm.notes || undefined,
     });
   };
-  
-// =====================================================
-// GROWTH PERFORMANCE DATA (single source of truth)
-// =====================================================
-
-  const benchmark = growthData?.benchmark ?? [];
-  const farmTarget = growthData?.farmTarget ?? [];
-  const actuals = growthData?.actuals ?? [];
-
-// --- Chart data (merged by day) ---
-  const chartData = (() => {
-  const days = new Set<number>();
-
-  benchmark.forEach(b => days.add(b.day));
-  farmTarget.forEach(t => days.add(t.day));
-  actuals.forEach(a => days.add(a.day));
-
-  return Array.from(days)
-  .sort((a, b) => a - b)
-  .map(day => {
-    const row = {
-      day,
-      benchmarkWeight:
-        benchmark.find(b => b.day === day)?.weightKg ?? null,
-      targetWeight:
-        farmTarget.find(t => t.day === day)?.targetWeightKg ?? null,
-      actualWeight:
-        actuals.find(a => a.day === day)?.weightKg ?? null,
-      feedKg:
-		actuals.find(a => a.day === day)?.feedKg
-		? actuals.find(a => a.day === day)!.feedKg ?? null
-		: null,
-    };
-
-    // 🔑 Keep row ONLY if at least one weight exists
-    return row.benchmarkWeight !== null ||
-      row.targetWeight !== null ||
-      row.actualWeight !== null
-      ? row
-      : null;
-  })
-  .filter(Boolean);
-
-})();
 
   if (flockLoading) {
     return (
@@ -387,61 +369,6 @@ export default function FlockDetail() {
       </div>
     );
   }
-  
-
-
-// --- ADWG (frontend-derived, temporary) ---
-  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
-
-  const adwgData = (() => {
-  if (!dailyRecords || !flock) return [];
-
-  const deliveredTargetWeight = Number(flock.targetSlaughterWeight);
-  const growingPeriod = Number(flock.growingPeriod);
-
-  if (!deliveredTargetWeight || !growingPeriod) return [];
-
-  const preCatchTargetWeight =
-    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
-
-  const expectedDailyGain = preCatchTargetWeight / growingPeriod;
-
-  const sortedRecords = [...dailyRecords]
-    .filter(r => Number(r.averageWeight ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        new Date(a.recordDate).getTime() -
-        new Date(b.recordDate).getTime()
-    );
-
-  if (sortedRecords.length < 2) return [];
-
-  return sortedRecords
-    .map((record, index, arr) => {
-      if (index === 0) return null;
-
-      const prev = arr[index - 1];
-
-      const daysBetween =
-        (new Date(record.recordDate).getTime() -
-          new Date(prev.recordDate).getTime()) /
-        (1000 * 60 * 60 * 24);
-
-      if (daysBetween <= 0) return null;
-
-      const currentWeight = Number(record.averageWeight);
-      const prevWeight = Number(prev.averageWeight);
-
-      const adwg = (currentWeight - prevWeight) / daysBetween;
-
-      return {
-        targetDay: Number((currentWeight / expectedDailyGain).toFixed(2)),
-        actualADWG: Number(adwg.toFixed(3)),
-        targetADWG: Number(expectedDailyGain.toFixed(3)),
-      };
-    })
-    .filter(Boolean);
-})();
 
   if (!flock) {
     return (
@@ -454,7 +381,104 @@ export default function FlockDetail() {
       </div>
     );
   }
-  
+
+  // Prepare chart data - merge actual and target data
+  // Treat weight of 0 as "not weighed" (null) so chart skips those days
+  const actualData = dailyRecords?.map((record) => {
+    const weight = record.averageWeight ? parseFloat(record.averageWeight.toString()) : 0;
+    return {
+      day: record.dayNumber,
+      actualWeight: weight > 0 ? weight : null, // Only plot actual measurements, not zeros
+      mortality: record.mortality,
+      feed: record.feedConsumed ? parseFloat(record.feedConsumed.toString()) : 0,
+    };
+  }) || [];
+
+  // Create a complete dataset combining actual and target data
+  const maxDay = Math.max(
+    ...(actualData.map(d => d.day)),
+    ...(targetGrowthCurve?.map(d => d.day) || []),
+    flock?.growingPeriod || 42
+  );
+
+  const chartData: Array<{
+    day: number;
+    actualWeight: number | null;
+    targetWeight: number;
+    farmTargetWeight: number | null;
+    feed: number | null;
+  }> = [];
+
+  // Parse target weights if they exist
+  const finalTargetCatchingWeight = flock?.targetCatchingWeight ? parseFloat(flock.targetCatchingWeight.toString()) : null;
+  const growingPeriod = flock?.growingPeriod || 42;
+
+  for (let day = 0; day <= maxDay; day++) {
+    const actual = actualData.find(d => d.day === day);
+    const target = targetGrowthCurve?.find(d => d.day === day);
+
+    // Calculate farm target weight growth curve (catching weight with shrinkage buffer)
+    const farmTargetWeightForDay = finalTargetCatchingWeight 
+      ? (finalTargetCatchingWeight / growingPeriod) * day 
+      : null;
+
+    chartData.push({
+      day,
+      actualWeight: actual?.actualWeight || null,
+      targetWeight: target?.targetWeight || 0,
+      farmTargetWeight: farmTargetWeightForDay,
+      feed: actual?.feed || null,
+    });
+  }
+
+  // Calculate performance status
+  // Find the latest record that has an actual weight measurement (not null)
+  const latestActual = [...actualData].reverse().find(d => d.actualWeight !== null);
+
+  // Calculate projected catch date based on ADG
+  let projectedCatchDay: number | null = null;
+  if (finalTargetCatchingWeight && advancedGrowthMetrics && advancedGrowthMetrics.avgDailyGain > 0 && latestActual) {
+    const latestWeight = latestActual.actualWeight || 0;
+    const latestDay = latestActual.day || 0;
+    const remainingWeight = finalTargetCatchingWeight - latestWeight;
+    const avgDailyGainKg = advancedGrowthMetrics.avgDailyGain / 1000; // Convert grams to kg
+    const daysToTarget = remainingWeight / avgDailyGainKg;
+    projectedCatchDay = Math.round(latestDay + daysToTarget);
+    
+    // Ensure projected day is within reasonable range
+    if (projectedCatchDay < latestDay || projectedCatchDay > growingPeriod + 14) {
+      projectedCatchDay = null; // Invalid projection
+    }
+  }
+  const performanceDeviation = latestActual && latestActual.actualWeight && targetGrowthCurve
+    ? ((latestActual.actualWeight - (targetGrowthCurve.find(t => t.day === latestActual.day)?.targetWeight || 0)) / 
+       (targetGrowthCurve.find(t => t.day === latestActual.day)?.targetWeight || 1)) * 100
+    : 0;
+
+  const getPerformanceStatus = (deviation: number) => {
+    if (deviation >= 5) return { label: 'Ahead of Target', color: 'text-green-600', bgColor: 'bg-green-50' };
+    if (deviation >= -5) return { label: 'On Track', color: 'text-blue-600', bgColor: 'bg-blue-50' };
+    if (deviation >= -10) return { label: 'Behind Target', color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
+    return { label: 'Critical - Action Required', color: 'text-red-600', bgColor: 'bg-red-50' };
+  };
+
+  const performanceStatus = getPerformanceStatus(performanceDeviation);
+
+  const getStatusColor = (status: string): "default" | "secondary" | "destructive" | "outline" | "warning" | "success" => {
+    switch (status) {
+      case "active":
+        return "warning"; // Amber/orange - in progress
+      case "completed":
+        return "success"; // Green - success
+      case "planned":
+        return "outline"; // No color - neutral
+      case "cancelled":
+        return "destructive"; // Red - terminated
+      default:
+        return "outline";
+    }
+  };
+
   return (
     <div className="container py-8">
       {/* Header */}
@@ -517,12 +541,8 @@ export default function FlockDetail() {
           <CardContent>
             <div className="text-2xl font-bold">{performanceMetrics?.averageWeight || 0} kg</div>
             <p className="text-xs text-muted-foreground">
-			  Target (pre-catch): {(
-				(performanceMetrics?.targetWeight || 0) /
-				(1 - 0.065)
-			).toFixed(3)} kg
-		</p>
-
+              Target: {performanceMetrics?.targetWeight || 0} kg
+            </p>
           </CardContent>
         </Card>
 
@@ -540,14 +560,99 @@ export default function FlockDetail() {
         </Card>
       </div>
 
+      {/* Ready for Harvest Indicator */}
+      {(() => {
+        const latestRecord = dailyRecords?.[dailyRecords.length - 1];
+        const currentWeight = latestRecord?.averageWeight ? parseFloat(latestRecord.averageWeight.toString()) : 0;
+        const targetDeliveredWeight = flock.targetDeliveredWeight ? parseFloat(flock.targetDeliveredWeight.toString()) : 0;
+        const targetCatchingWeight = targetDeliveredWeight * 1.055; // 5.5% shrinkage buffer
+        
+        // Calculate ADG from daily records
+        let adg = 50; // Default fallback
+        if (dailyRecords && dailyRecords.length >= 2) {
+          const recordsWithWeight = dailyRecords.filter(r => r.averageWeight && parseFloat(r.averageWeight.toString()) > 0);
+          if (recordsWithWeight.length >= 2) {
+            const firstRecord = recordsWithWeight[0];
+            const lastRecord = recordsWithWeight[recordsWithWeight.length - 1];
+            const weightGain = parseFloat(lastRecord.averageWeight!.toString()) - parseFloat(firstRecord.averageWeight!.toString());
+            const daysDiff = lastRecord.dayNumber - firstRecord.dayNumber;
+            if (daysDiff > 0) {
+              adg = (weightGain * 1000) / daysDiff; // Convert kg to grams
+            }
+          }
+        }
+        
+        if (currentWeight > 0 && targetDeliveredWeight > 0) {
+          const weightProgress = (currentWeight / targetCatchingWeight) * 100;
+          const isReadyForHarvest = weightProgress >= 95; // Ready when 95% or more of target
+          const daysToTarget = isReadyForHarvest ? 0 : Math.ceil((targetCatchingWeight - currentWeight) / (adg / 1000));
+          
+          if (isReadyForHarvest || weightProgress >= 85) {
+            return (
+              <Card className={`mb-6 ${isReadyForHarvest ? 'border-green-500 bg-green-50 dark:bg-green-950' : 'border-orange-500 bg-orange-50 dark:bg-orange-950'}`}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    {isReadyForHarvest ? (
+                      <>
+                        <TrendingUp className="h-5 w-5 text-green-600" />
+                        Ready for Harvest
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-5 w-5 text-orange-600" />
+                        Approaching Target Weight
+                      </>
+                    )}
+                  </CardTitle>
+                  <CardDescription>
+                    {isReadyForHarvest
+                      ? 'Birds have reached target catching weight and are ready for harvest'
+                      : `Birds are ${weightProgress.toFixed(1)}% of target weight`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Current Weight</p>
+                      <p className="text-2xl font-bold">{currentWeight.toFixed(3)} kg</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Target Catching Weight</p>
+                      <p className="text-2xl font-bold">{targetCatchingWeight.toFixed(3)} kg</p>
+                      <p className="text-xs text-muted-foreground">Includes 5.5% shrinkage buffer</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">{isReadyForHarvest ? 'Action Required' : 'Estimated Days to Target'}</p>
+                      <p className="text-2xl font-bold">{isReadyForHarvest ? 'Schedule Catch' : `~${daysToTarget} days`}</p>
+                      {!isReadyForHarvest && (
+                        <p className="text-xs text-muted-foreground">Based on current ADG: {adg.toFixed(1)}g/day</p>
+                      )}
+                    </div>
+                  </div>
+                  {isReadyForHarvest && (
+                    <div className="mt-4">
+                      <Button onClick={() => window.location.href = '/harvests'} className="w-full md:w-auto">
+                        Record Harvest
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          }
+        }
+        return null;
+      })()}
+
       {/* Tabbed Content */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs defaultValue="daily" className="space-y-4">
         <TabsList>
           <TabsTrigger value="daily">Daily Records</TabsTrigger>
           <TabsTrigger value="growth">Growth Performance</TabsTrigger>
           <TabsTrigger value="health">Health Records</TabsTrigger>
           <TabsTrigger value="vaccination">Vaccinations</TabsTrigger>
           <TabsTrigger value="stress-packs">Stress Packs</TabsTrigger>
+          <TabsTrigger value="harvests">Harvest Records</TabsTrigger>
           <TabsTrigger value="reminders">Reminders</TabsTrigger>
           <TabsTrigger value="status-history">Status History</TabsTrigger>
         </TabsList>
@@ -582,7 +687,7 @@ export default function FlockDetail() {
                 </p>
               </CardContent>
             </Card>
-			            <Card>
+            <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Latest Weight</CardTitle>
               </CardHeader>
@@ -1078,7 +1183,122 @@ export default function FlockDetail() {
 
         {/* Growth Performance Tab */}
         <TabsContent value="growth" className="space-y-4">
-           <Card>
+          {/* Performance Status Card */}
+          {latestActual && (
+            <Card className={performanceStatus.bgColor}>
+              <CardHeader>
+                <CardTitle className={performanceStatus.color}>Performance Status: {performanceStatus.label}</CardTitle>
+                <CardDescription>
+                  Current deviation from target: {performanceDeviation.toFixed(1)}%
+                  {latestActual && latestActual.actualWeight && (
+                    <span className="ml-2">
+                      (Day {latestActual.day}: {latestActual.actualWeight.toFixed(3)}kg actual vs {targetGrowthCurve?.find(t => t.day === latestActual.day)?.targetWeight.toFixed(3)}kg target)
+                    </span>
+                  )}
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
+
+          {/* Advanced Growth Metrics Cards */}
+          {advancedGrowthMetrics && (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Avg Daily Gain</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{advancedGrowthMetrics.avgDailyGain}g</div>
+                  <p className="text-xs text-muted-foreground">Per day weight increase</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Uniformity Index</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {advancedGrowthMetrics.uniformityIndex !== null ? `${advancedGrowthMetrics.uniformityIndex}%` : "N/A"}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {advancedGrowthMetrics.uniformityIndex !== null 
+                      ? advancedGrowthMetrics.uniformityIndex >= 85 ? "Excellent" : advancedGrowthMetrics.uniformityIndex >= 75 ? "Good" : "Needs improvement"
+                      : "Need 3+ weight samples"}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Projected Weight</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{advancedGrowthMetrics.projectedFinalWeight.toFixed(3)}kg</div>
+                  <p className="text-xs text-muted-foreground">At day {flock?.growingPeriod || 42}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">EPI Score</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{advancedGrowthMetrics.epi}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {advancedGrowthMetrics.epi >= 350 ? "Excellent" : advancedGrowthMetrics.epi >= 300 ? "Good" : advancedGrowthMetrics.epi >= 250 ? "Average" : "Below target"}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Livability</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{advancedGrowthMetrics.livability.toFixed(2)}%</div>
+                  <p className="text-xs text-muted-foreground">Survival rate</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Feed Efficiency Metrics Cards */}
+          {feedEfficiencyMetrics && (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Avg Feed/Bird</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{feedEfficiencyMetrics.avgFeedPerBird}g</div>
+                  <p className="text-xs text-muted-foreground">Per day per bird</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Water:Feed Ratio</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{feedEfficiencyMetrics.avgWaterFeedRatio}:1</div>
+                  <p className="text-xs text-muted-foreground">
+                    {feedEfficiencyMetrics.avgWaterFeedRatio >= 1.8 && feedEfficiencyMetrics.avgWaterFeedRatio <= 2.2 ? "Normal range" : "Check water system"}
+                  </p>
+                </CardContent>
+              </Card>
+              {feedEfficiencyMetrics.feedTypePerformance.map((phase: any) => (
+                <Card key={phase.feedType}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium capitalize">{phase.feedType} FCR</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{phase.fcr}</div>
+                    <p className="text-xs text-muted-foreground">
+                      {phase.weightGain}g gain over {phase.days} days
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          <Card>
             <CardHeader>
               <CardTitle>Growth Performance</CardTitle>
               <CardDescription>Actual weight progression vs. industry standard target (Ross 308/Cobb 500 benchmark)</CardDescription>
@@ -1092,67 +1312,48 @@ export default function FlockDetail() {
                       dataKey="day" 
                       label={{ value: "Age (Days)", position: "insideBottom", offset: -5 }} 
                     />
-                    <YAxis
-					  yAxisId="left"
-					  domain={[0, "dataMax + 0.2"]}
-					  allowDataOverflow
-					  label={{
-						value: "Weight (kg)",
-						angle: -90,
-						position: "insideLeft",
-					  }}
-					/>
-					<YAxis
-					  yAxisId="right"
-					  orientation="right"
-					  domain={["auto", "auto"]}
-					  tickFormatter={(v) => `${v.toLocaleString()} kg`}
-					  label={{
-						value: "Feed (kg/day)",
-						angle: 90,
-						position: "insideRight",
-					  }}
-					/>
-                    <Tooltip
-					  formatter={(value: number, name: string) => {
-						if (name === "Industry Benchmark") {
-						  return [`${value.toFixed(3)} kg`, name];
-						}
-						if (name === "Farm Target Weight") {
-						  return [`${value.toFixed(3)} kg`, "Target Weight (farm, pre-catch)"];
-						}
-						if (name === "Actual Weight") {
-						  return [`${value.toFixed(3)} kg`, name];
-						}
-						if (name === "Feed Consumed") {
-						  return [`${value.toLocaleString()} kg`, "Feed Consumed"];
-						}
-						return [value, name];
-					  }}
-					/>
-                    <Legend />
-					<Line
-					  yAxisId="left"
-					  type="monotone"
-					  dataKey="benchmarkWeight"
-					  stroke="#6b7280"
-					  strokeWidth={1.5}
-					  strokeDasharray="2 2"
-					  name="Industry Benchmark"
-					  dot={false}
-					/>
-
-                    {/* Target weight line (dashed) */}
+                    <YAxis 
+                      yAxisId="left" 
+                      label={{ value: "Weight (kg)", angle: -90, position: "insideLeft" }} 
+                      domain={[0, 'auto']}
+                    />
+                    <YAxis 
+                      yAxisId="right" 
+                      orientation="right" 
+                      label={{ value: "Feed (kg)", angle: 90, position: "insideRight" }} 
+                    />
+                    <Tooltip 
+                      formatter={(value: any, name: string) => {
+                        if (name === "Actual Weight" || name === "Target Weight") {
+                          return value ? `${parseFloat(value).toFixed(3)} kg` : 'No data';
+                        }
+                        return value ? `${parseFloat(value).toFixed(2)} kg` : 'No data';
+                      }}
+                    />
+                               {/* Target weight line (dashed) */}
                     <Line 
                       yAxisId="left" 
                       type="monotone" 
                       dataKey="targetWeight" 
-                      stroke="#f59e0b" 
+                      stroke="#9ca3af" 
                       strokeWidth={2} 
-                      strokeDasharray="6 4"
-                      name="Farm Target Weight" 
+                      strokeDasharray="5 5" 
+                      name="Target Weight" 
                       dot={false}
                     />
+                    {/* Farm Target Weight (orange dashed) - includes shrinkage buffer */}
+                    {finalTargetCatchingWeight && (
+                      <Line 
+                        yAxisId="left" 
+                        type="monotone" 
+                        dataKey="farmTargetWeight" 
+                        stroke="#f97316" 
+                        strokeWidth={2} 
+                        strokeDasharray="8 4" 
+                        name="Farm Target Weight" 
+                        dot={false}
+                      />
+                    )}
                     {/* Actual weight line (solid) */}
                     <Line 
                       yAxisId="left" 
@@ -1161,20 +1362,21 @@ export default function FlockDetail() {
                       stroke="#16a34a" 
                       strokeWidth={3} 
                       name="Actual Weight" 
-                      connectNulls={true}
-                      dot={{ r: 4 }}
+                      connectNulls={false}
+                      dot={{ r: 4, fill: "#16a34a" }}
                     />
-                    {/* Feed consumption */}
+                    {/* Feed consumption line (right axis) */}
                     <Line 
                       yAxisId="right" 
                       type="monotone" 
-                      dataKey="feedKg" 
+                      dataKey="feed" 
                       stroke="#2563eb" 
                       strokeWidth={2} 
                       name="Feed Consumed" 
                       connectNulls={false}
                       dot={false}
                     />
+
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
@@ -1191,79 +1393,266 @@ export default function FlockDetail() {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 border-t-2 border-dashed border-gray-400"></div>
-                  <span>Farm Target Weight (pre-catch)</span>
-				  </div>
-				  <div className="flex items-center gap-2">
-					<div className="h-0.5 w-8 border-t-2 border-dashed border-gray-500"></div>
-				    <span>Industry Benchmark (breed)</span>
+                  <span>Industry Benchmark (Ross 308/Cobb 500)</span>
                 </div>
+                {finalTargetCatchingWeight && (
+                  <div className="flex items-center gap-2">
+                    <div className="h-0.5 w-8 border-t-2 border-dashed border-orange-500"></div>
+                    <span>Farm Target Weight (pre-catch)</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 bg-blue-600"></div>
-                  <span>Daily Feed Consumption (kg)</span>
+                  <span>Daily Feed Consumption</span>
                 </div>
               </div>
+              
+              {/* Projected catch date indicator */}
+              {projectedCatchDay && finalTargetCatchingWeight && (
+                <div className="mt-3 p-3 bg-green-50 dark:bg-green-950 rounded-md text-sm">
+                  <p className="font-medium text-green-900 dark:text-green-100">📅 Projected Ready Date:</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Based on current growth rate ({advancedGrowthMetrics?.avgDailyGain}g/day), 
+                    birds are projected to reach target weight ({finalTargetCatchingWeight.toFixed(3)} kg) 
+                    on <span className="font-semibold text-foreground">Day {projectedCatchDay}</span>
+                    {projectedCatchDay !== growingPeriod && (
+                      <span className="ml-1">
+                        ({projectedCatchDay < growingPeriod ? 'ahead of' : 'behind'} planned Day {growingPeriod})
+                      </span>
+                    )}
+                  </p>
+                </div>
+              )}
+              
+              {/* Shrinkage explanation */}
+              {finalTargetCatchingWeight && flock?.targetDeliveredWeight && (
+                <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-950 rounded-md text-sm">
+                  <p className="font-medium">Weight Planning:</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Farm target weight ({finalTargetCatchingWeight.toFixed(3)} kg) includes a 5.5% shrinkage buffer 
+                    to ensure delivered weight ({parseFloat(flock.targetDeliveredWeight.toString()).toFixed(3)} kg) meets contract requirements 
+                    after feed withdrawal, catching stress, and transport losses.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
-		  
-		  {adwgData.length === 0 && (
-				<div className="text-sm text-muted-foreground text-center py-4">
-				ADWG requires at least two valid weight measurements.
-				</div>
-			)}
-		  
-		<Card>
-  <CardHeader>
-    <CardTitle>Average Daily Weight Gain vs Target</CardTitle>
-    <CardDescription>
-      Actual ADWG plotted against derived target day
-    </CardDescription>
-  </CardHeader>
 
-  <CardContent>
-      <ResponsiveContainer width="100%" height={300}>
-  <LineChart data={adwgData}>
-    <CartesianGrid strokeDasharray="3 3" />
-    <XAxis
-      dataKey="targetDay"
-      label={{ value: "Target Day", position: "insideBottom", offset: -5 }}
-    />
-    <YAxis
-      label={{ value: "ADWG (kg/day)", angle: -90, position: "insideLeft" }}
-    />
-    <Tooltip />
-    <Legend />
-    <Line
-      type="monotone"
-      dataKey="actualADWG"
-      name="Actual ADWG"
-      stroke="#2563eb"
-      strokeWidth={2}
-    />
-    <Line
-      type="monotone"
-      dataKey="targetADWG"
-      name="Target ADWG"
-      stroke="#16a34a"
-      strokeDasharray="5 5"
-    />
-  </LineChart>
-</ResponsiveContainer>
+          {/* Daily Weight Gain (ADG) Trend Chart */}
+          {advancedGrowthMetrics && advancedGrowthMetrics.adgData.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Daily Weight Gain Trend</CardTitle>
+                <CardDescription>Average daily weight gain (grams per day) throughout the growing period</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={350}>
+                  <LineChart data={advancedGrowthMetrics.adgData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="day" 
+                      label={{ value: "Age (Days)", position: "insideBottom", offset: -5 }} 
+                    />
+                    <YAxis 
+                      label={{ value: "Daily Gain (g)", angle: -90, position: "insideLeft" }} 
+                    />
+                    <Tooltip 
+                      formatter={(value: any) => `${value}g`}
+                    />
+                    <Legend />
+                    <Line 
+                      type="monotone" 
+                      dataKey="dailyGain" 
+                      stroke="#16a34a" 
+                      strokeWidth={2} 
+                      name="Daily Weight Gain" 
+                      dot={{ r: 3 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+                <div className="mt-4 text-sm text-muted-foreground">
+                  <p>Average Daily Gain: <span className="font-semibold text-foreground">{advancedGrowthMetrics.avgDailyGain}g/day</span></p>
+                  <p className="mt-1 text-xs">Industry benchmark: 50-60g/day for broilers</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-  </CardContent>
-</Card>
+          {/* Feed Efficiency Charts */}
+          {feedEfficiencyMetrics && feedEfficiencyMetrics.feedIntakeData.length > 0 && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Daily Feed Intake per Bird</CardTitle>
+                  <CardDescription>Feed consumption per bird per day (grams)</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={feedEfficiencyMetrics.feedIntakeData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis 
+                        dataKey="day" 
+                        label={{ value: "Age (Days)", position: "insideBottom", offset: -5 }} 
+                      />
+                      <YAxis 
+                        label={{ value: "Feed (g)", angle: -90, position: "insideLeft" }} 
+                      />
+                      <Tooltip 
+                        formatter={(value: any) => `${value}g`}
+                      />
+                      <Legend />
+                      <Line 
+                        type="monotone" 
+                        dataKey="feedPerBird" 
+                        stroke="#2563eb" 
+                        strokeWidth={2} 
+                        name="Feed per Bird" 
+                        dot={{ r: 2 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Water-to-Feed Ratio</CardTitle>
+                  <CardDescription>Daily water consumption relative to feed (optimal: 1.8-2.0)</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={feedEfficiencyMetrics.waterFeedRatioData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis 
+                        dataKey="day" 
+                        label={{ value: "Age (Days)", position: "insideBottom", offset: -5 }} 
+                      />
+                      <YAxis 
+                        label={{ value: "Ratio", angle: -90, position: "insideLeft" }} 
+                        domain={[0, 3]}
+                      />
+                      <Tooltip 
+                        formatter={(value: any) => `${value}:1`}
+                      />
+                      <Legend />
+                      <Line 
+                        type="monotone" 
+                        dataKey="ratio" 
+                        stroke="#0891b2" 
+                        strokeWidth={2} 
+                        name="Water:Feed Ratio" 
+                        dot={{ r: 2 }}
+                      />
+                      {/* Reference line for optimal range */}
+                      <Line 
+                        type="monotone" 
+                        data={[{ day: 0, optimal: 1.9 }, { day: 42, optimal: 1.9 }]} 
+                        dataKey="optimal" 
+                        stroke="#22c55e" 
+                        strokeWidth={1} 
+                        strokeDasharray="5 5" 
+                        name="Optimal (1.9)" 
+                        dot={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div className="mt-4 text-sm text-muted-foreground">
+                    <p>Average Ratio: <span className="font-semibold text-foreground">{feedEfficiencyMetrics.avgWaterFeedRatio}:1</span></p>
+                    <p className="mt-1 text-xs">Normal range: 1.8-2.2 (higher may indicate heat stress or water system issues)</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </TabsContent>
 
         {/* Health Records Tab */}
         <TabsContent value="health" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Health Records</CardTitle>
-              <CardDescription>Track treatments, observations, and veterinary visits</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Health Records</CardTitle>
+                <CardDescription>Track treatments, observations, and veterinary visits</CardDescription>
+              </div>
+              <Button
+                onClick={() => {
+                  setHealthRecordDialogOpen(true);
+                  setHealthRecordForm({
+                    recordDate: format(new Date(), "yyyy-MM-dd"),
+                    recordType: "observation",
+                    description: "",
+                    treatment: "",
+                    medication: "",
+                    dosage: "",
+                    veterinarianName: "",
+                    cost: 0,
+                    notes: "",
+                  });
+                }}
+              >
+                Add Health Record
+              </Button>
             </CardHeader>
             <CardContent>
-              <div className="text-center text-muted-foreground py-8">
-                Health records interface - Add health record form and table will be displayed here
-              </div>
+              {healthRecords && healthRecords.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Treatment</TableHead>
+                      <TableHead>Medication</TableHead>
+                      <TableHead>Cost</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {healthRecords.map((record: any) => (
+                      <TableRow key={record.id}>
+                        <TableCell className="font-medium">
+                          {format(new Date(record.eventDate), 'dd MMM yyyy')}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="capitalize">
+                            {record.eventType?.replace(/_/g, ' ')}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-xs truncate">{record.description}</TableCell>
+                        <TableCell className="max-w-xs truncate">{record.treatment || '-'}</TableCell>
+                        <TableCell>{record.medicationUsed || '-'}</TableCell>
+                        <TableCell>{record.cost ? `R${parseFloat(record.cost).toFixed(2)}` : '-'}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setHealthRecordDialogOpen(true);
+                              setHealthRecordForm({
+                                recordDate: format(new Date(record.eventDate), "yyyy-MM-dd"),
+                                recordType: record.eventType,
+                                description: record.description || "",
+                                treatment: record.treatment || "",
+                                medication: record.medication || "",
+                                dosage: record.dosage || "",
+                                veterinarianName: record.veterinarianName || "",
+                                cost: parseFloat(record.cost) || 0,
+                                notes: record.notes || "",
+                              });
+                            }}
+                          >
+                            View/Edit
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="text-center text-muted-foreground py-8">
+                  No health records yet. Click "Add Health Record" to create one.
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1286,6 +1675,7 @@ export default function FlockDetail() {
                       <TableHead>Application Method</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Actual Date</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1311,6 +1701,24 @@ export default function FlockDetail() {
                         </TableCell>
                         <TableCell>
                           {schedule.actualDate ? format(new Date(schedule.actualDate), 'dd MMM yyyy') : '-'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {schedule.status !== 'completed' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setVaccinationUpdateDialog({ open: true, scheduleId: schedule.id });
+                                setVaccinationUpdateForm({
+                                  actualDate: format(new Date(), "yyyy-MM-dd"),
+                                  dosageUsed: schedule.vaccine?.dosage || "",
+                                  notes: "",
+                                });
+                              }}
+                            >
+                              Mark Completed
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1344,6 +1752,7 @@ export default function FlockDetail() {
                       <TableHead>Dosage Strength</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Quantity Used</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1371,6 +1780,24 @@ export default function FlockDetail() {
                         </TableCell>
                         <TableCell>
                           {schedule.quantityUsed || '-'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {schedule.status !== 'completed' && schedule.status !== 'cancelled' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setStressPackUpdateDialog({ open: true, scheduleId: schedule.id });
+                                setStressPackUpdateForm({
+                                  status: schedule.status || "active",
+                                  quantityUsed: schedule.quantityUsed || "",
+                                  notes: "",
+                                });
+                              }}
+                            >
+                              Record Usage
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1538,6 +1965,111 @@ export default function FlockDetail() {
           </Card>
         </TabsContent>
 
+        {/* Harvest Records Tab */}
+        <TabsContent value="harvests" className="space-y-4">
+          {(() => {
+            const totalHarvested = harvests?.reduce((sum, h) => sum + h.chickenCountLoaded, 0) || 0;
+            const totalDeliveredWeight = harvests?.reduce((sum, h) => sum + (parseFloat(h.totalDeliveredWeightKg?.toString() || "0")), 0) || 0;
+            const avgDeliveredWeight = totalHarvested > 0 ? totalDeliveredWeight / totalHarvested : 0;
+            const avgShrinkage = harvests?.length
+              ? harvests.reduce((sum, h) => sum + (parseFloat(h.shrinkagePercentage?.toString() || "0")), 0) / harvests.length
+              : 0;
+
+            return (
+              <>
+                {/* Summary Cards */}
+                <div className="grid gap-4 md:grid-cols-4">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Total Harvested</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{totalHarvested.toLocaleString()}</div>
+                      <p className="text-xs text-muted-foreground">Birds caught</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Remaining Birds</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{flock?.currentCount.toLocaleString()}</div>
+                      <p className="text-xs text-muted-foreground">Still in house</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Avg Delivered Weight</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{avgDeliveredWeight.toFixed(3)} kg</div>
+                      <p className="text-xs text-muted-foreground">Per bird</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Avg Shrinkage</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{avgShrinkage.toFixed(2)}%</div>
+                      <p className="text-xs text-muted-foreground">Weight loss</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Harvest Records Table */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Harvest Records</CardTitle>
+                    <CardDescription>All catch records for this flock</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {harvests && harvests.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Destination</TableHead>
+                            <TableHead className="text-right">Birds Loaded</TableHead>
+                            <TableHead className="text-right">Loaded Weight</TableHead>
+                            <TableHead className="text-right">Delivered Weight</TableHead>
+                            <TableHead className="text-right">Shrinkage</TableHead>
+                            <TableHead className="text-right">Revenue</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {harvests.map((harvest: any) => (
+                            <TableRow key={harvest.id}>
+                              <TableCell>{new Date(harvest.harvestDate).toLocaleDateString()}</TableCell>
+                              <TableCell>{harvest.destination || "-"}</TableCell>
+                              <TableCell className="text-right">{harvest.chickenCountLoaded.toLocaleString()}</TableCell>
+                              <TableCell className="text-right">{parseFloat(harvest.totalLoadedWeightKg.toString()).toFixed(2)} kg</TableCell>
+                              <TableCell className="text-right">
+                                {harvest.totalDeliveredWeightKg ? `${parseFloat(harvest.totalDeliveredWeightKg.toString()).toFixed(2)} kg` : "-"}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {harvest.shrinkagePercentage ? `${harvest.shrinkagePercentage}%` : "-"}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {harvest.totalRevenue ? `R${parseFloat(harvest.totalRevenue).toFixed(2)}` : "-"}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <p>No harvest records yet</p>
+                        <p className="text-sm">Go to Harvests page to record bird catches</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            );
+          })()}
+        </TabsContent>
+
         {/* Status History Tab */}
         <TabsContent value="status-history" className="space-y-4">
           <Card>
@@ -1633,6 +2165,134 @@ export default function FlockDetail() {
               disabled={updateReminderStatus.isPending}
             >
               {updateReminderStatus.isPending ? "Updating..." : reminderActionDialog.action === "complete" ? "Complete" : "Dismiss"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Vaccination Update Dialog */}
+      <Dialog open={vaccinationUpdateDialog.open} onOpenChange={(open) => setVaccinationUpdateDialog({ open, scheduleId: null })}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark Vaccination as Completed</DialogTitle>
+            <DialogDescription>
+              Record the actual administration date and details for this vaccination.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="actualDate">Actual Date Administered</Label>
+              <Input
+                id="actualDate"
+                type="date"
+                value={vaccinationUpdateForm.actualDate}
+                onChange={(e) => setVaccinationUpdateForm({ ...vaccinationUpdateForm, actualDate: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="dosageUsed">Dosage Used (optional)</Label>
+              <Input
+                id="dosageUsed"
+                placeholder="e.g., 1000 doses, 2ml per bird"
+                value={vaccinationUpdateForm.dosageUsed}
+                onChange={(e) => setVaccinationUpdateForm({ ...vaccinationUpdateForm, dosageUsed: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="vaccinationNotes">Notes (optional)</Label>
+              <Textarea
+                id="vaccinationNotes"
+                placeholder="Any observations, issues, or additional details..."
+                value={vaccinationUpdateForm.notes}
+                onChange={(e) => setVaccinationUpdateForm({ ...vaccinationUpdateForm, notes: e.target.value })}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVaccinationUpdateDialog({ open: false, scheduleId: null })}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (vaccinationUpdateDialog.scheduleId) {
+                  updateVaccinationSchedule.mutate({
+                    id: vaccinationUpdateDialog.scheduleId,
+                    administeredDate: new Date(vaccinationUpdateForm.actualDate),
+                    status: "completed",
+                    notes: vaccinationUpdateForm.notes || undefined,
+                  });
+                }
+              }}
+              disabled={updateVaccinationSchedule.isPending}
+            >
+              {updateVaccinationSchedule.isPending ? "Saving..." : "Mark as Completed"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stress Pack Update Dialog */}
+      <Dialog open={stressPackUpdateDialog.open} onOpenChange={(open) => setStressPackUpdateDialog({ open, scheduleId: null })}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Record Stress Pack Usage</DialogTitle>
+            <DialogDescription>
+              Update the status and quantity used for this stress pack administration period.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="stressPackStatus">Status</Label>
+              <Select 
+                value={stressPackUpdateForm.status} 
+                onValueChange={(value) => setStressPackUpdateForm({ ...stressPackUpdateForm, status: value as "scheduled" | "active" | "completed" | "cancelled" })}
+              >
+                <SelectTrigger id="stressPackStatus">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="quantityUsed">Quantity Used</Label>
+              <Input
+                id="quantityUsed"
+                placeholder="e.g., 5kg, 10 liters, 200g per 1000 birds"
+                value={stressPackUpdateForm.quantityUsed}
+                onChange={(e) => setStressPackUpdateForm({ ...stressPackUpdateForm, quantityUsed: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="stressPackNotes">Notes (optional)</Label>
+              <Textarea
+                id="stressPackNotes"
+                placeholder="Any observations, issues, or additional details..."
+                value={stressPackUpdateForm.notes}
+                onChange={(e) => setStressPackUpdateForm({ ...stressPackUpdateForm, notes: e.target.value })}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStressPackUpdateDialog({ open: false, scheduleId: null })}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (stressPackUpdateDialog.scheduleId) {
+                  updateStressPackSchedule.mutate({
+                    id: stressPackUpdateDialog.scheduleId,
+                    status: stressPackUpdateForm.status,
+                    quantityUsed: stressPackUpdateForm.quantityUsed || undefined,
+                    notes: stressPackUpdateForm.notes || undefined,
+                  });
+                }
+              }}
+              disabled={updateStressPackSchedule.isPending}
+            >
+              {updateStressPackSchedule.isPending ? "Saving..." : "Save Usage"}
             </Button>
           </DialogFooter>
         </DialogContent>
