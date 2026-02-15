@@ -102,6 +102,8 @@ export const flocks = mysqlTable("flocks", {
   initialCount: int("initialCount").notNull(),
   currentCount: int("currentCount").notNull(),
   targetSlaughterWeight: decimal("targetSlaughterWeight", { precision: 10, scale: 2 }).default("1.70"), // kg
+  targetDeliveredWeight: decimal("targetDeliveredWeight", { precision: 10, scale: 3 }), // kg - target weight at processor after shrinkage
+  targetCatchingWeight: decimal("targetCatchingWeight", { precision: 10, scale: 3 }), // kg - target weight on farm before shrinkage (auto-calculated)
   growingPeriod: int("growingPeriod").default(42), // days
   weightUnit: mysqlEnum("weightUnit", ["grams", "kg"]).default("kg").notNull(),
   
@@ -116,7 +118,7 @@ export const flocks = mysqlTable("flocks", {
   finisherFromDay: int("finisherFromDay"),
   finisherToDay: int("finisherToDay"),
   
-  status: mysqlEnum("status", ["planned", "active", "completed", "cancelled"]).default("planned").notNull(),
+  status: mysqlEnum("status", ["planned", "active", "harvesting", "completed", "cancelled"]).default("planned").notNull(),
   
   // Status change audit trail
   statusChangedAt: timestamp("statusChangedAt"),
@@ -221,6 +223,100 @@ export const mortalityRecords = mysqlTable("mortality_records", {
   flockIdIdx: index("idx_mortality_records_flock_id").on(table.flockId),
   recordDateIdx: index("idx_mortality_records_record_date").on(table.recordDate),
 }));
+
+/**
+ * Harvest Records - tracks bird catches for slaughtering
+ * Supports multi-catch scenarios (partial depletion over multiple days)
+ */
+export const harvestRecords = mysqlTable("harvest_records", {
+  id: int("id").autoincrement().primaryKey(),
+  flockId: int("flockId").notNull().references(() => flocks.id),
+  
+  // Harvest timing
+  harvestDate: timestamp("harvestDate").notNull(),
+  harvestStartTime: timestamp("harvestStartTime").notNull(),
+  harvestDurationMinutes: int("harvestDurationMinutes"), // Total time for catching, crating, weighing, loading
+  
+  // Feed withdrawal
+  feedWithdrawalStartTime: timestamp("feedWithdrawalStartTime"),
+  feedWithdrawalDurationHours: decimal("feedWithdrawalDurationHours", { precision: 5, scale: 2 }), // Auto-calculated
+  
+  // Destination
+  destination: varchar("destination", { length: 255 }), // Processor/Abattoir name (free text for now)
+  
+  // Loading data
+  chickenCountLoaded: int("chickenCountLoaded").notNull(),
+  totalLoadedWeightKg: decimal("totalLoadedWeightKg", { precision: 10, scale: 3 }).notNull(),
+  averageLoadedWeightKg: decimal("averageLoadedWeightKg", { precision: 10, scale: 3 }), // Auto-calculated
+  
+  // Crate tracking
+  totalCrates: int("totalCrates"),
+  oddCrateCount: int("oddCrateCount"), // Number of chickens in odd crate
+  oddCrateWeightKg: decimal("oddCrateWeightKg", { precision: 10, scale: 3 }), // Weight of odd crate
+  
+  // Transport
+  transportDepartTime: timestamp("transportDepartTime"),
+  transportArrivalTime: timestamp("transportArrivalTime"),
+  travelDurationHours: decimal("travelDurationHours", { precision: 5, scale: 2 }), // Auto-calculated
+  
+  // Delivery data
+  chickenCountDelivered: int("chickenCountDelivered"),
+  totalDeliveredWeightKg: decimal("totalDeliveredWeightKg", { precision: 10, scale: 3 }),
+  averageDeliveredWeightKg: decimal("averageDeliveredWeightKg", { precision: 10, scale: 3 }), // Auto-calculated
+  transportMortalities: int("transportMortalities").default(0), // Deaths during transport
+  shrinkagePercentage: decimal("shrinkagePercentage", { precision: 5, scale: 2 }), // Auto-calculated: (loaded - delivered) / loaded * 100
+  
+  // Financial data
+  pricePerKg: decimal("pricePerKg", { precision: 10, scale: 2 }), // Price per kg at delivery (in currency units)
+  totalRevenue: decimal("totalRevenue", { precision: 12, scale: 2 }), // Auto-calculated: deliveredWeight * pricePerKg
+  paymentTerms: varchar("paymentTerms", { length: 100 }), // e.g., "Net 30", "COD"
+  invoiceReference: varchar("invoiceReference", { length: 100 }),
+  
+  // Notes
+  notes: text("notes"), // Weather conditions, issues, etc.
+  
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  recordedBy: int("recordedBy").references(() => users.id),
+}, (table) => ({
+  flockIdIdx: index("idx_harvest_records_flock_id").on(table.flockId),
+  harvestDateIdx: index("idx_harvest_records_harvest_date").on(table.harvestDate),
+}));
+
+/**
+ * PROCESSORS/DESTINATIONS
+ * Manage processor/abattoir information for harvest destinations
+ */
+export const processors = mysqlTable("processors", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull().unique(),
+  
+  // Contact information
+  contactPerson: varchar("contactPerson", { length: 255 }),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 50 }),
+  
+  // Address
+  physicalAddress: text("physicalAddress"),
+  gpsLatitude: decimal("gpsLatitude", { precision: 10, scale: 7 }),
+  gpsLongitude: decimal("gpsLongitude", { precision: 10, scale: 7 }),
+  
+  // Business details
+  paymentTerms: varchar("paymentTerms", { length: 100 }), // e.g., "Net 30", "COD"
+  defaultPricePerKg: decimal("defaultPricePerKg", { precision: 10, scale: 2 }), // Default price in currency units
+  
+  // Operational details
+  averageTravelTimeHours: decimal("averageTravelTimeHours", { precision: 5, scale: 2 }), // Typical travel time from farm
+  operatingDays: varchar("operatingDays", { length: 100 }), // e.g., "Mon-Fri", "Mon-Sat"
+  operatingHours: varchar("operatingHours", { length: 100 }), // e.g., "6:00-18:00"
+  
+  notes: text("notes"),
+  isActive: boolean("isActive").default(true).notNull(),
+  
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdBy: int("createdBy").references(() => users.id),
+});
 
 // ============================================================================
 // FEED MANUFACTURING
@@ -927,3 +1023,158 @@ export type InsertFlockVaccinationSchedule = typeof flockVaccinationSchedules.$i
 
 export type FlockStressPackSchedule = typeof flockStressPackSchedules.$inferSelect;
 export type InsertFlockStressPackSchedule = typeof flockStressPackSchedules.$inferInsert;
+
+
+// ============================================================================
+// CATCH PLANNING & TARGET WEIGHT MANAGEMENT
+// ============================================================================
+
+export const catchConfigurations = mysqlTable("catch_configurations", {
+  id: int("id").autoincrement().primaryKey(),
+  flockId: int("flockId").notNull().unique().references(() => flocks.id),
+  
+  // Target weights
+  targetDeliveredWeight: decimal("targetDeliveredWeight", { precision: 10, scale: 3 }).notNull(), // kg - what processor requires
+  calculatedCatchingWeight: decimal("calculatedCatchingWeight", { precision: 10, scale: 3 }).notNull(), // kg - target weight on farm before shrinkage
+  
+  // Shrinkage component percentages (configurable per flock)
+  feedWithdrawalLossPercent: decimal("feedWithdrawalLossPercent", { precision: 5, scale: 2 }).default("4.00").notNull(),
+  catchingLoadingLossPercent: decimal("catchingLoadingLossPercent", { precision: 5, scale: 2 }).default("0.70").notNull(),
+  transportLossPercentPerHour: decimal("transportLossPercentPerHour", { precision: 5, scale: 2 }).default("0.30").notNull(),
+  lairageLossPercent: decimal("lairageLossPercent", { precision: 5, scale: 2 }).default("0.20").notNull(),
+  
+  // Transport details
+  transportDurationHours: decimal("transportDurationHours", { precision: 5, scale: 2 }).default("2.00").notNull(),
+  
+  // Calculated total shrinkage
+  totalShrinkagePercent: decimal("totalShrinkagePercent", { precision: 5, scale: 2 }).notNull(),
+  
+  // Planned catch dates (for multi-day catches)
+  plannedCatchDates: text("plannedCatchDates"), // JSON array of {date: string, dayNumber: number, estimatedBirds: number}
+  
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdBy: int("createdBy").references(() => users.id),
+}, (table) => ({
+  flockIdIdx: index("idx_catch_config_flock_id").on(table.flockId),
+}));
+
+export type CatchConfiguration = typeof catchConfigurations.$inferSelect;
+export type InsertCatchConfiguration = typeof catchConfigurations.$inferInsert;
+
+// ============================================================================
+// CATCH OPERATIONS - Real-time catch data recording
+// ============================================================================
+
+export const crateTypes = mysqlTable("crate_types", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  length: decimal("length", { precision: 6, scale: 2 }).notNull(), // cm
+  width: decimal("width", { precision: 6, scale: 2 }).notNull(), // cm
+  height: decimal("height", { precision: 6, scale: 2 }).notNull(), // cm
+  tareWeight: decimal("tareWeight", { precision: 6, scale: 3 }).notNull(), // kg
+  isActive: tinyint("isActive").default(1).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  nameIdx: index("idx_crate_types_name").on(table.name),
+}));
+
+export const catchSessions = mysqlTable("catch_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  flockId: int("flockId").notNull().references(() => flocks.id),
+  catchDate: timestamp("catchDate").notNull(),
+  catchTeam: varchar("catchTeam", { length: 200 }),
+  weighingMethod: mysqlEnum("weighingMethod", ["individual", "digital_scale_stack", "platform_scale"]).default("individual").notNull(),
+  palletWeight: decimal("palletWeight", { precision: 6, scale: 3 }), // kg - for platform scale method
+  targetBirds: int("targetBirds"),
+  targetWeight: decimal("targetWeight", { precision: 10, scale: 3 }),
+  status: varchar("status", { length: 20 }).default("active").notNull(),
+  startTime: timestamp("startTime").notNull(),
+  endTime: timestamp("endTime"),
+  totalBirdsCaught: int("totalBirdsCaught").default(0).notNull(),
+  totalNetWeight: decimal("totalNetWeight", { precision: 10, scale: 3 }).default("0.000").notNull(),
+  totalCrates: int("totalCrates").default(0).notNull(),
+  averageBirdWeight: decimal("averageBirdWeight", { precision: 8, scale: 3 }),
+  harvestRecordId: int("harvestRecordId").references(() => harvestRecords.id),
+  // Planned distribution fields for seasonal density recommendations
+  crateTypeId: int("crateTypeId").references(() => crateTypes.id),
+  transportDurationHours: decimal("transportDurationHours", { precision: 4, scale: 1 }), // Expected transport duration
+  season: varchar("season", { length: 20 }), // 'summer', 'winter', 'moderate' - auto-detected from catchDate
+  plannedStandardDensity: int("plannedStandardDensity"), // Primary birds/crate (e.g., 10)
+  plannedStandardCrates: int("plannedStandardCrates"), // Number of crates at standard density
+  plannedOddDensity: int("plannedOddDensity"), // Secondary birds/crate (e.g., 12)
+  plannedOddCrates: int("plannedOddCrates"), // Number of crates at odd density
+  plannedTotalBirds: int("plannedTotalBirds"), // Expected total birds from plan
+  availableCrates: int("availableCrates"), // Total crates available for this session
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  createdBy: int("createdBy").references(() => users.id),
+}, (table) => ({
+  flockIdIdx: index("idx_catch_sessions_flock_id").on(table.flockId),
+  catchDateIdx: index("idx_catch_sessions_catch_date").on(table.catchDate),
+  statusIdx: index("idx_catch_sessions_status").on(table.status),
+}));
+
+export const catchCrates = mysqlTable("catch_crates", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull().references(() => catchSessions.id, { onDelete: "cascade" }),
+  crateTypeId: int("crateTypeId").notNull().references(() => crateTypes.id),
+  batchId: varchar("batchId", { length: 50 }), // Groups crates weighed together (e.g., "batch-1", "batch-2")
+  crateNumber: int("crateNumber").notNull(),
+  birdCount: int("birdCount").notNull(),
+  grossWeight: decimal("grossWeight", { precision: 8, scale: 3 }).notNull(),
+  netWeight: decimal("netWeight", { precision: 8, scale: 3 }).notNull(),
+  averageBirdWeight: decimal("averageBirdWeight", { precision: 8, scale: 3 }).notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+  notes: text("notes"),
+}, (table) => ({
+  sessionIdIdx: index("idx_catch_crates_session_id").on(table.sessionId),
+  crateTypeIdIdx: index("idx_catch_crates_crate_type_id").on(table.crateTypeId),
+}));
+
+// Batch weighing records (for digital_scale_stack and platform_scale methods)
+export const catchBatches = mysqlTable("catch_batches", {
+  id: int("id").autoincrement().primaryKey(),
+  sessionId: int("sessionId").notNull().references(() => catchSessions.id, { onDelete: "cascade" }),
+  crateTypeId: int("crateTypeId").notNull().references(() => crateTypes.id),
+  batchNumber: int("batchNumber").notNull(), // Sequential batch number within session
+  numberOfCrates: int("numberOfCrates").notNull(),
+  birdsPerCrate: int("birdsPerCrate").notNull(),
+  totalBirds: int("totalBirds").notNull(), // numberOfCrates * birdsPerCrate
+  totalGrossWeight: decimal("totalGrossWeight", { precision: 10, scale: 3 }).notNull(),
+  crateWeight: decimal("crateWeight", { precision: 8, scale: 3 }).notNull(), // Weight per crate
+  palletWeight: decimal("palletWeight", { precision: 8, scale: 3 }), // For platform_scale method
+  totalNetWeight: decimal("totalNetWeight", { precision: 10, scale: 3 }).notNull(),
+  averageBirdWeight: decimal("averageBirdWeight", { precision: 8, scale: 3 }).notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+  notes: text("notes"),
+}, (table) => ({
+  sessionIdIdx: index("idx_catch_batches_session_id").on(table.sessionId),
+  crateTypeIdIdx: index("idx_catch_batches_crate_type_id").on(table.crateTypeId),
+}));
+
+export type CrateType = typeof crateTypes.$inferSelect;
+export type InsertCrateType = typeof crateTypes.$inferInsert;
+export type CatchSession = typeof catchSessions.$inferSelect;
+export type InsertCatchSession = typeof catchSessions.$inferInsert;
+export type CatchBatch = typeof catchBatches.$inferSelect;
+export type InsertCatchBatch = typeof catchBatches.$inferInsert;
+export type CatchCrate = typeof catchCrates.$inferSelect;
+export type InsertCatchCrate = typeof catchCrates.$inferInsert;
+
+// Re-export slaughter tracking tables from schema-slaughter
+export {
+  slaughterBatches,
+  slaughterCatchRecords,
+  slaughterhouseRecords,
+  type SlaughterBatch,
+  type InsertSlaughterBatch,
+  type SlaughterCatchRecord,
+  type InsertSlaughterCatchRecord,
+  type SlaughterhouseRecord,
+  type InsertSlaughterhouseRecord,
+} from "./schema-slaughter";
