@@ -41,6 +41,9 @@ import {
   flockStressPackSchedules,
   reminderTemplates,
   healthProtocolTemplates,
+  harvestRecords,
+  processors,
+  catchSessions,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -264,6 +267,14 @@ export async function activateUser(userId: number) {
   if (!db) return false;
 
   await db.update(users).set({ isActive: true }).where(eq(users.id, userId));
+  return true;
+}
+
+export async function deleteUser(userId: number) {
+  const db = await getDb();
+  if (!db) return false;
+
+  await db.delete(users).where(eq(users.id, userId));
   return true;
 }
 
@@ -544,6 +555,7 @@ export async function deleteFlock(id: number) {
   await db.delete(healthRecords).where(eq(healthRecords.flockId, id));
   await db.delete(mortalityRecords).where(eq(mortalityRecords.flockId, id));
   await db.delete(procurementSchedules).where(eq(procurementSchedules.flockId, id));
+  await db.delete(catchSessions).where(eq(catchSessions.flockId, id));
   // Set flockId to null for sales_order_items instead of deleting (preserve sales history)
   await db.update(salesOrderItems).set({ flockId: null }).where(eq(salesOrderItems.flockId, id));
   
@@ -1058,6 +1070,188 @@ export async function getMortalityRecords(flockId: number) {
     .orderBy(asc(mortalityRecords.recordDate));
 }
 
+// Advanced Growth Metrics Calculation
+export async function getAdvancedGrowthMetrics(flockId: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const flock = await getFlockById(flockId);
+  if (!flock) return null;
+
+  const dailyRecords = await getFlockDailyRecords(flockId);
+  if (!dailyRecords || dailyRecords.length === 0) return null;
+
+  // Filter records with weight data and sort by day
+  const weightRecords = dailyRecords
+    .filter(r => r.averageWeight && parseFloat(r.averageWeight.toString()) > 0)
+    .sort((a, b) => a.dayNumber - b.dayNumber);
+
+  if (weightRecords.length === 0) return null;
+
+  // Calculate Daily Weight Gain (ADG)
+  const adgData = [];
+  for (let i = 1; i < weightRecords.length; i++) {
+    const prevWeight = parseFloat(weightRecords[i - 1].averageWeight!.toString());
+    const currWeight = parseFloat(weightRecords[i].averageWeight!.toString());
+    const dayDiff = weightRecords[i].dayNumber - weightRecords[i - 1].dayNumber;
+    const dailyGain = dayDiff > 0 ? ((currWeight - prevWeight) * 1000) / dayDiff : 0; // Convert to grams
+    adgData.push({
+      day: weightRecords[i].dayNumber,
+      dailyGain: parseFloat(dailyGain.toFixed(2)),
+      weight: currWeight
+    });
+  }
+
+  const avgDailyGain = adgData.length > 0
+    ? adgData.reduce((sum, d) => sum + d.dailyGain, 0) / adgData.length
+    : 0;
+
+  // Calculate Uniformity Index (Coefficient of Variation from weight samples)
+  let uniformityIndex = null;
+  const latestRecord = weightRecords[weightRecords.length - 1];
+  if (latestRecord.weightSamples) {
+    const samples = latestRecord.weightSamples
+      .split(',')
+      .map(w => parseFloat(w.trim()))
+      .filter(w => !isNaN(w) && w > 0);
+    
+    if (samples.length >= 3) {
+      const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+      const variance = samples.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / samples.length;
+      const stdDev = Math.sqrt(variance);
+      const cv = (stdDev / mean) * 100;
+      uniformityIndex = parseFloat((100 - cv).toFixed(2)); // Higher is better
+    }
+  }
+
+  // Calculate Projected Final Weight
+  const latestWeight = parseFloat(latestRecord.averageWeight!.toString());
+  const currentDay = latestRecord.dayNumber;
+  const targetDay = flock.growingPeriod || 42;
+  const daysRemaining = targetDay - currentDay;
+  const projectedFinalWeight = daysRemaining > 0
+    ? latestWeight + (avgDailyGain / 1000) * daysRemaining
+    : latestWeight;
+
+  // Calculate European Production Index (EPI)
+  // EPI = (Livability × Live Weight in kg × 100) / (Age in days × FCR)
+  const totalMortality = dailyRecords.reduce((sum, r) => sum + (r.mortality || 0), 0);
+  const livability = ((flock.initialCount - totalMortality) / flock.initialCount) * 100;
+  const totalFeedConsumed = dailyRecords.reduce((sum, r) => 
+    sum + (r.feedConsumed ? parseFloat(r.feedConsumed.toString()) : 0), 0
+  );
+  const currentCount = flock.initialCount - totalMortality;
+  const totalWeight = currentCount * latestWeight;
+  const fcr = totalWeight > 0 ? totalFeedConsumed / totalWeight : 0;
+  const epi = fcr > 0 && currentDay > 0
+    ? (livability * latestWeight * 100) / (currentDay * fcr)
+    : 0;
+
+  return {
+    avgDailyGain: parseFloat(avgDailyGain.toFixed(2)),
+    adgData,
+    uniformityIndex,
+    projectedFinalWeight: parseFloat(projectedFinalWeight.toFixed(3)),
+    epi: parseFloat(epi.toFixed(2)),
+    livability: parseFloat(livability.toFixed(2)),
+    currentDay,
+    latestWeight
+  };
+}
+
+// Feed Efficiency Metrics Calculation
+export async function getFeedEfficiencyMetrics(flockId: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const flock = await getFlockById(flockId);
+  if (!flock) return null;
+
+  const dailyRecords = await getFlockDailyRecords(flockId);
+  if (!dailyRecords || dailyRecords.length === 0) return null;
+
+  const totalMortality = dailyRecords.reduce((sum, r) => sum + (r.mortality || 0), 0);
+  const currentCount = flock.initialCount - totalMortality;
+
+  // Calculate daily feed intake per bird
+  const feedIntakeData = dailyRecords
+    .filter(r => r.feedConsumed && parseFloat(r.feedConsumed.toString()) > 0)
+    .map(r => {
+      const birdCount = flock.initialCount - dailyRecords
+        .filter(dr => dr.dayNumber <= r.dayNumber)
+        .reduce((sum, dr) => sum + (dr.mortality || 0), 0);
+      const feedPerBird = birdCount > 0
+        ? (parseFloat(r.feedConsumed!.toString()) / birdCount) * 1000 // Convert to grams
+        : 0;
+      return {
+        day: r.dayNumber,
+        feedPerBird: parseFloat(feedPerBird.toFixed(2)),
+        feedType: r.feedType || 'unknown'
+      };
+    });
+
+  const avgFeedPerBird = feedIntakeData.length > 0
+    ? feedIntakeData.reduce((sum, d) => sum + d.feedPerBird, 0) / feedIntakeData.length
+    : 0;
+
+  // Calculate feed type performance
+  const feedTypePerformance = ['starter', 'grower', 'finisher'].map(type => {
+    const typeRecords = dailyRecords.filter(r => r.feedType === type);
+    if (typeRecords.length === 0) return null;
+
+    const totalFeed = typeRecords.reduce((sum, r) => 
+      sum + (r.feedConsumed ? parseFloat(r.feedConsumed.toString()) : 0), 0
+    );
+    const startDay = Math.min(...typeRecords.map(r => r.dayNumber));
+    const endDay = Math.max(...typeRecords.map(r => r.dayNumber));
+    
+    // Get weight gain during this feed phase
+    const startWeight = dailyRecords
+      .filter(r => r.dayNumber <= startDay && r.averageWeight && parseFloat(r.averageWeight.toString()) > 0)
+      .sort((a, b) => b.dayNumber - a.dayNumber)[0];
+    const endWeight = dailyRecords
+      .filter(r => r.dayNumber <= endDay && r.averageWeight && parseFloat(r.averageWeight.toString()) > 0)
+      .sort((a, b) => b.dayNumber - a.dayNumber)[0];
+
+    const weightGain = startWeight && endWeight
+      ? parseFloat(endWeight.averageWeight!.toString()) - parseFloat(startWeight.averageWeight!.toString())
+      : 0;
+
+    const phaseFCR = weightGain > 0 && currentCount > 0
+      ? totalFeed / (currentCount * weightGain)
+      : 0;
+
+    return {
+      feedType: type,
+      totalFeed: parseFloat(totalFeed.toFixed(2)),
+      days: endDay - startDay + 1,
+      weightGain: parseFloat((weightGain * 1000).toFixed(2)), // Convert to grams
+      fcr: parseFloat(phaseFCR.toFixed(3))
+    };
+  }).filter(Boolean);
+
+  // Calculate water-to-feed ratio
+  const waterFeedRatioData = dailyRecords
+    .filter(r => r.waterConsumed && r.feedConsumed && 
+      parseFloat(r.waterConsumed.toString()) > 0 && parseFloat(r.feedConsumed.toString()) > 0)
+    .map(r => ({
+      day: r.dayNumber,
+      ratio: parseFloat((parseFloat(r.waterConsumed!.toString()) / parseFloat(r.feedConsumed!.toString())).toFixed(2))
+    }));
+
+  const avgWaterFeedRatio = waterFeedRatioData.length > 0
+    ? waterFeedRatioData.reduce((sum, d) => sum + d.ratio, 0) / waterFeedRatioData.length
+    : 0;
+
+  return {
+    avgFeedPerBird: parseFloat(avgFeedPerBird.toFixed(2)),
+    feedIntakeData,
+    feedTypePerformance,
+    avgWaterFeedRatio: parseFloat(avgWaterFeedRatio.toFixed(2)),
+    waterFeedRatioData
+  };
+}
+
 export async function getFlockPerformanceMetrics(flockId: number) {
   const db = await getDb();
   if (!db) return null;
@@ -1076,13 +1270,6 @@ export async function getFlockPerformanceMetrics(flockId: number) {
     sum + (record.mortality || 0), 0
   );
 
-  // Get latest weight sample
-  //const latestRecord = dailyRecords[dailyRecords.length - 1];
-  //const averageWeight = latestRecord?.averageWeight 
-  //  ? parseFloat(latestRecord.averageWeight.toString()) 
-  //  : 0;
-  
-  // NEW CODE //
   // Get latest weight sample (find the most recent record with a non-zero weight)
   let averageWeight = 0;
   for (let i = 0; i < dailyRecords.length; i++) {
@@ -1091,7 +1278,6 @@ export async function getFlockPerformanceMetrics(flockId: number) {
       averageWeight = parseFloat(record.averageWeight.toString());
     }
   }
-  // END NEW CODE //
 
   // Calculate current count as initial count minus cumulative mortality
   const calculatedCurrentCount = flock.initialCount - totalMortality;
@@ -1113,58 +1299,27 @@ export async function getFlockPerformanceMetrics(flockId: number) {
   const placementUTC = Date.UTC(placementDate.getUTCFullYear(), placementDate.getUTCMonth(), placementDate.getUTCDate());
   const todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   const ageInDays = Math.floor((todayUTC - placementUTC) / (1000 * 60 * 60 * 24));
+
+  const targetWeight = flock.targetSlaughterWeight ? parseFloat(flock.targetSlaughterWeight) : 0;
   const growingPeriod = flock.growingPeriod || 42;
 
-// Shrinkage (fixed for now, configurable later)
-  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
-
-// Delivered (slaughterhouse) target
-  const deliveredTargetWeight =
-  flock.targetSlaughterWeight
-    ? parseFloat(flock.targetSlaughterWeight)
-    : 0;
-
-// Convert to pre-catch (farm) target weight
-  const targetWeight =
-  deliveredTargetWeight > 0
-    ? deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100)
-    : 0;
-	
-	const breed: BreedType = 'ross_308'; // later configurable
-
-	const breedWeightAtDay = getTargetWeight(ageInDays, breed);
-	const breedWeightAtEnd = getTargetWeight(growingPeriod, breed);
-
-	const targetWeightAtDay =
-	  breedWeightAtEnd > 0
-	  ? (breedWeightAtDay / breedWeightAtEnd) * targetWeight
-	  : 0;
-
-	const deviation =
-  targetWeightAtDay > 0
-    ? ((averageWeight - targetWeightAtDay) / targetWeightAtDay) * 100
-    : 0;
-
-return {
-  flockId: flock.id,
-  flockNumber: flock.flockNumber,
-  ageInDays,
-  currentCount: calculatedCurrentCount,
-  initialCount: flock.initialCount,
-  totalMortality,
-  mortalityRate: parseFloat(mortalityRate.toFixed(2)),
-  totalFeedConsumed: parseFloat(totalFeedConsumed.toFixed(2)),
-  averageWeight: parseFloat(averageWeight.toFixed(3)),
-  fcr: parseFloat(fcr.toFixed(2)),
-  targetWeight,                     // pre-catch final target
-  targetWeightAtDay: Number(targetWeightAtDay.toFixed(3)),
-  performanceDeviation: Number(deviation.toFixed(1)),
-  performanceStatus: getPerformanceStatus(deviation),
-  growingPeriod,
-  daysRemaining: growingPeriod - ageInDays,
-};
-
+  return {
+    flockId: flock.id,
+    flockNumber: flock.flockNumber,
+    ageInDays,
+    currentCount: calculatedCurrentCount,
+    initialCount: flock.initialCount,
+    totalMortality,
+    mortalityRate: parseFloat(mortalityRate.toFixed(2)),
+    totalFeedConsumed: parseFloat(totalFeedConsumed.toFixed(2)),
+    averageWeight: parseFloat(averageWeight.toFixed(3)),
+    fcr: parseFloat(fcr.toFixed(2)),
+    targetWeight,
+    growingPeriod,
+    daysRemaining: growingPeriod - ageInDays,
+  };
 }
+
 
 // ============================================================================
 // Breed-Specific Target Growth Curve Functions
@@ -1244,117 +1399,42 @@ function getTargetWeightLegacy(dayNumber: number): number {
  * Get target growth curve data for charting (breed-specific)
  * Returns array of {day, targetWeight} for the specified day range
  */
-export function getTargetGrowthCurve(input: {
-  startDay: number;
-  endDay: number;
-  breed: BreedType;
-  deliveredTargetWeight: number;
-  growingPeriod: number;
-  shrinkagePercent?: number;
-}): Array<{ day: number; targetWeight: number }> {
-
-  const {
-    startDay,
-    endDay,
-    deliveredTargetWeight,
-    growingPeriod,
-    shrinkagePercent = 6.5,
-  } = input;
-
-  if (!deliveredTargetWeight || deliveredTargetWeight <= 0) {
-    throw new Error("Invalid delivered target weight");
-  }
-
-  if (!growingPeriod || growingPeriod <= 0) {
-    throw new Error("Invalid growing period");
-  }
-
-  // Convert delivered → pre-catch live weight
-  const preCatchTargetWeight =
-    deliveredTargetWeight / (1 - shrinkagePercent / 100);
-
+export function getTargetGrowthCurve(startDay: number = 0, endDay: number = 42, breed: BreedType = 'ross_308'): Array<{ day: number; targetWeight: number }> {
   const curve: Array<{ day: number; targetWeight: number }> = [];
-
+  
   for (let day = startDay; day <= endDay; day++) {
-    const breedWeight = getTargetWeight(day, breed);
-    const breedWeightFinal = getTargetWeight(growingPeriod, breed);
-
-    const scaledTarget =
-      breedWeightFinal > 0
-        ? (breedWeight / breedWeightFinal) * preCatchTargetWeight
-        : 0;
-
     curve.push({
       day,
-      targetWeight: Number(scaledTarget.toFixed(4)),
+      targetWeight: getTargetWeight(day, breed),
     });
   }
-
+  
   return curve;
 }
 
-export async function getGrowthPerformanceData(flockId: number) {
-  const flock = await getFlockById(flockId);
-  if (!flock) throw new Error("Flock not found");
-
-  const dailyRecords = await getFlockDailyRecords(flockId);
-
-  const breed: BreedType = "ross_308"; // TODO: make configurable later
-  const growingPeriod = flock.growingPeriod || 42;
-
-  const DEFAULT_SHRINKAGE_PERCENT = 6.5;
-  const deliveredTargetWeight = Number(flock.targetSlaughterWeight || 0);
-
-  if (!deliveredTargetWeight) {
-    throw new Error("Target slaughter weight not set");
-  }
-
-  // Pre-catch (farm) target
-  const preCatchTargetWeight =
-    deliveredTargetWeight / (1 - DEFAULT_SHRINKAGE_PERCENT / 100);
-
-  // 1️⃣ Benchmark curve (breed standard)
-  const benchmark = [];
-  for (let day = 0; day <= growingPeriod; day++) {
-    benchmark.push({
-      day,
-      weightKg: Number(getTargetWeight(day, breed).toFixed(4)),
-    });
-  }
-
-  // 2️⃣ Farm-scaled target curve
-  const breedFinal = getTargetWeight(growingPeriod, breed);
-
-  const farmTarget = benchmark.map(b => ({
-    day: b.day,
-    targetWeightKg:
-      breedFinal > 0
-        ? Number(((b.weightKg / breedFinal) * preCatchTargetWeight).toFixed(4))
-        : 0,
-  }));
-
-  // 3️⃣ Actual weights
-  const actuals = dailyRecords
-    .filter(r => r.averageWeight && Number(r.averageWeight) > 0)
-    .map(r => ({
-      day: r.dayNumber,
-      weightKg: Number(r.averageWeight),
-      feedKg: r.feedConsumed ? Number(r.feedConsumed) : undefined,
-    }));
-
-  return {
-    benchmark,
-    farmTarget,
-    actuals,
-  };
+/**
+ * Calculate performance deviation from target (breed-specific)
+ * Returns percentage deviation (positive = ahead of target, negative = behind target)
+ */
+export function calculatePerformanceDeviation(actualWeight: number, dayNumber: number, breed: BreedType = 'ross_308'): number {
+  const targetWeight = getTargetWeight(dayNumber, breed);
+  if (targetWeight === 0) return 0;
+  
+  const deviation = ((actualWeight - targetWeight) / targetWeight) * 100;
+  return Math.round(deviation * 10) / 10; // Round to 1 decimal place
 }
 
+/**
+ * Get performance status based on deviation from target
+ * Returns: 'ahead' | 'on-track' | 'behind' | 'critical'
+ */
 export function getPerformanceStatus(deviation: number): 'ahead' | 'on-track' | 'behind' | 'critical' {
   if (deviation >= 5) return 'ahead';           // 5% or more ahead
   if (deviation >= -5) return 'on-track';       // Within ±5%
   if (deviation > -10) return 'behind';         // 5-10% behind (not including -10%)
   return 'critical';                             // -10% or more behind
 }
+
 
 /**
  * Validate if target weight is realistic for given breed and growing period
