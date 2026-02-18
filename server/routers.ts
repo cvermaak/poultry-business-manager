@@ -1150,9 +1150,9 @@ export const appRouter = router({
         return await db.getFlocksUsingTemplate(input.templateId);
       }),
 
-    listAll: protectedProcedure.query(async ({ ctx }) => {
-      return await db.listAllRemindersWithFlockInfo(ctx.user.id);
-    }),
+    listAll: protectedProcedure.query(async () => {
+		return await db.listAllRemindersWithFlockInfo();
+	}),
   }),
 
   // ============================================================================
