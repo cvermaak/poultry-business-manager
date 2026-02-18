@@ -2465,6 +2465,79 @@ export async function syncFlockRemindersFromTemplate(flockId: number, templateId
   return { newReminderCount };
 }
 
+export async function getFlockActivityLogs(flockId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const logs = await db
+    .select({
+      id: userActivityLogs.id,
+      userId: userActivityLogs.userId,
+      action: userActivityLogs.action,
+      entityType: userActivityLogs.entityType,
+      entityId: userActivityLogs.entityId,
+      details: userActivityLogs.details,
+      createdAt: userActivityLogs.createdAt,
+      userName: users.name,
+    })
+    .from(userActivityLogs)
+    .leftJoin(users, eq(userActivityLogs.userId, users.id))
+    .where(
+      and(
+        eq(userActivityLogs.entityType, "flock"),
+        eq(userActivityLogs.entityId, flockId)
+      )
+    )
+    .orderBy(desc(userActivityLogs.createdAt));
+  return logs;
+}
+
+export async function getAllActivityLogs() {
+  const db = await getDb();
+  if (!db) return [];
+  const logs = await db
+    .select({
+      id: userActivityLogs.id,
+      userId: userActivityLogs.userId,
+      action: userActivityLogs.action,
+      entityType: userActivityLogs.entityType,
+      entityId: userActivityLogs.entityId,
+      details: userActivityLogs.details,
+      createdAt: userActivityLogs.createdAt,
+      userName: users.name,
+    })
+    .from(userActivityLogs)
+    .leftJoin(users, eq(userActivityLogs.userId, users.id))
+    .orderBy(desc(userActivityLogs.createdAt))
+    .limit(1000);
+  return logs;
+}
+
+export async function listAllRemindersWithFlockInfo(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  
+  const reminders = await db
+    .select({
+      id: flockReminders.id,
+      flockId: flockReminders.flockId,
+      title: flockReminders.title,
+      description: flockReminders.description,
+      dueDate: flockReminders.dueDate,
+      priority: flockReminders.priority,
+      status: flockReminders.status,
+      createdAt: flockReminders.createdAt,
+      flockName: flocks.name,
+      houseNumber: houses.houseNumber,
+    })
+    .from(flockReminders)
+    .leftJoin(flocks, eq(flockReminders.flockId, flocks.id))
+    .leftJoin(houses, eq(flocks.houseId, houses.id))
+    .where(eq(flockReminders.status, "pending"))
+    .orderBy(asc(flockReminders.dueDate));
+    
+  return reminders;
+}
+
 /**
  * Get all flocks that use a specific template
  */

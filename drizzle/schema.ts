@@ -1157,6 +1157,17 @@ export const catchBatches = mysqlTable("catch_batches", {
   crateTypeIdIdx: index("idx_catch_batches_crate_type_id").on(table.crateTypeId),
 }));
 
+export const inventoryStock = mysqlTable("inventory_stock", {
+  id: int("id").primaryKey().autoincrement(),
+  itemId: int("item_id").notNull().references(() => inventoryItems.id, { onDelete: "cascade" }),
+  locationId: int("location_id").notNull().references(() => inventoryLocations.id, { onDelete: "cascade" }),
+  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull().default("0"),
+  lastUpdated: timestamp("last_updated").defaultNow(),
+  updatedBy: int("updated_by").references(() => users.id, { onDelete: "set null" }),
+}, (table) => ({
+  uniqueItemLocation: unique().on(table.itemId, table.locationId),
+}));
+
 export type CrateType = typeof crateTypes.$inferSelect;
 export type InsertCrateType = typeof crateTypes.$inferInsert;
 export type CatchSession = typeof catchSessions.$inferSelect;

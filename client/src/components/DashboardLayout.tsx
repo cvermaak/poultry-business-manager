@@ -21,12 +21,13 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, Box, Scale } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, Box, Scale, ScrollText } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 import LoginPage from "@/pages/Login";
+import { ReminderNotifications } from "./ReminderNotifications";
 
 type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
 
@@ -47,12 +48,13 @@ const menuItems: MenuItem[] = [
   { icon: Building2, label: "Processors", path: "/processors", roles: ["admin", "farm_manager"] },
   { icon: Box, label: "Crate Types", path: "/crate-types", roles: ["admin", "farm_manager"] },
   { icon: Scale, label: "Catch Operations", path: "/catch-operations", roles: ["admin", "farm_manager", "production_worker"] },
-
+  { icon: Package, label: "Inventory", path: "/inventory", roles: ["admin", "farm_manager"] },
   { icon: Users, label: "Customers", path: "/customers", roles: ["admin", "sales_staff"] },
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
   { icon: DollarSign, label: "Finance", path: "/finance", roles: ["admin", "accountant"] },
   { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "farm_manager", "accountant"] },
+  { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"] },
   { icon: Settings, label: "User Management", path: "/users", roles: ["admin"] },
 ];
 
@@ -280,6 +282,12 @@ function DashboardLayoutContent({
                 </div>
               </div>
             </div>
+            <ReminderNotifications />
+          </div>
+        )}
+        {!isMobile && (
+          <div className="flex border-b h-14 items-center justify-end bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
+            <ReminderNotifications />
           </div>
         )}
         <main className="flex-1 p-4">{children}</main>

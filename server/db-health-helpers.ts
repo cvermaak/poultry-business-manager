@@ -1,6 +1,6 @@
 import { getDb } from "./db";
-import { flockVaccinationSchedules, flockStressPackSchedules, vaccines } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { flockVaccinationSchedules, flockStressPackSchedules, vaccines, stressPacks } from "../drizzle/schema";
+import { eq, asc } from "drizzle-orm";
 
 /**
  * Create vaccination schedules for a flock based on protocol
@@ -147,9 +147,44 @@ export async function getFlockVaccinationSchedules(flockId: number) {
 export async function getFlockStressPackSchedules(flockId: number) {
   const db = await getDb();
   if (!db) return [];
-
-  return await db
-    .select()
+  
+  const schedules = await db
+    .select({
+      id: flockStressPackSchedules.id,
+      flockId: flockStressPackSchedules.flockId,
+      stressPackId: flockStressPackSchedules.stressPackId,
+      dayNumber: flockStressPackSchedules.dayNumber,
+      scheduledDate: flockStressPackSchedules.scheduledDate,
+      actualDate: flockStressPackSchedules.actualDate,
+      notes: flockStressPackSchedules.notes,
+      createdAt: flockStressPackSchedules.createdAt,
+      // Enrich with stress pack details
+      stressPackName: stressPacks.name,
+      stressPackDescription: stressPacks.description,
+    })
     .from(flockStressPackSchedules)
-    .where(eq(flockStressPackSchedules.flockId, flockId));
+    .leftJoin(stressPacks, eq(flockStressPackSchedules.stressPackId, stressPacks.id))
+    .where(eq(flockStressPackSchedules.flockId, flockId))
+    .orderBy(asc(flockStressPackSchedules.dayNumber));
+    
+  return schedules;
+}
+
+export async function updateFlockVaccinationSchedule(
+  scheduleId: number,
+  actualDate: Date,
+  notes?: string
+) {
+  const db = await getDb();
+  if (!db) return null;
+  
+  await db
+    .update(flockVaccinationSchedules)
+    .set({
+      actualDate,
+      notes: notes || null,
+    })
+    .where(eq(flockVaccinationSchedules.id, scheduleId));
+    
+  return { success: true };
 }
