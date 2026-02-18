@@ -15,6 +15,7 @@ import { processorRouter } from "./procedures/processor";
 import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
 import { catchRouter } from "./procedures/catch";
 import { densityRouter } from "./procedures/density";
+import { inventoryRouter } from "./inventory-router";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -1148,6 +1149,10 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return await db.getFlocksUsingTemplate(input.templateId);
       }),
+
+    listAll: protectedProcedure.query(async ({ ctx }) => {
+      return await db.listAllRemindersWithFlockInfo(ctx.user.id);
+    }),
   }),
 
   // ============================================================================
@@ -1440,6 +1445,11 @@ export const appRouter = router({
   // ============================================================================
   catch: catchRouter,
   density: densityRouter,
+  
+  // ============================================================================
+  // INVENTORY
+  // ============================================================================
+  inventory: inventoryRouter,
 
   // ============================================================================
   // HARVEST MANAGEMENT

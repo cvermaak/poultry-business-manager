@@ -27,6 +27,9 @@ import Processors from "./pages/Processors";
 import CrateTypes from "./pages/CrateTypes";
 import SlaughterManagement from "./pages/SlaughterManagement";
 import CatchOperations from "./pages/CatchOperations";
+import AllReminders from "./pages/AllReminders";
+import AuditLogs from "./pages/AuditLogs";
+import Inventory from "./pages/Inventory";
 
 function Router() {
   return (
@@ -124,6 +127,24 @@ function Router() {
       <Route path="/login">
         <LoginPage />
       </Route>
+	  
+	 <Route path="/reminders">
+	  <DashboardLayout>
+		<AllReminders />
+	  </DashboardLayout>
+	</Route>
+
+	<Route path="/audit-logs">
+	  <DashboardLayout>
+		<AuditLogs />
+	  </DashboardLayout>
+	</Route>
+
+	<Route path="/inventory">
+	  <DashboardLayout>
+		<Inventory />
+	  </DashboardLayout>
+	</Route>
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

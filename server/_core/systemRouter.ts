@@ -1,6 +1,7 @@
+import * as db from "../db";
 import { z } from "zod";
 import { notifyOwner } from "./notification";
-import { adminProcedure, publicProcedure, router } from "./trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./trpc";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -26,4 +27,8 @@ export const systemRouter = router({
         success: delivered,
       } as const;
     }),
+
+  getAllActivityLogs: protectedProcedure.query(async () => {
+    return await db.getAllActivityLogs();
+  }),
 });
