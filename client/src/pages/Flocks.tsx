@@ -932,64 +932,85 @@ export default function Flocks() {
                           <Eye className="h-4 w-4 mr-1" />
                           View
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={async () => {
-                            setEditMode(true);
-                            setEditingFlockId(flock.id);
-                            setCopyMode(false);
-                            
-                            // Load existing health schedules
-                            const vacSchedules = await utils.flocks.getVaccinationSchedules.fetch({ flockId: flock.id });
-                            const spSchedules = await utils.flocks.getStressPackSchedules.fetch({ flockId: flock.id });
-                            
-                            // Determine vaccination protocol from schedules
-                            let vacProtocol: "standard" | "premium" | "none" = "none";
-                            if (vacSchedules.length > 0) {
-                              // Check if it's standard (3 vaccines) or premium (more vaccines)
-                              vacProtocol = vacSchedules.length <= 3 ? "standard" : "premium";
-                            }
-                            
-                            // Map stress pack schedules to form format
-                            const spSchedulesForForm = spSchedules.map((sp: any) => ({
-                              stressPackId: sp.stressPackId,
-                              startDay: sp.startDay,
-                              endDay: sp.endDay,
-                              dosageStrength: sp.dosageStrength as "single" | "double" | "triple",
-                            }));
-                            
-                            // Load flock data into form
-                            // Convert vaccination schedules to form format
-                            const vacSchedulesForForm = vacSchedules.map((vs: any) => ({
-                              vaccineId: vs.vaccineId,
-                              scheduledDay: vs.scheduledDay,
-                            }));
-                            
-                            setFormData({
-                              flockNumber: flock.flockNumber,
-                              houseId: flock.houseId.toString(),
-                              placementDate: new Date(flock.placementDate).toISOString().split('T')[0],
-                              initialCount: flock.initialCount.toString(),
-                              targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
-                              growingPeriod: flock.growingPeriod?.toString() || "42",
-                              weightUnit: flock.weightUnit || "kg",
-                              starterFeedType: flock.starterFeedType || "premium",
-                              starterToDay: flock.starterToDay?.toString() || "10",
-                              growerFeedType: flock.growerFeedType || "premium",
-                              growerFromDay: flock.growerFromDay?.toString() || "11",
-                              growerToDay: flock.growerToDay?.toString() || "24",
-                              finisherFeedType: flock.finisherFeedType || "premium",
-                              finisherFromDay: flock.finisherFromDay?.toString() || "25",
-                              notes: flock.notes || "",
-                              vaccinationProtocol: vacProtocol,
-                              vaccinationSchedules: vacSchedulesForForm,
-                              stressPackSchedules: spSchedulesForForm,
-                              selectedTemplateIds: [],
-                            });
-                            setDialogOpen(true);
-                          }}
-                        >
+						<Button
+						  variant="ghost"
+						  size="sm"
+						  onClick={async () => {
+							try {
+							  setEditMode(true);
+							  setEditingFlockId(flock.id);
+							  setCopyMode(false);
+							  
+							  // Load existing health schedules with error handling
+							  let vacSchedules: any[] = [];
+							  let spSchedules: any[] = [];
+							  
+							  try {
+								vacSchedules = await utils.flocks.getVaccinationSchedules.fetch({ flockId: flock.id });
+							  } catch (error) {
+								console.error("Failed to load vaccination schedules:", error);
+								toast.error("Warning: Could not load vaccination schedules");
+							  }
+							  
+							  try {
+								spSchedules = await utils.flocks.getStressPackSchedules.fetch({ flockId: flock.id });
+							  } catch (error) {
+								console.error("Failed to load stress pack schedules:", error);
+								toast.error("Warning: Could not load stress pack schedules");
+							  }
+							  
+							  // Determine vaccination protocol from schedules
+							  let vacProtocol: "standard" | "premium" | "none" = "none";
+							  if (vacSchedules.length > 0) {
+								// Check if it's standard (3 vaccines) or premium (more vaccines)
+								vacProtocol = vacSchedules.length <= 3 ? "standard" : "premium";
+							  }
+							  
+							  // Map stress pack schedules to form format
+							  const spSchedulesForForm = spSchedules.map((sp: any) => ({
+								stressPackId: sp.stressPackId,
+								startDay: sp.startDay,
+								endDay: sp.endDay,
+								dosageStrength: sp.dosageStrength as "single" | "double" | "triple",
+							  }));
+							  
+							  // Load flock data into form
+							  // Convert vaccination schedules to form format
+							  const vacSchedulesForForm = vacSchedules.map((vs: any) => ({
+								vaccineId: vs.vaccineId,
+								scheduledDay: vs.scheduledDay,
+							  }));
+							  
+							  setFormData({
+								flockNumber: flock.flockNumber,
+								houseId: flock.houseId.toString(),
+								placementDate: new Date(flock.placementDate).toISOString().split('T')[0],
+								initialCount: flock.initialCount.toString(),
+								targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
+								targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
+								targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
+								growingPeriod: flock.growingPeriod?.toString() || "42",
+								weightUnit: flock.weightUnit || "kg",
+								starterFeedType: flock.starterFeedType || "premium",
+								starterToDay: flock.starterToDay?.toString() || "10",
+								growerFeedType: flock.growerFeedType || "premium",
+								growerFromDay: flock.growerFromDay?.toString() || "11",
+								growerToDay: flock.growerToDay?.toString() || "24",
+								finisherFeedType: flock.finisherFeedType || "premium",
+								finisherFromDay: flock.finisherFromDay?.toString() || "25",
+								notes: flock.notes || "",
+								vaccinationProtocol: vacProtocol,
+								vaccinationSchedules: vacSchedulesForForm,
+								stressPackSchedules: spSchedulesForForm,
+								selectedTemplateIds: [],
+							  });
+							  setDialogOpen(true);
+							} catch (error) {
+							  console.error("Failed to open edit dialog:", error);
+							  toast.error("Failed to open edit form. Please try again.");
+							}
+						  }}
+						>
                           <Edit className="h-4 w-4 mr-1" />
                           Edit
                         </Button>
