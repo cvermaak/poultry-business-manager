@@ -2512,30 +2512,36 @@ export async function getAllActivityLogs() {
   return logs;
 }
 
-export async function listAllRemindersWithFlockInfo(userId: number) {
+export async function listAllRemindersWithFlockInfo() {
   const db = await getDb();
   if (!db) return [];
-  
-  const reminders = await db
+
+  const results = await db
     .select({
-      id: flockReminders.id,
-      flockId: flockReminders.flockId,
-      title: flockReminders.title,
-      description: flockReminders.description,
-      dueDate: flockReminders.dueDate,
-      priority: flockReminders.priority,
-      status: flockReminders.status,
-      createdAt: flockReminders.createdAt,
-      flockName: flocks.name,
-      houseNumber: houses.houseNumber,
+      id: reminders.id,
+      flockId: reminders.flockId,
+      houseId: reminders.houseId,
+      reminderType: reminders.reminderType,
+      title: reminders.title,
+      description: reminders.description,
+      dueDate: reminders.dueDate,
+      priority: reminders.priority,
+      status: reminders.status,
+      completedAt: reminders.completedAt,
+      completedBy: reminders.completedBy,
+      templateId: reminders.templateId,
+      actionNotes: reminders.actionNotes,
+      createdAt: reminders.createdAt,
+      updatedAt: reminders.updatedAt,
+      flockNumber: flocks.flockNumber,
+      houseName: houses.name,
     })
-    .from(flockReminders)
-    .leftJoin(flocks, eq(flockReminders.flockId, flocks.id))
-    .leftJoin(houses, eq(flocks.houseId, houses.id))
-    .where(eq(flockReminders.status, "pending"))
-    .orderBy(asc(flockReminders.dueDate));
-    
-  return reminders;
+    .from(reminders)
+    .leftJoin(flocks, eq(reminders.flockId, flocks.id))
+    .leftJoin(houses, eq(reminders.houseId, houses.id))
+    .orderBy(desc(reminders.dueDate));
+
+  return results;
 }
 
 /**
