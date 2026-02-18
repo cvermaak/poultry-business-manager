@@ -20,8 +20,18 @@ export default function Inventory() {
   const [itemForm, setItemForm] = useState({
     itemNumber: "",
     name: "",
+    longDescription: "",
+    itemStatus: "active" as "active" | "inactive" | "discontinued" | "obsolete",
+    itemType: "stocked_item" as "stocked_item" | "non_stocked" | "service" | "raw_material" | "finished_good" | "consumable",
+    barcode: "",
+    manufacturerPartNumber: "",
+    internalReference: "",
+    supplierPartNumber: "",
+    brand: "",
+    model: "",
     category: "feed" as "feed" | "raw_materials" | "supplies" | "equipment" | "live_birds",
     unit: "",
+    currentStock: "",
     reorderPoint: "",
     unitCost: "",
   });
@@ -89,8 +99,18 @@ export default function Inventory() {
     setItemForm({
       itemNumber: "",
       name: "",
+      longDescription: "",
+      itemStatus: "active",
+      itemType: "stocked_item",
+      barcode: "",
+      manufacturerPartNumber: "",
+      internalReference: "",
+      supplierPartNumber: "",
+      brand: "",
+      model: "",
       category: "feed",
       unit: "",
+      currentStock: "",
       reorderPoint: "",
       unitCost: "",
     });
@@ -108,8 +128,18 @@ export default function Inventory() {
     createItemMutation.mutate({
       itemNumber: itemForm.itemNumber,
       name: itemForm.name,
+      longDescription: itemForm.longDescription || undefined,
+      itemStatus: itemForm.itemStatus,
+      itemType: itemForm.itemType,
+      barcode: itemForm.barcode || undefined,
+      manufacturerPartNumber: itemForm.manufacturerPartNumber || undefined,
+      internalReference: itemForm.internalReference || undefined,
+      supplierPartNumber: itemForm.supplierPartNumber || undefined,
+      brand: itemForm.brand || undefined,
+      model: itemForm.model || undefined,
       category: itemForm.category,
       unit: itemForm.unit,
+      currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : 0,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
     });
@@ -120,8 +150,18 @@ export default function Inventory() {
     updateItemMutation.mutate({
       id: editingItem.id,
       name: itemForm.name,
+      longDescription: itemForm.longDescription || undefined,
+      itemStatus: itemForm.itemStatus,
+      itemType: itemForm.itemType,
+      barcode: itemForm.barcode || undefined,
+      manufacturerPartNumber: itemForm.manufacturerPartNumber || undefined,
+      internalReference: itemForm.internalReference || undefined,
+      supplierPartNumber: itemForm.supplierPartNumber || undefined,
+      brand: itemForm.brand || undefined,
+      model: itemForm.model || undefined,
       category: itemForm.category,
       unit: itemForm.unit,
+      currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : undefined,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
     });
@@ -132,8 +172,18 @@ export default function Inventory() {
     setItemForm({
       itemNumber: item.itemNumber,
       name: item.name,
+      longDescription: item.longDescription || "",
+      itemStatus: item.itemStatus || "active",
+      itemType: item.itemType || "stocked_item",
+      barcode: item.barcode || "",
+      manufacturerPartNumber: item.manufacturerPartNumber || "",
+      internalReference: item.internalReference || "",
+      supplierPartNumber: item.supplierPartNumber || "",
+      brand: item.brand || "",
+      model: item.model || "",
       category: item.category,
       unit: item.unit,
+      currentStock: item.currentStock || "",
       reorderPoint: item.reorderPoint || "",
       unitCost: item.unitCost ? (item.unitCost / 100).toFixed(2) : "",
     });
@@ -182,7 +232,7 @@ export default function Inventory() {
     }
     acc[stock.itemId!].total += parseFloat(stock.quantity || "0");
     acc[stock.itemId!].locations.push({
-      locationName: stock.locationName,
+      locationName: stock.locationName || "Unknown",
       quantity: parseFloat(stock.quantity || "0"),
     });
     return acc;
@@ -269,10 +319,12 @@ export default function Inventory() {
                   <TableRow>
                     <TableHead>Item Number</TableHead>
                     <TableHead>Name</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Category</TableHead>
-                    <TableHead>Unit</TableHead>
+                    <TableHead>Barcode</TableHead>
+                    <TableHead>Brand</TableHead>
                     <TableHead>Total Stock</TableHead>
-                    <TableHead>Reorder Point</TableHead>
                     <TableHead>Unit Cost</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -286,19 +338,50 @@ export default function Inventory() {
                     return (
                       <TableRow key={item.id} className={isLowStock ? "bg-orange-50" : ""}>
                         <TableCell className="font-medium">{item.itemNumber}</TableCell>
-                        <TableCell>{item.name}</TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{item.name}</p>
+                            {item.longDescription && (
+                              <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                {item.longDescription}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={
+                              item.itemStatus === "active"
+                                ? "bg-green-100 text-green-800"
+                                : item.itemStatus === "inactive"
+                                ? "bg-gray-100 text-gray-800"
+                                : item.itemStatus === "discontinued"
+                                ? "bg-orange-100 text-orange-800"
+                                : "bg-red-100 text-red-800"
+                            }
+                          >
+                            {item.itemStatus || "active"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-muted-foreground">
+                            {item.itemType?.replace("_", " ") || "stocked item"}
+                          </span>
+                        </TableCell>
                         <TableCell>
                           <Badge className={getCategoryBadge(item.category)}>
                             {item.category.replace("_", " ")}
                           </Badge>
                         </TableCell>
-                        <TableCell>{item.unit}</TableCell>
+                        <TableCell>
+                          <span className="text-sm font-mono">{item.barcode || "-"}</span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm">{item.brand || "-"}</span>
+                        </TableCell>
                         <TableCell>
                           {stock.total.toFixed(2)} {item.unit}
                           {isLowStock && <AlertTriangle className="inline h-4 w-4 ml-2 text-orange-500" />}
-                        </TableCell>
-                        <TableCell>
-                          {reorderPoint > 0 ? `${reorderPoint.toFixed(2)} ${item.unit}` : "-"}
                         </TableCell>
                         <TableCell>
                           {item.unitCost ? `R${(item.unitCost / 100).toFixed(2)}` : "-"}
@@ -419,71 +502,213 @@ export default function Inventory() {
               {editingItem ? "Update item details" : "Add a new item to your inventory catalog"}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="itemNumber">Item Number</Label>
-              <Input
-                id="itemNumber"
-                value={itemForm.itemNumber}
-                onChange={(e) => setItemForm({ ...itemForm, itemNumber: e.target.value })}
-                disabled={!!editingItem}
-                placeholder="FEED-001"
-              />
+          <div className="max-h-[70vh] overflow-y-auto space-y-6">
+            {/* Basic Information */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 text-muted-foreground">Basic Information</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="itemNumber">Item Number (SKU) *</Label>
+                  <Input
+                    id="itemNumber"
+                    value={itemForm.itemNumber}
+                    onChange={(e) => setItemForm({ ...itemForm, itemNumber: e.target.value })}
+                    disabled={!!editingItem}
+                    placeholder="FEED-001"
+                    title={editingItem ? "Item number cannot be changed after creation" : ""}
+                  />
+                  {editingItem && <p className="text-xs text-muted-foreground">SKU is immutable</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="name">Name *</Label>
+                  <Input
+                    id="name"
+                    value={itemForm.name}
+                    onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
+                    placeholder="Starter Feed Premium"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <Label htmlFor="longDescription">Long Description</Label>
+                  <textarea
+                    id="longDescription"
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={itemForm.longDescription}
+                    onChange={(e) => setItemForm({ ...itemForm, longDescription: e.target.value })}
+                    placeholder="Detailed description of the item..."
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={itemForm.name}
-                onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
-                placeholder="Starter Feed Premium"
-              />
+
+            {/* Item Classification */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 text-muted-foreground">Classification</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="itemStatus">Item Status</Label>
+                  <Select value={itemForm.itemStatus} onValueChange={(value: any) => setItemForm({ ...itemForm, itemStatus: value })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                      <SelectItem value="discontinued">Discontinued</SelectItem>
+                      <SelectItem value="obsolete">Obsolete</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="itemType">Item Type</Label>
+                  <Select value={itemForm.itemType} onValueChange={(value: any) => setItemForm({ ...itemForm, itemType: value })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="stocked_item">Stocked Item</SelectItem>
+                      <SelectItem value="non_stocked">Non-Stocked</SelectItem>
+                      <SelectItem value="service">Service</SelectItem>
+                      <SelectItem value="raw_material">Raw Material</SelectItem>
+                      <SelectItem value="finished_good">Finished Good</SelectItem>
+                      <SelectItem value="consumable">Consumable</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="category">Category *</Label>
+                  <Select value={itemForm.category} onValueChange={(value: any) => setItemForm({ ...itemForm, category: value })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="feed">Feed</SelectItem>
+                      <SelectItem value="raw_materials">Raw Materials</SelectItem>
+                      <SelectItem value="supplies">Supplies</SelectItem>
+                      <SelectItem value="equipment">Equipment</SelectItem>
+                      <SelectItem value="live_birds">Live Birds</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="unit">Unit *</Label>
+                  <Input
+                    id="unit"
+                    value={itemForm.unit}
+                    onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })}
+                    placeholder="kg, bags, liters"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select value={itemForm.category} onValueChange={(value: any) => setItemForm({ ...itemForm, category: value })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="feed">Feed</SelectItem>
-                  <SelectItem value="raw_materials">Raw Materials</SelectItem>
-                  <SelectItem value="supplies">Supplies</SelectItem>
-                  <SelectItem value="equipment">Equipment</SelectItem>
-                  <SelectItem value="live_birds">Live Birds</SelectItem>
-                </SelectContent>
-              </Select>
+
+            {/* External Identifiers */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 text-muted-foreground">External Identifiers</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="barcode">Barcode</Label>
+                  <Input
+                    id="barcode"
+                    value={itemForm.barcode}
+                    onChange={(e) => setItemForm({ ...itemForm, barcode: e.target.value })}
+                    placeholder="Scan or enter barcode"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manufacturerPartNumber">Manufacturer Part Number</Label>
+                  <Input
+                    id="manufacturerPartNumber"
+                    value={itemForm.manufacturerPartNumber}
+                    onChange={(e) => setItemForm({ ...itemForm, manufacturerPartNumber: e.target.value })}
+                    placeholder="MPN-12345"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="supplierPartNumber">Supplier Part Number</Label>
+                  <Input
+                    id="supplierPartNumber"
+                    value={itemForm.supplierPartNumber}
+                    onChange={(e) => setItemForm({ ...itemForm, supplierPartNumber: e.target.value })}
+                    placeholder="SPN-67890"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="internalReference">Internal Reference</Label>
+                  <Input
+                    id="internalReference"
+                    value={itemForm.internalReference}
+                    onChange={(e) => setItemForm({ ...itemForm, internalReference: e.target.value })}
+                    placeholder="Internal code"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="unit">Unit</Label>
-              <Input
-                id="unit"
-                value={itemForm.unit}
-                onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })}
-                placeholder="kg, bags, liters"
-              />
+
+            {/* Product Details */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 text-muted-foreground">Product Details</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="brand">Brand</Label>
+                  <Input
+                    id="brand"
+                    value={itemForm.brand}
+                    onChange={(e) => setItemForm({ ...itemForm, brand: e.target.value })}
+                    placeholder="AFGRO, Epol, etc."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="model">Model</Label>
+                  <Input
+                    id="model"
+                    value={itemForm.model}
+                    onChange={(e) => setItemForm({ ...itemForm, model: e.target.value })}
+                    placeholder="Model number or name"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="reorderPoint">Reorder Point (optional)</Label>
-              <Input
-                id="reorderPoint"
-                type="number"
-                step="0.01"
-                value={itemForm.reorderPoint}
-                onChange={(e) => setItemForm({ ...itemForm, reorderPoint: e.target.value })}
-                placeholder="100"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="unitCost">Unit Cost (R, optional)</Label>
-              <Input
-                id="unitCost"
-                type="number"
-                step="0.01"
-                value={itemForm.unitCost}
-                onChange={(e) => setItemForm({ ...itemForm, unitCost: e.target.value })}
-                placeholder="25.50"
-              />
+
+            {/* Inventory Management */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 text-muted-foreground">Inventory Management</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="currentStock">Current Stock *</Label>
+                  <Input
+                    id="currentStock"
+                    type="number"
+                    step="0.01"
+                    value={itemForm.currentStock}
+                    onChange={(e) => setItemForm({ ...itemForm, currentStock: e.target.value })}
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-muted-foreground">Quantity on hand</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="reorderPoint">Reorder Point</Label>
+                  <Input
+                    id="reorderPoint"
+                    type="number"
+                    step="0.01"
+                    value={itemForm.reorderPoint}
+                    onChange={(e) => setItemForm({ ...itemForm, reorderPoint: e.target.value })}
+                    placeholder="100"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="unitCost">Unit Cost (R)</Label>
+                  <Input
+                    id="unitCost"
+                    type="number"
+                    step="0.01"
+                    value={itemForm.unitCost}
+                    onChange={(e) => setItemForm({ ...itemForm, unitCost: e.target.value })}
+                    placeholder="25.50"
+                  />
+                </div>
+              </div>
             </div>
           </div>
           <DialogFooter>

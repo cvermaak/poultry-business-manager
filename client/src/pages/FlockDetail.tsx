@@ -1,6 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -10,17 +11,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
-import { Activity, Calendar, TrendingUp, AlertCircle, Plus, ArrowLeft, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Activity, Calendar, TrendingUp, AlertCircle, Plus, ArrowLeft, RefreshCw, Pencil, Trash2, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { formatWeight, getWeightValue, getUnitLabel } from "@/lib/weightUtils";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
   const [, params] = useRoute("/flocks/:id");
   const [, setLocation] = useLocation();
   const flockId = params?.id ? parseInt(params.id) : 0;
+  
+  // Get tab from URL query parameter
+  const urlParams = new URLSearchParams(window.location.search);
+  const tabParam = urlParams.get('tab');
+  const [activeTab, setActiveTab] = useState(tabParam || "daily");
+  
+  // Collapsible state for reminder templates
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   
   const { user } = useAuth();
   const utils = trpc.useUtils();
@@ -44,6 +54,7 @@ export default function FlockDetail() {
   const { data: allTemplates } = trpc.reminderTemplates.list.useQuery();
   const { data: appliedTemplates } = trpc.reminderTemplates.getAppliedTemplates.useQuery({ flockId });
   const { data: statusHistory } = trpc.flocks.getStatusHistory.useQuery({ flockId });
+  const { data: activityLogs } = trpc.flocks.getActivityLogs.useQuery({ flockId });
   const { data: harvests } = trpc.harvest.getByFlock.useQuery({ flockId });
   const addTemplate = trpc.reminderTemplates.addToFlock.useMutation();
   const removeTemplate = trpc.reminderTemplates.removeFromFlock.useMutation();
@@ -154,6 +165,25 @@ export default function FlockDetail() {
     },
   });
 
+  // Create manual reminder mutation
+  const createManualReminder = trpc.reminders.create.useMutation({
+    onSuccess: () => {
+      utils.reminders.list.invalidate({ flockId });
+      toast.success("Reminder created successfully");
+      setManualReminderDialogOpen(false);
+      setManualReminderForm({
+        reminderType: "routine_task",
+        title: "",
+        description: "",
+        dueDate: format(new Date(), "yyyy-MM-dd"),
+        priority: "medium",
+      });
+    },
+    onError: (error) => {
+      toast.error(`Failed to create reminder: ${error.message}`);
+    },
+  });
+
   // Dialog states
   const [dailyRecordDialogOpen, setDailyRecordDialogOpen] = useState(false);
   const [editDailyRecordDialogOpen, setEditDailyRecordDialogOpen] = useState(false);
@@ -166,6 +196,8 @@ export default function FlockDetail() {
   const [stressPackUpdateDialog, setStressPackUpdateDialog] = useState<{ open: boolean; scheduleId: number | null }>({ open: false, scheduleId: null });
   const [reminderActionDialog, setReminderActionDialog] = useState<{ open: boolean; reminderId: number | null; action: "complete" | "dismiss" | null }>({ open: false, reminderId: null, action: null });
   const [reminderActionNotes, setReminderActionNotes] = useState("");
+  const [manualReminderDialogOpen, setManualReminderDialogOpen] = useState(false);
+  const [activityLogFilter, setActivityLogFilter] = useState<string>("all");
 
   // Form states for daily record
   const [dailyRecordForm, setDailyRecordForm] = useState({
@@ -217,6 +249,15 @@ export default function FlockDetail() {
     status: "active" as "scheduled" | "active" | "completed" | "cancelled",
     quantityUsed: "",
     notes: "",
+  });
+
+  // Form states for manual reminder creation
+  const [manualReminderForm, setManualReminderForm] = useState({
+    reminderType: "routine_task" as "vaccination" | "feed_transition" | "house_preparation" | "environmental_check" | "routine_task" | "milestone" | "biosecurity" | "performance_alert" | "house_light_timing",
+    title: "",
+    description: "",
+    dueDate: format(new Date(), "yyyy-MM-dd"),
+    priority: "medium" as "urgent" | "high" | "medium" | "low",
   });
 
   const resetDailyRecordForm = () => {
@@ -560,6 +601,94 @@ export default function FlockDetail() {
         </Card>
       </div>
 
+      {/* Active Feed Phase Indicator */}
+      {(() => {
+        const currentDay = performanceMetrics?.ageInDays || 0;
+        let activeFeedPhase: 'starter' | 'grower' | 'finisher' | null = null;
+        let activeFeedType: string | null = null;
+        
+        // Determine active feed phase based on current day
+        if (flock.starterFromDay !== null && flock.starterToDay !== null && 
+            currentDay >= flock.starterFromDay && currentDay <= flock.starterToDay) {
+          activeFeedPhase = 'starter';
+          activeFeedType = flock.starterFeedType;
+        } else if (flock.growerFromDay !== null && flock.growerToDay !== null && 
+                   currentDay >= flock.growerFromDay && currentDay <= flock.growerToDay) {
+          activeFeedPhase = 'grower';
+          activeFeedType = flock.growerFeedType;
+        } else if (flock.finisherFromDay !== null && flock.finisherToDay !== null && 
+                   currentDay >= flock.finisherFromDay && currentDay <= flock.finisherToDay) {
+          activeFeedPhase = 'finisher';
+          activeFeedType = flock.finisherFeedType;
+        }
+        
+        if (activeFeedPhase && activeFeedType) {
+          const phaseColors = {
+            starter: 'border-[rgb(242,195,0)] bg-[rgb(242,195,0)]/10',
+            grower: 'border-[rgb(46,125,50)] bg-[rgb(46,125,50)]/10',
+            finisher: 'border-[rgb(227,100,20)] bg-[rgb(227,100,20)]/10'
+          };
+          
+          const phaseIcons = {
+            starter: 'https://files.manuscdn.com/user_upload_by_module/session_file/310419663029451273/sJTLzPoUUvNmzXRW.png',
+            grower: 'https://files.manuscdn.com/user_upload_by_module/session_file/310419663029451273/pqctXWATiQBxxzeQ.png',
+            finisher: 'https://files.manuscdn.com/user_upload_by_module/session_file/310419663029451273/vZxdaFhchlZXJGgS.png'
+          };
+          
+          return (
+            <Card className={`mb-4 ${phaseColors[activeFeedPhase]}`}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg flex items-center gap-3">
+                  <img src={phaseIcons[activeFeedPhase]} alt={`${activeFeedPhase} phase`} className="h-12 w-auto" />
+                  <span className="flex items-center">Active Feed Phase: {activeFeedPhase.charAt(0).toUpperCase() + activeFeedPhase.slice(1)}</span>
+                </CardTitle>
+                <CardDescription>
+                  Currently feeding {activeFeedType?.charAt(0).toUpperCase() + activeFeedType?.slice(1)} quality feed
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div className={`p-2 rounded ${activeFeedPhase === 'starter' ? 'bg-white dark:bg-gray-800 font-semibold' : 'opacity-60'}`}>
+                    <div className="text-xs text-muted-foreground">Starter</div>
+                    <div className="font-medium">
+                      {flock.starterFromDay !== null && flock.starterToDay !== null 
+                        ? `Day ${flock.starterFromDay}-${flock.starterToDay}`
+                        : 'Not set'}
+                    </div>
+                    {flock.starterFeedType && (
+                      <div className="text-xs capitalize">{flock.starterFeedType}</div>
+                    )}
+                  </div>
+                  <div className={`p-2 rounded ${activeFeedPhase === 'grower' ? 'bg-white dark:bg-gray-800 font-semibold' : 'opacity-60'}`}>
+                    <div className="text-xs text-muted-foreground">Grower</div>
+                    <div className="font-medium">
+                      {flock.growerFromDay !== null && flock.growerToDay !== null 
+                        ? `Day ${flock.growerFromDay}-${flock.growerToDay}`
+                        : 'Not set'}
+                    </div>
+                    {flock.growerFeedType && (
+                      <div className="text-xs capitalize">{flock.growerFeedType}</div>
+                    )}
+                  </div>
+                  <div className={`p-2 rounded ${activeFeedPhase === 'finisher' ? 'bg-white dark:bg-gray-800 font-semibold' : 'opacity-60'}`}>
+                    <div className="text-xs text-muted-foreground">Finisher</div>
+                    <div className="font-medium">
+                      {flock.finisherFromDay !== null && flock.finisherToDay !== null 
+                        ? `Day ${flock.finisherFromDay}-${flock.finisherToDay}`
+                        : 'Not set'}
+                    </div>
+                    {flock.finisherFeedType && (
+                      <div className="text-xs capitalize">{flock.finisherFeedType}</div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        }
+        return null;
+      })()}
+
       {/* Ready for Harvest Indicator */}
       {(() => {
         const latestRecord = dailyRecords?.[dailyRecords.length - 1];
@@ -614,11 +743,11 @@ export default function FlockDetail() {
                   <div className="grid gap-4 md:grid-cols-3">
                     <div>
                       <p className="text-sm text-muted-foreground">Current Weight</p>
-                      <p className="text-2xl font-bold">{currentWeight.toFixed(3)} kg</p>
+                      <p className="text-2xl font-bold">{formatWeight(currentWeight, flock?.weightUnit)}</p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Target Catching Weight</p>
-                      <p className="text-2xl font-bold">{targetCatchingWeight.toFixed(3)} kg</p>
+                      <p className="text-2xl font-bold">{formatWeight(targetCatchingWeight, flock?.weightUnit)}</p>
                       <p className="text-xs text-muted-foreground">Includes 5.5% shrinkage buffer</p>
                     </div>
                     <div>
@@ -645,7 +774,7 @@ export default function FlockDetail() {
       })()}
 
       {/* Tabbed Content */}
-      <Tabs defaultValue="daily" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="daily">Daily Records</TabsTrigger>
           <TabsTrigger value="growth">Growth Performance</TabsTrigger>
@@ -654,7 +783,7 @@ export default function FlockDetail() {
           <TabsTrigger value="stress-packs">Stress Packs</TabsTrigger>
           <TabsTrigger value="harvests">Harvest Records</TabsTrigger>
           <TabsTrigger value="reminders">Reminders</TabsTrigger>
-          <TabsTrigger value="status-history">Status History</TabsTrigger>
+          <TabsTrigger value="status-history">Activity Log</TabsTrigger>
         </TabsList>
 
         {/* Daily Records Tab */}
@@ -694,7 +823,7 @@ export default function FlockDetail() {
               <CardContent>
                 <div className="text-2xl font-bold">
                   {performanceMetrics?.averageWeight && performanceMetrics.averageWeight > 0
-                    ? `${performanceMetrics.averageWeight.toFixed(3)} kg`
+                    ? formatWeight(performanceMetrics.averageWeight, flock?.weightUnit)
                     : "No data"}
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -716,6 +845,221 @@ export default function FlockDetail() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Enhanced Consumption Metrics */}
+          {dailyRecords && dailyRecords.length > 0 && (() => {
+            // Prepare data for consumption charts
+            const consumptionData = dailyRecords
+              .filter(r => r.feedConsumed || r.waterConsumed)
+              .map(r => {
+                const birdCount = flock.currentCount || 1;
+                const feedKg = r.feedConsumed ? parseFloat(r.feedConsumed.toString()) : 0;
+                const waterL = r.waterConsumed ? parseFloat(r.waterConsumed.toString()) : 0;
+                
+                return {
+                  day: r.dayNumber,
+                  date: new Date(r.recordDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                  feedPerBird: (feedKg / birdCount * 1000), // grams per bird
+                  waterPerBird: (waterL / birdCount * 1000), // ml per bird
+                  feedTotal: feedKg,
+                  waterTotal: waterL,
+                  ratio: waterL > 0 && feedKg > 0 ? (waterL / feedKg).toFixed(2) : null
+                };
+              });
+            
+            // Calculate averages
+            const avgFeedPerBird = consumptionData.length > 0 
+              ? consumptionData.reduce((sum, d) => sum + d.feedPerBird, 0) / consumptionData.length 
+              : 0;
+            const avgWaterPerBird = consumptionData.length > 0 
+              ? consumptionData.reduce((sum, d) => sum + d.waterPerBird, 0) / consumptionData.length 
+              : 0;
+            const avgRatio = consumptionData.filter(d => d.ratio !== null).length > 0
+              ? consumptionData.filter(d => d.ratio !== null).reduce((sum, d) => sum + parseFloat(d.ratio!), 0) / consumptionData.filter(d => d.ratio !== null).length
+              : 0;
+            
+            const totalWater = dailyRecords.reduce((sum, r) => sum + (r.waterConsumed ? parseFloat(r.waterConsumed.toString()) : 0), 0);
+            
+            // Detect consumption anomalies
+            const alerts = [];
+            
+            // Check Feed:Water ratio
+            if (avgRatio > 0 && (avgRatio < 1.8 || avgRatio > 2.2)) {
+              alerts.push({
+                type: 'ratio',
+                severity: avgRatio < 1.5 || avgRatio > 2.5 ? 'high' : 'medium',
+                title: 'Abnormal Feed:Water Ratio',
+                message: `Current ratio is 1:${avgRatio.toFixed(1)}. Optimal range is 1:1.8 to 1:2.2. ${avgRatio < 1.8 ? 'Birds may be drinking too little water.' : 'Birds may be drinking excessive water, which could indicate heat stress or disease.'}`,
+              });
+            }
+            
+            // Check for sudden changes in consumption (compare last 3 days to previous average)
+            if (consumptionData.length >= 5) {
+              const recentData = consumptionData.slice(-3);
+              const previousData = consumptionData.slice(0, -3);
+              
+              const recentAvgFeed = recentData.reduce((sum, d) => sum + d.feedPerBird, 0) / recentData.length;
+              const previousAvgFeed = previousData.reduce((sum, d) => sum + d.feedPerBird, 0) / previousData.length;
+              const feedChange = ((recentAvgFeed - previousAvgFeed) / previousAvgFeed) * 100;
+              
+              if (Math.abs(feedChange) > 20) {
+                alerts.push({
+                  type: 'feed',
+                  severity: Math.abs(feedChange) > 30 ? 'high' : 'medium',
+                  title: feedChange > 0 ? 'Sudden Increase in Feed Consumption' : 'Sudden Decrease in Feed Consumption',
+                  message: `Feed consumption has ${feedChange > 0 ? 'increased' : 'decreased'} by ${Math.abs(feedChange).toFixed(1)}% in the last 3 days. ${feedChange < 0 ? 'This could indicate illness, heat stress, or feed quality issues.' : 'Monitor for signs of cold stress or increased activity.'}`,
+                });
+              }
+              
+              const recentAvgWater = recentData.reduce((sum, d) => sum + d.waterPerBird, 0) / recentData.length;
+              const previousAvgWater = previousData.reduce((sum, d) => sum + d.waterPerBird, 0) / previousData.length;
+              const waterChange = ((recentAvgWater - previousAvgWater) / previousAvgWater) * 100;
+              
+              if (Math.abs(waterChange) > 25) {
+                alerts.push({
+                  type: 'water',
+                  severity: Math.abs(waterChange) > 40 ? 'high' : 'medium',
+                  title: waterChange > 0 ? 'Sudden Increase in Water Consumption' : 'Sudden Decrease in Water Consumption',
+                  message: `Water consumption has ${waterChange > 0 ? 'increased' : 'decreased'} by ${Math.abs(waterChange).toFixed(1)}% in the last 3 days. ${waterChange > 0 ? 'Check for heat stress, disease, or water system leaks.' : 'Check water system for blockages or freezing.'}`,
+                });
+              }
+            }
+            
+            return (
+              <div className="space-y-4 mt-4">
+                {/* Consumption Alerts */}
+                {alerts.length > 0 && (
+                  <Card className="border-orange-500 bg-orange-50 dark:bg-orange-950">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
+                        <AlertCircle className="h-5 w-5" />
+                        Consumption Alerts ({alerts.length})
+                      </CardTitle>
+                      <CardDescription>Abnormal patterns detected in feed or water consumption</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {alerts.map((alert, idx) => (
+                        <div key={idx} className={`p-3 rounded-lg ${
+                          alert.severity === 'high' 
+                            ? 'bg-red-100 dark:bg-red-950 border border-red-300 dark:border-red-700' 
+                            : 'bg-yellow-100 dark:bg-yellow-950 border border-yellow-300 dark:border-yellow-700'
+                        }`}>
+                          <div className="flex items-start gap-2">
+                            <AlertCircle className={`h-4 w-4 mt-0.5 ${
+                              alert.severity === 'high' ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'
+                            }`} />
+                            <div className="flex-1">
+                              <p className={`font-semibold text-sm ${
+                                alert.severity === 'high' ? 'text-red-800 dark:text-red-200' : 'text-yellow-800 dark:text-yellow-200'
+                              }`}>
+                                {alert.title}
+                              </p>
+                              <p className={`text-sm mt-1 ${
+                                alert.severity === 'high' ? 'text-red-700 dark:text-red-300' : 'text-yellow-700 dark:text-yellow-300'
+                              }`}>
+                                {alert.message}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+                
+                {/* Consumption Trends Chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Feed & Water Consumption Trends</CardTitle>
+                    <CardDescription>Daily consumption per bird over time</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={consumptionData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="date" 
+                            tick={{ fontSize: 12 }}
+                          />
+                          <YAxis 
+                            yAxisId="left"
+                            label={{ value: 'Feed (g/bird)', angle: -90, position: 'insideLeft' }}
+                          />
+                          <YAxis 
+                            yAxisId="right"
+                            orientation="right"
+                            label={{ value: 'Water (ml/bird)', angle: 90, position: 'insideRight' }}
+                          />
+                          <Tooltip />
+                          <Legend />
+                          <Line 
+                            yAxisId="left"
+                            type="monotone" 
+                            dataKey="feedPerBird" 
+                            stroke="#f59e0b" 
+                            name="Feed (g/bird)"
+                            strokeWidth={2}
+                          />
+                          <Line 
+                            yAxisId="right"
+                            type="monotone" 
+                            dataKey="waterPerBird" 
+                            stroke="#3b82f6" 
+                            name="Water (ml/bird)"
+                            strokeWidth={2}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Additional Metrics Cards */}
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Avg Feed/Bird/Day</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{avgFeedPerBird.toFixed(1)}g</div>
+                      <p className="text-xs text-muted-foreground">
+                        Total: {dailyRecords.reduce((sum, r) => sum + (r.feedConsumed ? parseFloat(r.feedConsumed.toString()) : 0), 0).toFixed(1)} kg
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Avg Water/Bird/Day</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{avgWaterPerBird.toFixed(1)}ml</div>
+                      <p className="text-xs text-muted-foreground">
+                        Total: {totalWater.toFixed(1)} L
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium">Feed:Water Ratio</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">
+                        {avgRatio > 0 ? `1:${avgRatio.toFixed(1)}` : "N/A"}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {avgRatio >= 1.8 && avgRatio <= 2.2 
+                          ? "✓ Optimal range" 
+                          : avgRatio > 0 
+                          ? "⚠ Outside optimal (1.8-2.2)" 
+                          : "Record data to calculate"}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Add Record Button and Dialog */}
           <Card>
@@ -1192,7 +1536,7 @@ export default function FlockDetail() {
                   Current deviation from target: {performanceDeviation.toFixed(1)}%
                   {latestActual && latestActual.actualWeight && (
                     <span className="ml-2">
-                      (Day {latestActual.day}: {latestActual.actualWeight.toFixed(3)}kg actual vs {targetGrowthCurve?.find(t => t.day === latestActual.day)?.targetWeight.toFixed(3)}kg target)
+                      (Day {latestActual.day}: {formatWeight(latestActual.actualWeight, flock?.weightUnit)} actual vs {formatWeight(targetGrowthCurve?.find(t => t.day === latestActual.day)?.targetWeight, flock?.weightUnit)} target)
                     </span>
                   )}
                 </CardDescription>
@@ -1232,7 +1576,7 @@ export default function FlockDetail() {
                   <CardTitle className="text-sm font-medium">Projected Weight</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{advancedGrowthMetrics.projectedFinalWeight.toFixed(3)}kg</div>
+                  <div className="text-2xl font-bold">{formatWeight(advancedGrowthMetrics.projectedFinalWeight, flock?.weightUnit)}</div>
                   <p className="text-xs text-muted-foreground">At day {flock?.growingPeriod || 42}</p>
                 </CardContent>
               </Card>
@@ -1325,9 +1669,9 @@ export default function FlockDetail() {
                     <Tooltip 
                       formatter={(value: any, name: string) => {
                         if (name === "Actual Weight" || name === "Target Weight") {
-                          return value ? `${parseFloat(value).toFixed(3)} kg` : 'No data';
+                          return value ? formatWeight(parseFloat(value), flock?.weightUnit) : 'No data';
                         }
-                        return value ? `${parseFloat(value).toFixed(2)} kg` : 'No data';
+                        return value ? formatWeight(parseFloat(value), flock?.weightUnit, 2) : 'No data';
                       }}
                     />
                                {/* Target weight line (dashed) */}
@@ -1413,7 +1757,7 @@ export default function FlockDetail() {
                   <p className="font-medium text-green-900 dark:text-green-100">📅 Projected Ready Date:</p>
                   <p className="mt-1 text-muted-foreground">
                     Based on current growth rate ({advancedGrowthMetrics?.avgDailyGain}g/day), 
-                    birds are projected to reach target weight ({finalTargetCatchingWeight.toFixed(3)} kg) 
+                    birds are projected to reach target weight ({formatWeight(finalTargetCatchingWeight, flock?.weightUnit)}) 
                     on <span className="font-semibold text-foreground">Day {projectedCatchDay}</span>
                     {projectedCatchDay !== growingPeriod && (
                       <span className="ml-1">
@@ -1429,8 +1773,8 @@ export default function FlockDetail() {
                 <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-950 rounded-md text-sm">
                   <p className="font-medium">Weight Planning:</p>
                   <p className="mt-1 text-muted-foreground">
-                    Farm target weight ({finalTargetCatchingWeight.toFixed(3)} kg) includes a 5.5% shrinkage buffer 
-                    to ensure delivered weight ({parseFloat(flock.targetDeliveredWeight.toString()).toFixed(3)} kg) meets contract requirements 
+                    Farm target weight ({formatWeight(finalTargetCatchingWeight, flock?.weightUnit)}) includes a 5.5% shrinkage buffer 
+                    to ensure delivered weight ({formatWeight(parseFloat(flock.targetDeliveredWeight.toString()), flock?.weightUnit)}) meets contract requirements 
                     after feed withdrawal, catching stress, and transport losses.
                   </p>
                 </div>
@@ -1759,7 +2103,7 @@ export default function FlockDetail() {
                     {stressPackSchedules.map((schedule: any) => (
                       <TableRow key={schedule.id}>
                         <TableCell className="font-medium">
-                          Stress Pack #{schedule.stressPackId}
+                          {schedule.stressPack?.name || `Stress Pack #${schedule.stressPackId}`}
                         </TableCell>
                         <TableCell>Day {schedule.startDay}</TableCell>
                         <TableCell>Day {schedule.endDay}</TableCell>
@@ -1814,13 +2158,143 @@ export default function FlockDetail() {
 
         {/* Reminders Tab */}
         <TabsContent value="reminders" className="space-y-4">
-          {/* Manage Templates Section */}
+          {/* Create Manual Reminder Section */}
           <Card>
-            <CardHeader>
-              <CardTitle>Manage Reminder Templates</CardTitle>
-              <CardDescription>Add or remove reminder templates for this flock</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Manual Reminders</CardTitle>
+                <CardDescription>Create custom reminders for this flock</CardDescription>
+              </div>
+              <Dialog open={manualReminderDialogOpen} onOpenChange={setManualReminderDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Reminder
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Create Manual Reminder</DialogTitle>
+                    <DialogDescription>
+                      Add a custom reminder for {flock?.flockNumber}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="reminderType">Reminder Type</Label>
+                        <select
+                          id="reminderType"
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={manualReminderForm.reminderType}
+                          onChange={(e) => setManualReminderForm({ ...manualReminderForm, reminderType: e.target.value as any })}
+                        >
+                          <option value="routine_task">Routine Task</option>
+                          <option value="vaccination">Vaccination</option>
+                          <option value="feed_transition">Feed Transition</option>
+                          <option value="house_preparation">House Preparation</option>
+                          <option value="environmental_check">Environmental Check</option>
+                          <option value="milestone">Milestone</option>
+                          <option value="biosecurity">Biosecurity</option>
+                          <option value="performance_alert">Performance Alert</option>
+                          <option value="house_light_timing">House Light Timing</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="priority">Priority</Label>
+                        <select
+                          id="priority"
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={manualReminderForm.priority}
+                          onChange={(e) => setManualReminderForm({ ...manualReminderForm, priority: e.target.value as any })}
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="urgent">Urgent</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="title">Title</Label>
+                      <Input
+                        id="title"
+                        placeholder="e.g., Check water pressure"
+                        value={manualReminderForm.title}
+                        onChange={(e) => setManualReminderForm({ ...manualReminderForm, title: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Description (Optional)</Label>
+                      <textarea
+                        id="description"
+                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="Additional details about this reminder..."
+                        value={manualReminderForm.description}
+                        onChange={(e) => setManualReminderForm({ ...manualReminderForm, description: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dueDate">Due Date</Label>
+                      <Input
+                        id="dueDate"
+                        type="date"
+                        value={manualReminderForm.dueDate}
+                        onChange={(e) => setManualReminderForm({ ...manualReminderForm, dueDate: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setManualReminderDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (!manualReminderForm.title.trim()) {
+                          toast.error("Please enter a title for the reminder");
+                          return;
+                        }
+                        createManualReminder.mutate({
+                          flockId,
+                          houseId: flock.houseId,
+                          reminderType: manualReminderForm.reminderType,
+                          title: manualReminderForm.title,
+                          description: manualReminderForm.description || undefined,
+                          dueDate: new Date(manualReminderForm.dueDate),
+                          priority: manualReminderForm.priority,
+                        });
+                      }}
+                      disabled={createManualReminder.isPending}
+                    >
+                      {createManualReminder.isPending ? "Creating..." : "Create Reminder"}
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </CardHeader>
-            <CardContent>
+          </Card>
+
+          {/* Manage Templates Section */}
+          <Collapsible open={templatesOpen} onOpenChange={setTemplatesOpen}>
+            <Card>
+              <CollapsibleTrigger asChild>
+                <CardHeader className="cursor-pointer hover:bg-accent/50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        Manage Reminder Templates
+                        <Badge variant="secondary" className="text-xs">
+                          {allTemplates?.length || 0} available
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription>Add or remove reminder templates for this flock</CardDescription>
+                    </div>
+                    <ChevronDown className={`h-5 w-5 transition-transform ${templatesOpen ? 'rotate-180' : ''}`} />
+                  </div>
+                </CardHeader>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent>
               {allTemplates && appliedTemplates ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {allTemplates.map((template: any) => {
@@ -1876,11 +2350,13 @@ export default function FlockDetail() {
                     );
                   })}
                 </div>
-              ) : (
-                <p className="text-muted-foreground">Loading templates...</p>
-              )}
-            </CardContent>
-          </Card>
+                ) : (
+                  <p className="text-muted-foreground">Loading templates...</p>
+                )}
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
 
           {/* Active Reminders Section */}
           <Card>
@@ -2002,7 +2478,7 @@ export default function FlockDetail() {
                       <CardTitle className="text-sm font-medium">Avg Delivered Weight</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold">{avgDeliveredWeight.toFixed(3)} kg</div>
+                      <div className="text-2xl font-bold">{formatWeight(avgDeliveredWeight, flock?.weightUnit)}</div>
                       <p className="text-xs text-muted-foreground">Per bird</p>
                     </CardContent>
                   </Card>
@@ -2043,9 +2519,9 @@ export default function FlockDetail() {
                               <TableCell>{new Date(harvest.harvestDate).toLocaleDateString()}</TableCell>
                               <TableCell>{harvest.destination || "-"}</TableCell>
                               <TableCell className="text-right">{harvest.chickenCountLoaded.toLocaleString()}</TableCell>
-                              <TableCell className="text-right">{parseFloat(harvest.totalLoadedWeightKg.toString()).toFixed(2)} kg</TableCell>
+                              <TableCell className="text-right">{formatWeight(parseFloat(harvest.totalLoadedWeightKg.toString()), flock?.weightUnit, 2)}</TableCell>
                               <TableCell className="text-right">
-                                {harvest.totalDeliveredWeightKg ? `${parseFloat(harvest.totalDeliveredWeightKg.toString()).toFixed(2)} kg` : "-"}
+                                {harvest.totalDeliveredWeightKg ? formatWeight(parseFloat(harvest.totalDeliveredWeightKg.toString()), flock?.weightUnit, 2) : "-"}
                               </TableCell>
                               <TableCell className="text-right">
                                 {harvest.shrinkagePercentage ? `${harvest.shrinkagePercentage}%` : "-"}
@@ -2070,52 +2546,72 @@ export default function FlockDetail() {
           })()}
         </TabsContent>
 
-        {/* Status History Tab */}
+        {/* Activity Log Tab */}
         <TabsContent value="status-history" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Status Change History</CardTitle>
-              <CardDescription>Complete audit trail of all status changes for this flock</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Activity Log</CardTitle>
+                <CardDescription>Complete audit trail of all activities for this flock</CardDescription>
+              </div>
+              <Select value={activityLogFilter} onValueChange={setActivityLogFilter}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Activities</SelectItem>
+                  <SelectItem value="status">Status Changes</SelectItem>
+                  <SelectItem value="health">Health Records</SelectItem>
+                  <SelectItem value="vaccination">Vaccinations</SelectItem>
+                  <SelectItem value="daily">Daily Records</SelectItem>
+                  <SelectItem value="reminder">Reminders</SelectItem>
+                </SelectContent>
+              </Select>
             </CardHeader>
             <CardContent>
-              {statusHistory && statusHistory.length > 0 ? (
-                <div className="space-y-3">
-                  {statusHistory.map((entry, index) => (
-                    <div key={index} className="border rounded-lg p-4 space-y-2">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">Status:</span>
-                            <Badge variant={getStatusColor(entry.status)}>{entry.status}</Badge>
-                          </div>
-                          {entry.changedAt && (
-                            <div className="text-sm text-muted-foreground">
-                              {format(new Date(entry.changedAt), 'MMM d, yyyy \\at h:mm a')}
+              {(() => {
+                const filteredLogs = activityLogFilter === "all" 
+                  ? activityLogs || []
+                  : (activityLogs || []).filter(log => {
+                      if (activityLogFilter === "status") return log.action.includes("status");
+                      if (activityLogFilter === "health") return log.action.includes("health");
+                      if (activityLogFilter === "vaccination") return log.action.includes("vaccination");
+                      if (activityLogFilter === "daily") return log.action.includes("daily_record");
+                      if (activityLogFilter === "reminder") return log.action.includes("reminder");
+                      return true;
+                    });
+
+                return filteredLogs.length > 0 ? (
+                  <div className="space-y-3">
+                    {filteredLogs.map((log: any) => (
+                      <div key={log.id} className="border rounded-lg p-4 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div className="space-y-1 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold capitalize">{log.action.replace(/_/g, ' ')}</span>
                             </div>
+                            <div className="text-sm text-muted-foreground">
+                              {format(new Date(log.createdAt), 'MMM d, yyyy \\at h:mm a')}
+                            </div>
+                            {log.details && (
+                              <div className="text-sm">
+                                {log.details}
+                              </div>
+                            )}
+                          </div>
+                          {log.userName && (
+                            <Badge variant="outline">{log.userName}</Badge>
                           )}
                         </div>
-                        <Badge variant={entry.isManual ? 'default' : 'secondary'}>
-                          {entry.isManual ? 'Manual' : 'Automatic'}
-                        </Badge>
                       </div>
-                      {entry.changedBy && (
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Changed by:</span> {entry.changedBy}
-                        </div>
-                      )}
-                      {entry.reason && (
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Reason:</span> {entry.reason}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center text-muted-foreground py-8">
-                  No status changes recorded yet.
-                </div>
-              )}
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground py-8">
+                    No {activityLogFilter === "all" ? "activities" : activityLogFilter + " activities"} recorded yet.
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>
@@ -2293,6 +2789,143 @@ export default function FlockDetail() {
               disabled={updateStressPackSchedule.isPending}
             >
               {updateStressPackSchedule.isPending ? "Saving..." : "Save Usage"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Health Record Dialog */}
+      <Dialog open={healthRecordDialogOpen} onOpenChange={setHealthRecordDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add Health Record</DialogTitle>
+            <DialogDescription>
+              Record health observations, treatments, or veterinary visits for this flock.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="recordDate">Date</Label>
+                <Input
+                  id="recordDate"
+                  type="date"
+                  value={healthRecordForm.recordDate}
+                  onChange={(e) => setHealthRecordForm({ ...healthRecordForm, recordDate: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="recordType">Record Type</Label>
+                <Select
+                  value={healthRecordForm.recordType}
+                  onValueChange={(value) => setHealthRecordForm({ ...healthRecordForm, recordType: value as any })}
+                >
+                  <SelectTrigger id="recordType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="observation">Observation</SelectItem>
+                    <SelectItem value="treatment">Treatment</SelectItem>
+                    <SelectItem value="veterinary_visit">Veterinary Visit</SelectItem>
+                    <SelectItem value="medication">Medication</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                placeholder="Describe the health issue, observation, or reason for visit..."
+                value={healthRecordForm.description}
+                onChange={(e) => setHealthRecordForm({ ...healthRecordForm, description: e.target.value })}
+                rows={3}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="treatment">Treatment (optional)</Label>
+                <Input
+                  id="treatment"
+                  placeholder="Treatment provided"
+                  value={healthRecordForm.treatment}
+                  onChange={(e) => setHealthRecordForm({ ...healthRecordForm, treatment: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="medication">Medication (optional)</Label>
+                <Input
+                  id="medication"
+                  placeholder="Medication name"
+                  value={healthRecordForm.medication}
+                  onChange={(e) => setHealthRecordForm({ ...healthRecordForm, medication: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="dosage">Dosage (optional)</Label>
+                <Input
+                  id="dosage"
+                  placeholder="e.g., 10ml per bird"
+                  value={healthRecordForm.dosage}
+                  onChange={(e) => setHealthRecordForm({ ...healthRecordForm, dosage: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="veterinarianName">Veterinarian Name (optional)</Label>
+                <Input
+                  id="veterinarianName"
+                  placeholder="Veterinarian name"
+                  value={healthRecordForm.veterinarianName}
+                  onChange={(e) => setHealthRecordForm({ ...healthRecordForm, veterinarianName: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="cost">Cost (R)</Label>
+                <Input
+                  id="cost"
+                  type="number"
+                  step="0.01"
+                  value={healthRecordForm.cost}
+                  onChange={(e) => setHealthRecordForm({ ...healthRecordForm, cost: parseFloat(e.target.value) || 0 })}
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="notes">Additional Notes (optional)</Label>
+              <Textarea
+                id="notes"
+                placeholder="Any additional observations or notes..."
+                value={healthRecordForm.notes}
+                onChange={(e) => setHealthRecordForm({ ...healthRecordForm, notes: e.target.value })}
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHealthRecordDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                createHealthRecord.mutate({
+                  flockId,
+                  eventDate: new Date(healthRecordForm.recordDate),
+                  eventType: healthRecordForm.recordType,
+                  description: healthRecordForm.description,
+                  treatment: healthRecordForm.treatment || undefined,
+                  medication: healthRecordForm.medication || undefined,
+                  dosage: healthRecordForm.dosage || undefined,
+                  veterinarianName: healthRecordForm.veterinarianName || undefined,
+                  cost: healthRecordForm.cost.toString(),
+                  notes: healthRecordForm.notes || undefined,
+                });
+              }}
+              disabled={createHealthRecord.isPending || !healthRecordForm.description}
+            >
+              {createHealthRecord.isPending ? "Saving..." : "Add Record"}
             </Button>
           </DialogFooter>
         </DialogContent>
