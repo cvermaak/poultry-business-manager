@@ -1615,6 +1615,38 @@ export async function getTodayReminders() {
   return results;
 }
 
+export async function listAllRemindersWithFlockInfo() {
+  const db = await getDb();
+  if (!db) return [];
+
+  const results = await db
+    .select({
+      id: reminders.id,
+      flockId: reminders.flockId,
+      houseId: reminders.houseId,
+      reminderType: reminders.reminderType,
+      title: reminders.title,
+      description: reminders.description,
+      dueDate: reminders.dueDate,
+      priority: reminders.priority,
+      status: reminders.status,
+      completedAt: reminders.completedAt,
+      completedBy: reminders.completedBy,
+      templateId: reminders.templateId,
+      actionNotes: reminders.actionNotes,
+      createdAt: reminders.createdAt,
+      updatedAt: reminders.updatedAt,
+      flockNumber: flocks.flockNumber,
+      houseName: houses.name,
+    })
+    .from(reminders)
+    .leftJoin(flocks, eq(reminders.flockId, flocks.id))
+    .leftJoin(houses, eq(reminders.houseId, houses.id))
+    .orderBy(asc(reminders.dueDate));
+
+  return results;
+}
+
 export async function createReminder(data: typeof reminders.$inferInsert) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -2465,85 +2497,6 @@ export async function syncFlockRemindersFromTemplate(flockId: number, templateId
   return { newReminderCount };
 }
 
-export async function getFlockActivityLogs(flockId: number) {
-  const db = await getDb();
-  if (!db) return [];
-  const logs = await db
-    .select({
-      id: userActivityLogs.id,
-      userId: userActivityLogs.userId,
-      action: userActivityLogs.action,
-      entityType: userActivityLogs.entityType,
-      entityId: userActivityLogs.entityId,
-      details: userActivityLogs.details,
-      createdAt: userActivityLogs.createdAt,
-      userName: users.name,
-    })
-    .from(userActivityLogs)
-    .leftJoin(users, eq(userActivityLogs.userId, users.id))
-    .where(
-      and(
-        eq(userActivityLogs.entityType, "flock"),
-        eq(userActivityLogs.entityId, flockId)
-      )
-    )
-    .orderBy(desc(userActivityLogs.createdAt));
-  return logs;
-}
-
-export async function getAllActivityLogs() {
-  const db = await getDb();
-  if (!db) return [];
-  const logs = await db
-    .select({
-      id: userActivityLogs.id,
-      userId: userActivityLogs.userId,
-      action: userActivityLogs.action,
-      entityType: userActivityLogs.entityType,
-      entityId: userActivityLogs.entityId,
-      details: userActivityLogs.details,
-      createdAt: userActivityLogs.createdAt,
-      userName: users.name,
-    })
-    .from(userActivityLogs)
-    .leftJoin(users, eq(userActivityLogs.userId, users.id))
-    .orderBy(desc(userActivityLogs.createdAt))
-    .limit(1000);
-  return logs;
-}
-
-export async function listAllRemindersWithFlockInfo() {
-  const db = await getDb();
-  if (!db) return [];
-
-  const results = await db
-    .select({
-      id: reminders.id,
-      flockId: reminders.flockId,
-      houseId: reminders.houseId,
-      reminderType: reminders.reminderType,
-      title: reminders.title,
-      description: reminders.description,
-      dueDate: reminders.dueDate,
-      priority: reminders.priority,
-      status: reminders.status,
-      completedAt: reminders.completedAt,
-      completedBy: reminders.completedBy,
-      templateId: reminders.templateId,
-      actionNotes: reminders.actionNotes,
-      createdAt: reminders.createdAt,
-      updatedAt: reminders.updatedAt,
-      flockNumber: flocks.flockNumber,
-      houseName: houses.name,
-    })
-    .from(reminders)
-    .leftJoin(flocks, eq(reminders.flockId, flocks.id))
-    .leftJoin(houses, eq(reminders.houseId, houses.id))
-    .orderBy(desc(reminders.dueDate));
-
-  return results;
-}
-
 /**
  * Get all flocks that use a specific template
  */
@@ -2567,4 +2520,55 @@ export async function getFlocksUsingTemplate(templateId: number) {
     .where(inArray(flocks.id, flockIds));
 
   return flockList;
+}
+
+export async function getFlockActivityLogs(flockId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const logs = await db
+    .select({
+      id: userActivityLogs.id,
+      userId: userActivityLogs.userId,
+      action: userActivityLogs.action,
+      entityType: userActivityLogs.entityType,
+      entityId: userActivityLogs.entityId,
+      details: userActivityLogs.details,
+      createdAt: userActivityLogs.createdAt,
+      userName: users.name,
+    })
+    .from(userActivityLogs)
+    .leftJoin(users, eq(userActivityLogs.userId, users.id))
+    .where(
+      and(
+        eq(userActivityLogs.entityType, "flock"),
+        eq(userActivityLogs.entityId, flockId)
+      )
+    )
+    .orderBy(desc(userActivityLogs.createdAt));
+
+  return logs;
+}
+
+export async function getAllActivityLogs() {
+  const db = await getDb();
+  if (!db) return [];
+
+  const logs = await db
+    .select({
+      id: userActivityLogs.id,
+      userId: userActivityLogs.userId,
+      action: userActivityLogs.action,
+      entityType: userActivityLogs.entityType,
+      entityId: userActivityLogs.entityId,
+      details: userActivityLogs.details,
+      createdAt: userActivityLogs.createdAt,
+      userName: users.name,
+    })
+    .from(userActivityLogs)
+    .leftJoin(users, eq(userActivityLogs.userId, users.id))
+    .orderBy(desc(userActivityLogs.createdAt))
+    .limit(1000); // Limit to last 1000 logs for performance
+
+  return logs;
 }

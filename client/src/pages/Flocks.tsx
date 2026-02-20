@@ -29,6 +29,7 @@ import { Plus, Activity, Eye, Edit, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
+import { formatWeight, convertToKg } from "@/lib/weightUtils";
 
 export default function Flocks() {
   const [, setLocation] = useLocation();
@@ -44,6 +45,8 @@ export default function Flocks() {
     placementDate: "",
     initialCount: "",
     targetSlaughterWeight: "1.70",
+    targetDeliveredWeight: "",
+    targetCatchingWeight: "",
     growingPeriod: "42",
     weightUnit: "kg" as "grams" | "kg",
     starterFeedType: "premium" as "premium" | "value" | "econo",
@@ -165,6 +168,8 @@ export default function Flocks() {
       placementDate: "",
       initialCount: "",
       targetSlaughterWeight: "1.70",
+      targetDeliveredWeight: "",
+      targetCatchingWeight: "",
       growingPeriod: "42",
       weightUnit: "kg",
       starterFeedType: "premium",
@@ -196,6 +201,8 @@ export default function Flocks() {
         placementDate: new Date(formData.placementDate),
         initialCount: parseInt(formData.initialCount),
         targetSlaughterWeight: parseFloat(formData.targetSlaughterWeight),
+        targetDeliveredWeight: formData.targetDeliveredWeight ? parseFloat(formData.targetDeliveredWeight) : undefined,
+        targetCatchingWeight: formData.targetCatchingWeight ? parseFloat(formData.targetCatchingWeight) : undefined,
         growingPeriod,
         weightUnit: formData.weightUnit as "kg" | "lbs",
         starterFeedType: formData.starterFeedType,
@@ -222,6 +229,8 @@ export default function Flocks() {
       placementDate: new Date(formData.placementDate),
       initialCount: parseInt(formData.initialCount),
       targetSlaughterWeight: parseFloat(formData.targetSlaughterWeight),
+      targetDeliveredWeight: formData.targetDeliveredWeight ? parseFloat(formData.targetDeliveredWeight) : undefined,
+      targetCatchingWeight: formData.targetCatchingWeight ? parseFloat(formData.targetCatchingWeight) : undefined,
       growingPeriod,
       weightUnit: formData.weightUnit,
       starterFeedType: formData.starterFeedType,
@@ -370,17 +379,7 @@ export default function Flocks() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="targetSlaughterWeight">Target Weight</Label>
-                    <Input
-                      id="targetSlaughterWeight"
-                      type="number"
-                      step="0.01"
-                      value={formData.targetSlaughterWeight}
-                      onChange={(e) => setFormData({ ...formData, targetSlaughterWeight: e.target.value })}
-                    />
-                  </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="weightUnit">Weight Unit</Label>
                     <Select
@@ -405,6 +404,57 @@ export default function Flocks() {
                       onChange={(e) => setFormData({ ...formData, growingPeriod: e.target.value })}
                     />
                   </div>
+                </div>
+
+                {/* Target Weight with Shrinkage Compensation */}
+                <div className="border-t pt-4 mt-2">
+                  <h4 className="font-medium mb-2">Target Weight Planning</h4>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Account for shrinkage (feed withdrawal, stress, transport) to ensure delivered weight meets contract requirements.
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="targetDeliveredWeight">Target Delivered Weight (kg)</Label>
+                      <Input
+                        id="targetDeliveredWeight"
+                        type="number"
+                        step="0.001"
+                        placeholder="e.g., 2.500"
+                        value={formData.targetDeliveredWeight}
+                        onChange={(e) => {
+                          const delivered = parseFloat(e.target.value) || 0;
+                          const catching = delivered / 0.945; // 5.5% shrinkage
+                          setFormData({ 
+                            ...formData, 
+                            targetDeliveredWeight: e.target.value,
+                            targetCatchingWeight: catching > 0 ? catching.toFixed(3) : ""
+                          });
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">Weight at processor after shrinkage</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="targetCatchingWeight">Target Catching Weight (kg)</Label>
+                      <Input
+                        id="targetCatchingWeight"
+                        type="number"
+                        step="0.001"
+                        value={formData.targetCatchingWeight}
+                        disabled
+                        className="bg-muted"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Auto-calculated with 5.5% shrinkage buffer
+                      </p>
+                    </div>
+                  </div>
+                  {formData.targetDeliveredWeight && (
+                    <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 rounded text-sm">
+                      <span className="font-medium">Shrinkage Buffer:</span> +
+                      {formatWeight(parseFloat(formData.targetCatchingWeight) - parseFloat(formData.targetDeliveredWeight), formData.weightUnit)}
+                      (accounts for feed withdrawal, catching stress, and transport loss)
+                    </div>
+                  )}
                 </div>
 
                 {/* Feed Planning Section */}
@@ -932,85 +982,85 @@ export default function Flocks() {
                           <Eye className="h-4 w-4 mr-1" />
                           View
                         </Button>
-						<Button
-						  variant="ghost"
-						  size="sm"
-						  onClick={async () => {
-							try {
-							  setEditMode(true);
-							  setEditingFlockId(flock.id);
-							  setCopyMode(false);
-							  
-							  // Load existing health schedules with error handling
-							  let vacSchedules: any[] = [];
-							  let spSchedules: any[] = [];
-							  
-							  try {
-								vacSchedules = await utils.flocks.getVaccinationSchedules.fetch({ flockId: flock.id });
-							  } catch (error) {
-								console.error("Failed to load vaccination schedules:", error);
-								toast.error("Warning: Could not load vaccination schedules");
-							  }
-							  
-							  try {
-								spSchedules = await utils.flocks.getStressPackSchedules.fetch({ flockId: flock.id });
-							  } catch (error) {
-								console.error("Failed to load stress pack schedules:", error);
-								toast.error("Warning: Could not load stress pack schedules");
-							  }
-							  
-							  // Determine vaccination protocol from schedules
-							  let vacProtocol: "standard" | "premium" | "none" = "none";
-							  if (vacSchedules.length > 0) {
-								// Check if it's standard (3 vaccines) or premium (more vaccines)
-								vacProtocol = vacSchedules.length <= 3 ? "standard" : "premium";
-							  }
-							  
-							  // Map stress pack schedules to form format
-							  const spSchedulesForForm = spSchedules.map((sp: any) => ({
-								stressPackId: sp.stressPackId,
-								startDay: sp.startDay,
-								endDay: sp.endDay,
-								dosageStrength: sp.dosageStrength as "single" | "double" | "triple",
-							  }));
-							  
-							  // Load flock data into form
-							  // Convert vaccination schedules to form format
-							  const vacSchedulesForForm = vacSchedules.map((vs: any) => ({
-								vaccineId: vs.vaccineId,
-								scheduledDay: vs.scheduledDay,
-							  }));
-							  
-							  setFormData({
-								flockNumber: flock.flockNumber,
-								houseId: flock.houseId.toString(),
-								placementDate: new Date(flock.placementDate).toISOString().split('T')[0],
-								initialCount: flock.initialCount.toString(),
-								targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
-								targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
-								targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
-								growingPeriod: flock.growingPeriod?.toString() || "42",
-								weightUnit: flock.weightUnit || "kg",
-								starterFeedType: flock.starterFeedType || "premium",
-								starterToDay: flock.starterToDay?.toString() || "10",
-								growerFeedType: flock.growerFeedType || "premium",
-								growerFromDay: flock.growerFromDay?.toString() || "11",
-								growerToDay: flock.growerToDay?.toString() || "24",
-								finisherFeedType: flock.finisherFeedType || "premium",
-								finisherFromDay: flock.finisherFromDay?.toString() || "25",
-								notes: flock.notes || "",
-								vaccinationProtocol: vacProtocol,
-								vaccinationSchedules: vacSchedulesForForm,
-								stressPackSchedules: spSchedulesForForm,
-								selectedTemplateIds: [],
-							  });
-							  setDialogOpen(true);
-							} catch (error) {
-							  console.error("Failed to open edit dialog:", error);
-							  toast.error("Failed to open edit form. Please try again.");
-							}
-						  }}
-						>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              setEditMode(true);
+                              setEditingFlockId(flock.id);
+                              setCopyMode(false);
+                              
+                              // Load existing health schedules with error handling
+                              let vacSchedules: any[] = [];
+                              let spSchedules: any[] = [];
+                              
+                              try {
+                                vacSchedules = await utils.flocks.getVaccinationSchedules.fetch({ flockId: flock.id });
+                              } catch (error) {
+                                console.error("Failed to load vaccination schedules:", error);
+                                toast.error("Warning: Could not load vaccination schedules");
+                              }
+                              
+                              try {
+                                spSchedules = await utils.flocks.getStressPackSchedules.fetch({ flockId: flock.id });
+                              } catch (error) {
+                                console.error("Failed to load stress pack schedules:", error);
+                                toast.error("Warning: Could not load stress pack schedules");
+                              }
+                              
+                              // Determine vaccination protocol from schedules
+                              let vacProtocol: "standard" | "premium" | "none" = "none";
+                              if (vacSchedules.length > 0) {
+                                // Check if it's standard (3 vaccines) or premium (more vaccines)
+                                vacProtocol = vacSchedules.length <= 3 ? "standard" : "premium";
+                              }
+                              
+                              // Map stress pack schedules to form format
+                              const spSchedulesForForm = spSchedules.map((sp: any) => ({
+                                stressPackId: sp.stressPackId,
+                                startDay: sp.startDay,
+                                endDay: sp.endDay,
+                                dosageStrength: sp.dosageStrength as "single" | "double" | "triple",
+                              }));
+                              
+                              // Load flock data into form
+                              // Convert vaccination schedules to form format
+                              const vacSchedulesForForm = vacSchedules.map((vs: any) => ({
+                                vaccineId: vs.vaccineId,
+                                scheduledDay: vs.scheduledDay,
+                              }));
+                              
+                              setFormData({
+                                flockNumber: flock.flockNumber,
+                                houseId: flock.houseId.toString(),
+                                placementDate: new Date(flock.placementDate).toISOString().split('T')[0],
+                                initialCount: flock.initialCount.toString(),
+                                targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
+                                targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
+                                targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
+                                growingPeriod: flock.growingPeriod?.toString() || "42",
+                                weightUnit: flock.weightUnit || "kg",
+                                starterFeedType: flock.starterFeedType || "premium",
+                                starterToDay: flock.starterToDay?.toString() || "10",
+                                growerFeedType: flock.growerFeedType || "premium",
+                                growerFromDay: flock.growerFromDay?.toString() || "11",
+                                growerToDay: flock.growerToDay?.toString() || "24",
+                                finisherFeedType: flock.finisherFeedType || "premium",
+                                finisherFromDay: flock.finisherFromDay?.toString() || "25",
+                                notes: flock.notes || "",
+                                vaccinationProtocol: vacProtocol,
+                                vaccinationSchedules: vacSchedulesForForm,
+                                stressPackSchedules: spSchedulesForForm,
+                                selectedTemplateIds: [],
+                              });
+                              setDialogOpen(true);
+                            } catch (error) {
+                              console.error("Failed to open edit dialog:", error);
+                              toast.error("Failed to open edit form. Please try again.");
+                            }
+                          }}
+                        >
                           <Edit className="h-4 w-4 mr-1" />
                           Edit
                         </Button>
@@ -1028,6 +1078,8 @@ export default function Flocks() {
                               placementDate: "",
                               initialCount: flock.initialCount.toString(),
                               targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
+                              targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
+                              targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
                               growingPeriod: flock.growingPeriod?.toString() || "42",
                               weightUnit: flock.weightUnit || "kg",
                               starterFeedType: flock.starterFeedType || "premium",

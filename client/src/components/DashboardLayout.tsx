@@ -21,13 +21,13 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, Box, Scale, ScrollText } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, Clipboard, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, ScrollText } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 import LoginPage from "@/pages/Login";
-import { ReminderNotifications } from "./ReminderNotifications";
+import { ReminderNotifications } from "@/components/ReminderNotifications";
 
 type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
 
@@ -42,20 +42,20 @@ const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: HomeIcon, label: "Houses", path: "/houses", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Activity, label: "Flocks", path: "/flocks", roles: ["admin", "farm_manager", "production_worker"] },
-  { icon: Syringe, label: "Health", path: "/health", roles: ["admin", "farm_manager"] },
-  { icon: Bell, label: "Reminder Templates", path: "/reminder-templates", roles: ["admin", "farm_manager"] },
   { icon: TrendingUp, label: "Harvests", path: "/harvests", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Building2, label: "Processors", path: "/processors", roles: ["admin", "farm_manager"] },
-  { icon: Box, label: "Crate Types", path: "/crate-types", roles: ["admin", "farm_manager"] },
-  { icon: Scale, label: "Catch Operations", path: "/catch-operations", roles: ["admin", "farm_manager", "production_worker"] },
+  { icon: Package, label: "Crate Types", path: "/crate-types", roles: ["admin", "farm_manager", "production_worker"] },
+  { icon: Clipboard, label: "Catch Operations", path: "/catch-operations", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Package, label: "Inventory", path: "/inventory", roles: ["admin", "farm_manager"] },
+  { icon: Syringe, label: "Health", path: "/health", roles: ["admin", "farm_manager"] },
+  { icon: Bell, label: "Reminder Templates", path: "/reminder-templates", roles: ["admin", "farm_manager"] },
   { icon: Users, label: "Customers", path: "/customers", roles: ["admin", "sales_staff"] },
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
   { icon: DollarSign, label: "Finance", path: "/finance", roles: ["admin", "accountant"] },
   { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"] },
-  { icon: Settings, label: "User Management", path: "/users", roles: ["admin"] },
+  { icon: Settings, label: "User Management", path: "/user-management", roles: ["admin"] },
 ];
 
 const canAccessMenuItem = (item: MenuItem, userRole: string | undefined): boolean => {
