@@ -1362,7 +1362,7 @@ export default function FlockDetail() {
                       stroke="#16a34a" 
                       strokeWidth={3} 
                       name="Actual Weight" 
-                      connectNulls={false}
+                      connectNulls={true}
                       dot={{ r: 4, fill: "#16a34a" }}
                     />
                     {/* Feed consumption line (right axis) */}
