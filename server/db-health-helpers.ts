@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import { flockVaccinationSchedules, flockStressPackSchedules, vaccines, stressPacks } from "../drizzle/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 /**
  * Create vaccination schedules for a flock based on protocol
@@ -147,44 +147,68 @@ export async function getFlockVaccinationSchedules(flockId: number) {
 export async function getFlockStressPackSchedules(flockId: number) {
   const db = await getDb();
   if (!db) return [];
-  
+
   const schedules = await db
-    .select({
-      id: flockStressPackSchedules.id,
-      flockId: flockStressPackSchedules.flockId,
-      stressPackId: flockStressPackSchedules.stressPackId,
-      dayNumber: flockStressPackSchedules.dayNumber,
-      scheduledDate: flockStressPackSchedules.scheduledDate,
-      actualDate: flockStressPackSchedules.actualDate,
-      notes: flockStressPackSchedules.notes,
-      createdAt: flockStressPackSchedules.createdAt,
-      // Enrich with stress pack details
-      stressPackName: stressPacks.name,
-      stressPackDescription: stressPacks.description,
-    })
+    .select()
     .from(flockStressPackSchedules)
-    .leftJoin(stressPacks, eq(flockStressPackSchedules.stressPackId, stressPacks.id))
-    .where(eq(flockStressPackSchedules.flockId, flockId))
-    .orderBy(asc(flockStressPackSchedules.dayNumber));
-    
-  return schedules;
+    .where(eq(flockStressPackSchedules.flockId, flockId));
+
+  // Enrich with stress pack details
+  const enriched = await Promise.all(
+    schedules.map(async (schedule) => {
+      const stressPackResult = await db
+        .select()
+        .from(stressPacks)
+        .where(eq(stressPacks.id, schedule.stressPackId))
+        .limit(1);
+      return {
+        ...schedule,
+        stressPack: stressPackResult[0] || null,
+      };
+    })
+  );
+
+  return enriched;
 }
 
-export async function updateFlockVaccinationSchedule(
-  scheduleId: number,
-  actualDate: Date,
-  notes?: string
+/**
+ * Update a flock stress pack schedule
+ */
+export async function updateFlockStressPackSchedule(
+  id: number,
+  data: {
+    status?: "scheduled" | "active" | "completed" | "cancelled";
+    quantityUsed?: string;
+    notes?: string;
+  }
 ) {
   const db = await getDb();
-  if (!db) return null;
-  
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .update(flockStressPackSchedules)
+    .set(data)
+    .where(eq(flockStressPackSchedules.id, id));
+}
+
+/**
+ * Update a flock vaccination schedule
+ */
+export async function updateFlockVaccinationSchedule(
+  id: number,
+  data: {
+    status?: "scheduled" | "completed" | "missed" | "rescheduled";
+    actualDate?: Date;
+    dosageUsed?: string;
+    notes?: string;
+    administeredBy?: number;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
   await db
     .update(flockVaccinationSchedules)
-    .set({
-      actualDate,
-      notes: notes || null,
-    })
-    .where(eq(flockVaccinationSchedules.id, scheduleId));
-    
-  return { success: true };
+    .set(data)
+    .where(eq(flockVaccinationSchedules.id, id));
 }

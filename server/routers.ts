@@ -3,19 +3,19 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
+import { inventoryRouter } from "./inventory-router";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, createFlockVaccinationSchedule } from "./db-health-helpers";
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
 import { sdk } from "./_core/sdk";
-
+import { slaughterRouter } from "./procedures/slaughter";
 import { harvestRouter } from "./procedures/harvest";
 import { processorRouter } from "./procedures/processor";
 import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
 import { catchRouter } from "./procedures/catch";
 import { densityRouter } from "./procedures/density";
-import { inventoryRouter } from "./inventory-router";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -29,6 +29,7 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 
 export const appRouter = router({
   system: systemRouter,
+  inventory: inventoryRouter,
 
   // ============================================================================
   // AUTHENTICATION
@@ -791,15 +792,20 @@ export const appRouter = router({
       .input(
         z.object({
           id: z.number(),
-          status: z.enum(["scheduled", "completed", "skipped", "overdue"]).optional(),
+          status: z.enum(["scheduled", "completed", "missed", "rescheduled"]).optional(),
           administeredDate: z.date().optional(),
           administeredBy: z.number().optional(),
+          dosageUsed: z.string().optional(),
           notes: z.string().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
-        const { id, ...data } = input;
-        await db.updateVaccinationSchedule(id, data);
+        const { id, administeredDate, ...rest } = input;
+        const { updateFlockVaccinationSchedule } = await import("./db-health-helpers");
+        await updateFlockVaccinationSchedule(id, {
+          ...rest,
+          actualDate: administeredDate,
+        });
         await db.logUserActivity(
           ctx.user.id,
           "update_vaccination_schedule",
@@ -947,6 +953,13 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return await db.getFlockStatusHistory(input.flockId);
       }),
+
+    // Get activity logs for flock
+    getActivityLogs: protectedProcedure
+      .input(z.object({ flockId: z.number() }))
+      .query(async ({ input }) => {
+        return await db.getFlockActivityLogs(input.flockId);
+      }),
   }),
 
   // ============================================================================
@@ -1050,6 +1063,10 @@ export const appRouter = router({
         return await db.getUpcomingReminders(input.days);
       }),
 
+    listAll: protectedProcedure.query(async () => {
+      return await db.listAllRemindersWithFlockInfo();
+    }),
+
   getCompletedHistory: protectedProcedure
     .input(
       z.object({
@@ -1149,10 +1166,6 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return await db.getFlocksUsingTemplate(input.templateId);
       }),
-
-    listAll: protectedProcedure.query(async () => {
-		return await db.listAllRemindersWithFlockInfo();
-	}),
   }),
 
   // ============================================================================
@@ -1445,11 +1458,11 @@ export const appRouter = router({
   // ============================================================================
   catch: catchRouter,
   density: densityRouter,
-  
+
   // ============================================================================
-  // INVENTORY
+  // SLAUGHTER TRACKING
   // ============================================================================
-  inventory: inventoryRouter,
+  slaughter: slaughterRouter,
 
   // ============================================================================
   // HARVEST MANAGEMENT
