@@ -1,161 +1,117 @@
-// shared/sku-constants.ts
-
 /**
- * SKU Format: {PRIMARY_CLASS}-{SUB_TYPE}-{FORM}-{SEQUENTIAL}
+ * SKU Generation Constants
+ * Structured SKU format: {PRIMARY_CLASS}-{SUB_TYPE}-{FORM}-{SEQ}
  * Example: FD-ST-P-001 = Feed, Starter, Pellet, #1
  */
 
+// Primary Class (What operational cost bucket it belongs to)
 export const PRIMARY_CLASSES = {
-  FD: { code: 'FD', label: 'Feed', description: 'Feed products' },
-  RM: { code: 'RM', label: 'Raw Materials', description: 'Raw materials for feed production' },
-  MD: { code: 'MD', label: 'Medication', description: 'Medications and treatments' },
-  VX: { code: 'VX', label: 'Vaccine', description: 'Vaccines' },
-  DS: { code: 'DS', label: 'Disinfectant', description: 'Disinfectants and sanitizers' },
-  BD: { code: 'BD', label: 'Birds', description: 'Live birds' },
-  LT: { code: 'LT', label: 'Litter/Bedding', description: 'Litter and bedding materials' },
-  PK: { code: 'PK', label: 'Packaging', description: 'Packaging materials' },
-  EQ: { code: 'EQ', label: 'Equipment', description: 'Equipment and machinery' },
-  SP: { code: 'SP', label: 'Spare Parts', description: 'Spare parts' },
-  CL: { code: 'CL', label: 'Cleaning Supplies', description: 'Cleaning supplies' },
-  AD: { code: 'AD', label: 'Additives', description: 'Feed additives and supplements' },
-  VT: { code: 'VT', label: 'Veterinary Consumables', description: 'Veterinary consumables' },
-  UT: { code: 'UT', label: 'Utilities Consumables', description: 'Utilities consumables' },
+  FD: { code: 'FD', label: 'Feed', description: 'FCR + production cost' },
+  RM: { code: 'RM', label: 'Raw Materials', description: 'Feed mill costing' },
+  MD: { code: 'MD', label: 'Medication', description: 'Health cost/bird' },
+  VX: { code: 'VX', label: 'Vaccine', description: 'Biosecurity cost' },
+  DS: { code: 'DS', label: 'Disinfectant', description: 'Biosecurity' },
+  BD: { code: 'BD', label: 'Birds (chicks/pullets)', description: 'Placement cost' },
+  LT: { code: 'LT', label: 'Litter/Bedding', description: 'House prep cost' },
+  PK: { code: 'PK', label: 'Packaging', description: 'Egg or processed output' },
+  EQ: { code: 'EQ', label: 'Equipment', description: 'Capex/asset' },
+  SP: { code: 'SP', label: 'Spare Parts', description: 'Maintenance cost' },
+  CL: { code: 'CL', label: 'Cleaning Supplies', description: 'Hygiene' },
+  AD: { code: 'AD', label: 'Additives', description: 'Nutrition efficiency (enzymes, toxin binders)' },
+  VT: { code: 'VT', label: 'Veterinary Consumables', description: 'Syringes, needles' },
+  UT: { code: 'UT', label: 'Utilities Consumables', description: 'Coal, gas, diesel' },
 } as const;
 
-export const SUB_TYPES: Record<string, { code: string; label: string }[]> = {
-  FD: [
-    { code: 'ST', label: 'Starter' },
-    { code: 'GR', label: 'Grower' },
-    { code: 'FN', label: 'Finisher' },
-    { code: 'PR', label: 'Pre-starter' },
-    { code: 'LY', label: 'Layer Mash' },
-    { code: 'BR', label: 'Breeder' },
-    { code: 'CR', label: 'Crumble' },
-    { code: 'WS', label: 'Wheat/Straight' },
-  ],
-  RM: [
-    { code: 'GR', label: 'Grain' },
-    { code: 'PR', label: 'Protein Source' },
-    { code: 'MN', label: 'Mineral' },
-    { code: 'VT', label: 'Vitamin' },
-    { code: 'EN', label: 'Energy Source' },
-  ],
-  MD: [
-    { code: 'AB', label: 'Antibiotic' },
-    { code: 'AC', label: 'Anticoccidial' },
-    { code: 'AH', label: 'Anthelmintic' },
-    { code: 'AS', label: 'Antiseptic' },
-    { code: 'OT', label: 'Other' },
-  ],
-  VX: [
-    { code: 'ND', label: 'Newcastle Disease' },
-    { code: 'IB', label: 'Infectious Bronchitis' },
-    { code: 'GB', label: 'Gumboro' },
-    { code: 'FP', label: 'Fowl Pox' },
-    { code: 'OT', label: 'Other' },
-  ],
-  DS: [
-    { code: 'VI', label: 'Virucidal' },
-    { code: 'BC', label: 'Bactericidal' },
-    { code: 'FG', label: 'Fungicidal' },
-    { code: 'GP', label: 'General Purpose' },
-  ],
-  BD: [
-    { code: 'DC', label: 'Day-old Chicks' },
-    { code: 'PL', label: 'Pullets' },
-    { code: 'LY', label: 'Layers' },
-    { code: 'BR', label: 'Broilers' },
-    { code: 'BD', label: 'Breeders' },
-  ],
-  LT: [
-    { code: 'WS', label: 'Wood Shavings' },
-    { code: 'ST', label: 'Straw' },
-    { code: 'SH', label: 'Sawdust/Husks' },
-    { code: 'OT', label: 'Other' },
-  ],
-  PK: [
-    { code: 'BG', label: 'Bags' },
-    { code: 'CT', label: 'Cartons' },
-    { code: 'TR', label: 'Trays' },
-    { code: 'CR', label: 'Crates' },
-    { code: 'LB', label: 'Labels' },
-  ],
-  EQ: [
-    { code: 'FD', label: 'Feeders' },
-    { code: 'DR', label: 'Drinkers' },
-    { code: 'HT', label: 'Heaters' },
-    { code: 'VN', label: 'Ventilation' },
-    { code: 'LG', label: 'Lighting' },
-    { code: 'OT', label: 'Other' },
-  ],
-  SP: [
-    { code: 'ME', label: 'Mechanical' },
-    { code: 'EL', label: 'Electrical' },
-    { code: 'PL', label: 'Plumbing' },
-    { code: 'OT', label: 'Other' },
-  ],
-  CL: [
-    { code: 'DT', label: 'Detergent' },
-    { code: 'BR', label: 'Brushes/Brooms' },
-    { code: 'MO', label: 'Mops' },
-    { code: 'OT', label: 'Other' },
-  ],
-  AD: [
-    { code: 'EN', label: 'Enzyme' },
-    { code: 'PB', label: 'Probiotic' },
-    { code: 'AC', label: 'Acidifier' },
-    { code: 'GR', label: 'Growth Promoter' },
-    { code: 'OT', label: 'Other' },
-  ],
-  VT: [
-    { code: 'SY', label: 'Syringes' },
-    { code: 'ND', label: 'Needles' },
-    { code: 'GL', label: 'Gloves' },
-    { code: 'BD', label: 'Bandages' },
-    { code: 'OT', label: 'Other' },
-  ],
-  UT: [
-    { code: 'GS', label: 'Gas' },
-    { code: 'EL', label: 'Electricity' },
-    { code: 'WT', label: 'Water' },
-    { code: 'OT', label: 'Other' },
-  ],
-};
+// Sub-Type mappings by Primary Class
+export const SUB_TYPES = {
+  FD: { // Feed
+    ST: 'Starter',
+    GR: 'Grower',
+    FN: 'Finisher',
+    PR: 'Pre-starter',
+    LY: 'Layer Mash',
+    BR: 'Breeder',
+    CR: 'Crumble',
+    WS: 'Wheat/Straight',
+  },
+  MD: { // Medication
+    AB: 'Antibiotic',
+    CC: 'Coccidiostat',
+    VT: 'Vitamin',
+    EL: 'Electrolyte',
+    DP: 'Dewormer',
+  },
+  VX: { // Vaccine
+    ND: 'Newcastle',
+    IB: 'Infectious Bronchitis',
+    IBD: 'Gumboro',
+    MG: 'Mycoplasma',
+    AI: 'Avian Influenza',
+  },
+  BD: { // Birds
+    BR: 'Broiler Chicks',
+    PL: 'Pullets',
+    LY: 'Layers',
+  },
+  // Other primary classes use generic sub-types or none
+  RM: { GN: 'General' },
+  DS: { GN: 'General' },
+  LT: { GN: 'General' },
+  PK: { GN: 'General' },
+  EQ: { GN: 'General' },
+  SP: { GN: 'General' },
+  CL: { GN: 'General' },
+  AD: { GN: 'General' },
+  VT: { GN: 'General' },
+  UT: { GN: 'General' },
+} as const;
 
-export const FORMS = [
-  { code: 'P', label: 'Pellet' },
-  { code: 'C', label: 'Crumble' },
-  { code: 'M', label: 'Mash' },
-  { code: 'L', label: 'Liquid' },
-  { code: 'S', label: 'Soluble Powder' },
-  { code: 'G', label: 'Granule' },
-  { code: 'D', label: 'Dust/Powder' },
-  { code: 'INJ', label: 'Injectable' },
-] as const;
+// Physical Form
+export const FORMS = {
+  P: 'Pellet',
+  C: 'Crumble',
+  M: 'Mash',
+  L: 'Liquid',
+  S: 'Soluble Powder',
+  G: 'Granule',
+  D: 'Dust/Powder',
+  INJ: 'Injectable',
+} as const;
 
+// Type exports
+export type PrimaryClassCode = keyof typeof PRIMARY_CLASSES;
+export type SubTypeCode = string; // Dynamic based on primary class
+export type FormCode = keyof typeof FORMS;
+
+// Helper to get sub-types for a primary class
+export function getSubTypesForClass(primaryClass: PrimaryClassCode): Record<string, string> {
+  return SUB_TYPES[primaryClass] || {};
+}
+
+// Helper to validate SKU components
+export function isValidSKUComponents(
+  primaryClass: string,
+  subType: string,
+  form: string
+): boolean {
+  if (!(primaryClass in PRIMARY_CLASSES)) return false;
+  if (!(form in FORMS)) return false;
+  
+  const validSubTypes = getSubTypesForClass(primaryClass as PrimaryClassCode);
+  if (Object.keys(validSubTypes).length > 0 && !(subType in validSubTypes)) {
+    return false;
+  }
+  
+  return true;
+}
+
+// Helper to format SKU
 export function formatSKU(
   primaryClass: string,
   subType: string,
   form: string,
-  sequential: number
+  sequentialNumber: number
 ): string {
-  const seqStr = sequential.toString().padStart(3, '0');
-  return `${primaryClass}-${subType}-${form}-${seqStr}`;
-}
-
-export function parseSKU(sku: string): {
-  primaryClass: string;
-  subType: string;
-  form: string;
-  sequential: number;
-} | null {
-  const parts = sku.split('-');
-  if (parts.length !== 4) return null;
-
-  const [primaryClass, subType, form, seqStr] = parts;
-  const sequential = parseInt(seqStr, 10);
-
-  if (isNaN(sequential)) return null;
-
-  return { primaryClass, subType, form, sequential };
+  const seq = sequentialNumber.toString().padStart(3, '0');
+  return `${primaryClass}-${subType}-${form}-${seq}`;
 }

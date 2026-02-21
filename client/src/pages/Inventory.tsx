@@ -931,4 +931,3 @@ export default function Inventory() {
     </div>
   );
 }
-
