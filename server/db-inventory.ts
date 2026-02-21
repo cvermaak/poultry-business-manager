@@ -147,15 +147,17 @@ export async function createInventoryItem(data: {
   if (data.currentStock && data.currentStock > 0) {
     const locationId = data.locationId || 1; // Default to location ID 1 (Main Warehouse)
     
+    // Create or update stock level for the location
     await db.insert(inventoryStock).values({
-      itemId: item.id,
-      locationId: locationId,
+      itemId: insertId,
+      locationId,
       quantity: data.currentStock.toString(),
-      lastUpdated: new Date().toISOString(),
-    } as any);
+      lastUpdated: sql`NOW()`, // Explicitly set timestamp
+      updatedBy: 1, // System user
+    });
   }
-
-  return item;
+  
+  return createdItem || null;
 }
 
 export async function updateInventoryItem(
