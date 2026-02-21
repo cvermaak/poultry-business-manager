@@ -27,33 +27,33 @@ export const inventoryRouter = router({
     }),
 
   createItem: protectedProcedure
-  .input(
-    z.object({
-      itemNumber: z.string().optional(), // Optional - auto-generated if SKU components provided
-      primaryClass: z.string().optional(),  // ADD THIS
-      subType: z.string().optional(),       // ADD THIS
-      form: z.string().optional(),          // ADD THIS
-      name: z.string(),
-      longDescription: z.string().optional(),
-      itemStatus: z.enum(["active", "inactive", "discontinued", "obsolete"]).optional(),
-      itemType: z.enum(["stocked_item", "non_stocked", "service", "raw_material", "finished_good", "consumable"]).optional(),
-      barcode: z.string().optional(),
-      manufacturerPartNumber: z.string().optional(),
-      internalReference: z.string().optional(),
-      supplierPartNumber: z.string().optional(),
-      brand: z.string().optional(),
-      model: z.string().optional(),
-      category: z.enum(["live_birds", "feed", "raw_materials", "supplies", "equipment"]),
-      unit: z.string(),
-      currentStock: z.number().optional(),
-      reorderPoint: z.number().optional(),
-      unitCost: z.number().optional(),
-      locationId: z.number().optional(),  // ADD THIS
-    })
-  )
-  .mutation(async ({ input }) => {
-    return await inventoryDb.createInventoryItem(input);
-  }),
+    .input(
+      z.object({
+        itemNumber: z.string().optional(), // Optional - auto-generated if SKU components provided
+        primaryClass: z.string().optional(),
+        subType: z.string().optional(),
+        form: z.string().optional(),
+        name: z.string(),
+        longDescription: z.string().optional(),
+        itemStatus: z.enum(["active", "inactive", "discontinued", "obsolete"]).optional(),
+        itemType: z.enum(["stocked_item", "non_stocked", "service", "raw_material", "finished_good", "consumable"]).optional(),
+        barcode: z.string().optional(),
+        manufacturerPartNumber: z.string().optional(),
+        internalReference: z.string().optional(),
+        supplierPartNumber: z.string().optional(),
+        brand: z.string().optional(),
+        model: z.string().optional(),
+        category: z.enum(["live_birds", "feed", "raw_materials", "supplies", "equipment"]),
+        unit: z.string(),
+        currentStock: z.number().optional(),
+        reorderPoint: z.number().optional(),
+        unitCost: z.number().optional(),
+        locationId: z.number().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      return await inventoryDb.createInventoryItem(input);
+    }),
 
   updateItem: protectedProcedure
     .input(

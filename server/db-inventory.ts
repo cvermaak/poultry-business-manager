@@ -1,7 +1,11 @@
 import { getDb } from "./db";
 import { inventoryItems, inventoryLocations, inventoryStock, inventoryTransactions } from "../drizzle/schema";
-import { eq, and, sql, desc, gte, lte, like } from "drizzle-orm";  // ← ADD 'like' HERE
+import { eq, and, sql, desc, gte, lte, like } from "drizzle-orm";
 import { formatSKU } from "../shared/sku-constants";
+
+// ============================================================================
+// INVENTORY ITEMS
+// ============================================================================
 
 /**
  * Get the next sequential number for a SKU pattern
@@ -42,10 +46,6 @@ export async function getNextSequentialNumber(
   return Math.max(...numbers) + 1;
 }
 
-// ============================================================================
-// INVENTORY ITEMS
-// ============================================================================
-
 export async function listInventoryItems(filters?: {
   category?: string;
   isActive?: boolean;
@@ -81,14 +81,14 @@ export async function getInventoryItem(id: number) {
 }
 
 export async function createInventoryItem(data: {
-  itemNumber?: string;
+  itemNumber?: string; // Optional - will be auto-generated if primaryClass/subType/form provided
   primaryClass?: string;
   subType?: string;
   form?: string;
   name: string;
   longDescription?: string;
-  itemStatus?: string;
-  itemType?: string;
+  itemStatus?: "active" | "inactive" | "discontinued" | "obsolete";
+  itemType?: "stocked_item" | "non_stocked" | "service" | "raw_material" | "finished_good" | "consumable";
   barcode?: string;
   manufacturerPartNumber?: string;
   internalReference?: string;
@@ -97,55 +97,110 @@ export async function createInventoryItem(data: {
   model?: string;
   category: string;
   unit: string;
-  currentStock?: number;
   reorderPoint?: number;
   unitCost?: number;
+  currentStock?: number;
   locationId?: number;
 }) {
   const db = await getDb();
   if (!db) return null;
 
-  // Generate SKU if components are provided
-  let finalItemNumber = data.itemNumber;
+  // Validate barcode uniqueness if provided
+  if (data.barcode) {
+    const isUnique = await validateBarcodeUniqueness(data.barcode);
+    if (!isUnique) {
+      throw new Error("Barcode already exists");
+    }
+  }
+
+  // Auto-generate SKU if components provided
+  let itemNumber = data.itemNumber;
   if (data.primaryClass && data.subType && data.form) {
-    const sequential = await getNextSequentialNumber(
+    const seqNumber = await getNextSequentialNumber(
       data.primaryClass,
       data.subType,
       data.form
     );
-    finalItemNumber = formatSKU(
-      data.primaryClass,
-      data.subType,
-      data.form,
-      sequential
-    );
+    itemNumber = formatSKU(data.primaryClass, data.subType, data.form, seqNumber);
   }
 
-  const [item] = await db
-    .insert(inventoryItems)
-    .values({
-      itemNumber: finalItemNumber || `ITEM-${Date.now()}`,
-      name: data.name,
-      longDescription: data.longDescription,
-      itemStatus: data.itemStatus || 'active',
-      itemType: data.itemType || 'stocked_item',
-      barcode: data.barcode,
-      manufacturerPartNumber: data.manufacturerPartNumber,
-      internalReference: data.internalReference,
-      supplierPartNumber: data.supplierPartNumber,
-      brand: data.brand,
-      model: data.model,
-      category: data.category,
-      unit: data.unit,
-      currentStock: data.currentStock?.toString() || '0',
-      reorderPoint: data.reorderPoint?.toString(),
-      unitCost: data.unitCost?.toString(),
-    } as any)
-    .$returningId();
+  if (!itemNumber) {
+    throw new Error("Either itemNumber or (primaryClass + subType + form) must be provided");
+  }
 
-  // Create initial stock level if currentStock > 0
+  const insertData: any = {
+    itemNumber,
+    name: data.name,
+    category: data.category,
+    unit: data.unit,
+    itemStatus: data.itemStatus || "active",
+    itemType: data.itemType || "stocked_item",
+  };
+
+  // Add SKU component fields
+  if (data.primaryClass) insertData.primaryClass = data.primaryClass;
+  if (data.subType) insertData.subType = data.subType;
+  if (data.form) insertData.form = data.form;
+
+  // Add optional SKU Identity Block fields
+  if (data.longDescription) insertData.longDescription = data.longDescription;
+  if (data.barcode) insertData.barcode = data.barcode;
+  if (data.manufacturerPartNumber) insertData.manufacturerPartNumber = data.manufacturerPartNumber;
+  if (data.internalReference) insertData.internalReference = data.internalReference;
+  if (data.supplierPartNumber) insertData.supplierPartNumber = data.supplierPartNumber;
+  if (data.brand) insertData.brand = data.brand;
+  if (data.model) insertData.model = data.model;
+
+  if (data.reorderPoint !== undefined) {
+    insertData.reorderPoint = data.reorderPoint.toString();
+  }
+  if (data.unitCost !== undefined) {
+    insertData.unitCost = data.unitCost;
+  }
+  if (data.currentStock !== undefined) {
+    insertData.currentStock = data.currentStock.toString();
+  }
+
+  const result = await db.insert(inventoryItems).values(insertData);
+  
+  // Fetch the created item to get all fields including defaults
+  const insertId = Number(result[0].insertId);
+  const [createdItem] = await db
+    .select()
+    .from(inventoryItems)
+    .where(eq(inventoryItems.id, insertId));
+  
+  // If currentStock > 0, create initial stock transaction
   if (data.currentStock && data.currentStock > 0) {
-    const locationId = data.locationId || 1; // Default to location ID 1 (Main Warehouse)
+    let targetLocationId = data.locationId;
+    
+    // If no locationId provided, get or create default location ("Main Warehouse")
+    if (!targetLocationId) {
+      let defaultLocation = await db
+        .select()
+        .from(inventoryLocations)
+        .where(eq(inventoryLocations.name, "Main Warehouse"))
+        .limit(1);
+      
+      if (defaultLocation.length === 0) {
+        // Create default location
+        await db.insert(inventoryLocations).values({
+          name: "Main Warehouse",
+          locationType: "warehouse",
+          description: "Default storage location",
+          isActive: true,
+        });
+        defaultLocation = await db
+          .select()
+          .from(inventoryLocations)
+          .where(eq(inventoryLocations.name, "Main Warehouse"))
+          .limit(1);
+      }
+      
+      targetLocationId = defaultLocation[0].id;
+    }
+    
+    const locationId = targetLocationId;
     
     // Create or update stock level for the location
     await db.insert(inventoryStock).values({
@@ -163,11 +218,11 @@ export async function createInventoryItem(data: {
 export async function updateInventoryItem(
   id: number,
   data: {
-    itemNumber?: string;
+    itemNumber?: string; // Will be validated for immutability
     name?: string;
     longDescription?: string;
-    itemStatus?: string;
-    itemType?: string;
+    itemStatus?: "active" | "inactive" | "discontinued" | "obsolete";
+    itemType?: "stocked_item" | "non_stocked" | "service" | "raw_material" | "finished_good" | "consumable";
     barcode?: string;
     manufacturerPartNumber?: string;
     internalReference?: string;
@@ -176,41 +231,48 @@ export async function updateInventoryItem(
     model?: string;
     category?: string;
     unit?: string;
-    currentStock?: number;  // ADD THIS LINE
     reorderPoint?: number;
     unitCost?: number;
+    currentStock?: number;
     isActive?: boolean;
   }
 ) {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) return false;
 
-  // Existing validation code...
-  
-  await db
-    .update(inventoryItems)
-    .set({
-      ...(data.name && { name: data.name }),
-      ...(data.longDescription !== undefined && { longDescription: data.longDescription }),
-      ...(data.itemStatus && { itemStatus: data.itemStatus }),
-      ...(data.itemType && { itemType: data.itemType }),
-      ...(data.barcode !== undefined && { barcode: data.barcode }),
-      ...(data.manufacturerPartNumber !== undefined && { manufacturerPartNumber: data.manufacturerPartNumber }),
-      ...(data.internalReference !== undefined && { internalReference: data.internalReference }),
-      ...(data.supplierPartNumber !== undefined && { supplierPartNumber: data.supplierPartNumber }),
-      ...(data.brand !== undefined && { brand: data.brand }),
-      ...(data.model !== undefined && { model: data.model }),
-      ...(data.category && { category: data.category }),
-      ...(data.unit && { unit: data.unit }),
-      ...(data.currentStock !== undefined && { currentStock: data.currentStock.toString() }),  // ADD THIS LINE
-      ...(data.reorderPoint !== undefined && { reorderPoint: data.reorderPoint?.toString() }),
-      ...(data.unitCost !== undefined && { unitCost: data.unitCost?.toString() }),
-      ...(data.isActive !== undefined && { isActive: data.isActive ? 1 : 0 }),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(inventoryItems.id, id));
+  // Validate SKU immutability - itemNumber cannot be changed
+  if (data.itemNumber) {
+    const isValid = await validateItemNumberImmutability(id, data.itemNumber);
+    if (!isValid) {
+      throw new Error("Item number (SKU) cannot be changed after creation");
+    }
+    // Remove from update data since it shouldn't change
+    delete data.itemNumber;
+  }
 
-  return { id };
+  // Validate barcode uniqueness if being updated
+  if (data.barcode) {
+    const isUnique = await validateBarcodeUniqueness(data.barcode, id);
+    if (!isUnique) {
+      throw new Error("Barcode already exists");
+    }
+  }
+
+  const updateData: any = { ...data };
+  if (data.reorderPoint !== undefined) {
+    updateData.reorderPoint = data.reorderPoint.toString();
+  }
+  if (data.currentStock !== undefined) {
+    updateData.currentStock = data.currentStock.toString();
+  }
+
+  // If no fields to update (e.g., only itemNumber was provided and was removed), return success
+  if (Object.keys(updateData).length === 0) {
+    return true;
+  }
+
+  await db.update(inventoryItems).set(updateData).where(eq(inventoryItems.id, id));
+  return true;
 }
 
 export async function deleteInventoryItem(id: number) {
@@ -463,4 +525,154 @@ export async function getReorderAlerts() {
     .having(sql`COALESCE(SUM(${inventoryStock.quantity}), 0) < ${inventoryItems.reorderPoint}`);
 
   return alerts;
+}
+
+// ============================================================================
+// SKU IDENTITY BLOCK - VALIDATION & LOOKUP
+// ============================================================================
+
+/**
+ * Find an inventory item by barcode
+ * @param barcode - The barcode to search for
+ * @returns The inventory item or null if not found
+ */
+export async function findItemByBarcode(barcode: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [item] = await db
+    .select()
+    .from(inventoryItems)
+    .where(eq(inventoryItems.barcode, barcode));
+
+  return item || null;
+}
+
+/**
+ * Validate barcode uniqueness (excluding a specific item ID for updates)
+ * @param barcode - The barcode to check
+ * @param excludeItemId - Optional item ID to exclude from the check (for updates)
+ * @returns true if barcode is unique, false if already exists
+ */
+export async function validateBarcodeUniqueness(barcode: string, excludeItemId?: number) {
+  const db = await getDb();
+  if (!db) return true; // Fail open if DB unavailable
+
+  const conditions = [eq(inventoryItems.barcode, barcode)];
+  
+  if (excludeItemId) {
+    conditions.push(sql`${inventoryItems.id} != ${excludeItemId}`);
+  }
+
+  const [existing] = await db
+    .select({ id: inventoryItems.id })
+    .from(inventoryItems)
+    .where(and(...conditions));
+
+  return !existing; // true if no existing item found
+}
+
+/**
+ * Validate that itemNumber is not being changed (SKU immutability)
+ * @param itemId - The item ID being updated
+ * @param newItemNumber - The new itemNumber being attempted
+ * @returns true if itemNumber matches existing, false if attempting to change
+ */
+export async function validateItemNumberImmutability(itemId: number, newItemNumber: string) {
+  const db = await getDb();
+  if (!db) return false;
+
+  const [existing] = await db
+    .select({ itemNumber: inventoryItems.itemNumber })
+    .from(inventoryItems)
+    .where(eq(inventoryItems.id, itemId));
+
+  if (!existing) return false; // Item doesn't exist
+
+  return existing.itemNumber === newItemNumber; // true if unchanged
+}
+
+/**
+ * Search inventory items across multiple identifier fields
+ * @param searchTerm - The search term to match against multiple fields
+ * @param filters - Optional filters for category, status, type
+ * @returns Array of matching inventory items
+ */
+export async function searchInventoryItems(
+  searchTermOrFilters?: string | {
+    searchTerm?: string;
+    category?: string;
+    itemStatus?: string;
+    itemType?: string;
+    brand?: string;
+    manufacturerPartNumber?: string;
+  },
+  legacyFilters?: {
+    category?: string;
+    itemStatus?: string;
+    itemType?: string;
+  }
+) {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Handle both old signature (searchTerm, filters) and new signature (filters only)
+  let searchTerm: string | undefined;
+  let filters: any = {};
+
+  if (typeof searchTermOrFilters === 'string') {
+    // Old signature: searchInventoryItems("term", {filters})
+    searchTerm = searchTermOrFilters;
+    filters = legacyFilters || {};
+  } else if (searchTermOrFilters) {
+    // New signature: searchInventoryItems({searchTerm: "term", ...filters})
+    searchTerm = searchTermOrFilters.searchTerm;
+    filters = searchTermOrFilters;
+  }
+
+  const conditions: any[] = [];
+
+  // Add search term condition if provided
+  if (searchTerm) {
+    const searchPattern = `%${searchTerm}%`;
+    conditions.push(
+      sql`(
+        ${inventoryItems.itemNumber} LIKE ${searchPattern} OR
+        ${inventoryItems.name} LIKE ${searchPattern} OR
+        ${inventoryItems.barcode} LIKE ${searchPattern} OR
+        ${inventoryItems.manufacturerPartNumber} LIKE ${searchPattern} OR
+        ${inventoryItems.internalReference} LIKE ${searchPattern} OR
+        ${inventoryItems.supplierPartNumber} LIKE ${searchPattern} OR
+        ${inventoryItems.brand} LIKE ${searchPattern} OR
+        ${inventoryItems.model} LIKE ${searchPattern}
+      )`
+    );
+  }
+
+  // Add filter conditions
+  if (filters.category) {
+    conditions.push(eq(inventoryItems.category, filters.category as any));
+  }
+  if (filters.itemStatus) {
+    conditions.push(eq(inventoryItems.itemStatus, filters.itemStatus as any));
+  }
+  if (filters.itemType) {
+    conditions.push(eq(inventoryItems.itemType, filters.itemType as any));
+  }
+  if (filters.brand) {
+    conditions.push(eq(inventoryItems.brand, filters.brand));
+  }
+  if (filters.manufacturerPartNumber) {
+    conditions.push(eq(inventoryItems.manufacturerPartNumber, filters.manufacturerPartNumber));
+  }
+
+  // If no conditions, return all items
+  if (conditions.length === 0) {
+    return await db.select().from(inventoryItems);
+  }
+
+  return await db
+    .select()
+    .from(inventoryItems)
+    .where(and(...conditions));
 }
