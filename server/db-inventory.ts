@@ -306,8 +306,16 @@ export async function createInventoryLocation(data: {
   const db = await getDb();
   if (!db) return null;
 
-  const [location] = await db.insert(inventoryLocations).values(data as any);
-  return location;
+  const result = await db.insert(inventoryLocations).values(data as any);
+  
+  // Fetch the created location to return complete data
+  const insertId = Number(result[0].insertId);
+  const [createdLocation] = await db
+    .select()
+    .from(inventoryLocations)
+    .where(eq(inventoryLocations.id, insertId));
+  
+  return createdLocation || null;
 }
 
 export async function updateInventoryLocation(
