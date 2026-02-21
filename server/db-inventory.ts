@@ -1,6 +1,46 @@
+import { formatSKU } from "../shared/sku-constants";
 import { getDb } from "./db";
 import { inventoryItems, inventoryLocations, inventoryStock, inventoryTransactions } from "../drizzle/schema";
 import { eq, and, sql, desc, gte, lte } from "drizzle-orm";
+
+/**
+ * Get the next sequential number for a SKU pattern
+ * @param primaryClass - Primary class code (e.g., 'FD')
+ * @param subType - Sub-type code (e.g., 'ST')
+ * @param form - Form code (e.g., 'P')
+ * @returns Next sequential number (1 if no existing SKUs match the pattern)
+ */
+export async function getNextSequentialNumber(
+  primaryClass: string,
+  subType: string,
+  form: string
+): Promise<number> {
+  const db = await getDb();
+  if (!db) return 1;
+
+  // Find all SKUs matching the pattern (e.g., 'FD-ST-P-%')
+  const pattern = `${primaryClass}-${subType}-${form}-%`;
+  
+  const items = await db
+    .select({ itemNumber: inventoryItems.itemNumber })
+    .from(inventoryItems)
+    .where(like(inventoryItems.itemNumber, pattern));
+
+  if (items.length === 0) return 1;
+
+  // Extract sequential numbers and find the max
+  const numbers = items
+    .map(item => {
+      const parts = item.itemNumber.split('-');
+      const seqStr = parts[parts.length - 1]; // Last part is the sequential number
+      return parseInt(seqStr, 10);
+    })
+    .filter(n => !isNaN(n));
+
+  if (numbers.length === 0) return 1;
+
+  return Math.max(...numbers) + 1;
+}
 
 // ============================================================================
 // INVENTORY ITEMS
@@ -41,55 +81,134 @@ export async function getInventoryItem(id: number) {
 }
 
 export async function createInventoryItem(data: {
-  itemNumber: string;
+  itemNumber?: string;
+  primaryClass?: string;
+  subType?: string;
+  form?: string;
   name: string;
+  longDescription?: string;
+  itemStatus?: string;
+  itemType?: string;
+  barcode?: string;
+  manufacturerPartNumber?: string;
+  internalReference?: string;
+  supplierPartNumber?: string;
+  brand?: string;
+  model?: string;
   category: string;
   unit: string;
+  currentStock?: number;
   reorderPoint?: number;
   unitCost?: number;
+  locationId?: number;
 }) {
   const db = await getDb();
   if (!db) return null;
 
-  const insertData: any = {
-    itemNumber: data.itemNumber,
-    name: data.name,
-    category: data.category,
-    unit: data.unit,
-  };
-
-  if (data.reorderPoint !== undefined) {
-    insertData.reorderPoint = data.reorderPoint.toString();
+  // Generate SKU if components are provided
+  let finalItemNumber = data.itemNumber;
+  if (data.primaryClass && data.subType && data.form) {
+    const sequential = await getNextSequentialNumber(
+      data.primaryClass,
+      data.subType,
+      data.form
+    );
+    finalItemNumber = formatSKU(
+      data.primaryClass,
+      data.subType,
+      data.form,
+      sequential
+    );
   }
-  if (data.unitCost !== undefined) {
-    insertData.unitCost = data.unitCost;
+
+  const [item] = await db
+    .insert(inventoryItems)
+    .values({
+      itemNumber: finalItemNumber || `ITEM-${Date.now()}`,
+      name: data.name,
+      longDescription: data.longDescription,
+      itemStatus: data.itemStatus || 'active',
+      itemType: data.itemType || 'stocked_item',
+      barcode: data.barcode,
+      manufacturerPartNumber: data.manufacturerPartNumber,
+      internalReference: data.internalReference,
+      supplierPartNumber: data.supplierPartNumber,
+      brand: data.brand,
+      model: data.model,
+      category: data.category,
+      unit: data.unit,
+      currentStock: data.currentStock?.toString() || '0',
+      reorderPoint: data.reorderPoint?.toString(),
+      unitCost: data.unitCost?.toString(),
+    } as any)
+    .$returningId();
+
+  // Create initial stock level if currentStock > 0
+  if (data.currentStock && data.currentStock > 0) {
+    const locationId = data.locationId || 1; // Default to location ID 1 (Main Warehouse)
+    
+    await db.insert(inventoryStock).values({
+      itemId: item.id,
+      locationId: locationId,
+      quantity: data.currentStock.toString(),
+      lastUpdated: new Date().toISOString(),
+    } as any);
   }
 
-  const [item] = await db.insert(inventoryItems).values(insertData);
   return item;
 }
 
 export async function updateInventoryItem(
   id: number,
   data: {
+    itemNumber?: string;
     name?: string;
+    longDescription?: string;
+    itemStatus?: string;
+    itemType?: string;
+    barcode?: string;
+    manufacturerPartNumber?: string;
+    internalReference?: string;
+    supplierPartNumber?: string;
+    brand?: string;
+    model?: string;
     category?: string;
     unit?: string;
+    currentStock?: number;  // ADD THIS LINE
     reorderPoint?: number;
     unitCost?: number;
     isActive?: boolean;
   }
 ) {
   const db = await getDb();
-  if (!db) return false;
+  if (!db) return null;
 
-  const updateData: any = { ...data };
-  if (data.reorderPoint !== undefined) {
-    updateData.reorderPoint = data.reorderPoint.toString();
-  }
+  // Existing validation code...
+  
+  await db
+    .update(inventoryItems)
+    .set({
+      ...(data.name && { name: data.name }),
+      ...(data.longDescription !== undefined && { longDescription: data.longDescription }),
+      ...(data.itemStatus && { itemStatus: data.itemStatus }),
+      ...(data.itemType && { itemType: data.itemType }),
+      ...(data.barcode !== undefined && { barcode: data.barcode }),
+      ...(data.manufacturerPartNumber !== undefined && { manufacturerPartNumber: data.manufacturerPartNumber }),
+      ...(data.internalReference !== undefined && { internalReference: data.internalReference }),
+      ...(data.supplierPartNumber !== undefined && { supplierPartNumber: data.supplierPartNumber }),
+      ...(data.brand !== undefined && { brand: data.brand }),
+      ...(data.model !== undefined && { model: data.model }),
+      ...(data.category && { category: data.category }),
+      ...(data.unit && { unit: data.unit }),
+      ...(data.currentStock !== undefined && { currentStock: data.currentStock.toString() }),  // ADD THIS LINE
+      ...(data.reorderPoint !== undefined && { reorderPoint: data.reorderPoint?.toString() }),
+      ...(data.unitCost !== undefined && { unitCost: data.unitCost?.toString() }),
+      ...(data.isActive !== undefined && { isActive: data.isActive ? 1 : 0 }),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(inventoryItems.id, id));
 
-  await db.update(inventoryItems).set(updateData).where(eq(inventoryItems.id, id));
-  return true;
+  return { id };
 }
 
 export async function deleteInventoryItem(id: number) {

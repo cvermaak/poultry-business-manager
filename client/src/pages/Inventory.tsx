@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { PRIMARY_CLASSES, SUB_TYPES, FORMS } from "../../../shared/sku-constants";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,8 +18,13 @@ export default function Inventory() {
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [skuPreview, setSkuPreview] = useState("");
+  
   const [itemForm, setItemForm] = useState({
     itemNumber: "",
+    primaryClass: "",
+    subType: "",
+    form: "",
     name: "",
     longDescription: "",
     itemStatus: "active" as "active" | "inactive" | "discontinued" | "obsolete",
@@ -34,26 +40,38 @@ export default function Inventory() {
     currentStock: "",
     reorderPoint: "",
     unitCost: "",
+    locationId: "",
   });
+  
   const [locationForm, setLocationForm] = useState({
     name: "",
     locationType: "warehouse" as "warehouse" | "house" | "silo" | "cold_storage" | "other",
     description: "",
   });
 
+  // Update SKU preview when SKU components change
+  useEffect(() => {
+    if (itemForm.primaryClass && itemForm.subType && itemForm.form) {
+      setSkuPreview(`${itemForm.primaryClass}-${itemForm.subType}-${itemForm.form}-###`);
+    } else {
+      setSkuPreview("");
+    }
+  }, [itemForm.primaryClass, itemForm.subType, itemForm.form]);
+
   // Queries
   const { data: items = [], refetch: refetchItems } = trpc.inventory.listItems.useQuery({ isActive: true });
   const { data: locations = [], refetch: refetchLocations } = trpc.inventory.listLocations.useQuery({ isActive: true });
-  const { data: stockLevels = [] } = trpc.inventory.getAllStockLevels.useQuery();
+  const { data: stockLevels = [], refetch: refetchStockLevels } = trpc.inventory.getAllStockLevels.useQuery();
   const { data: reorderAlerts = [] } = trpc.inventory.getReorderAlerts.useQuery();
 
   // Mutations
   const createItemMutation = trpc.inventory.createItem.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Item created successfully");
       setItemDialogOpen(false);
       resetItemForm();
-      refetchItems();
+      await refetchItems();
+      await refetchStockLevels(); // Refresh stock levels after creating item with initial stock
     },
     onError: (error) => {
       toast.error(`Failed to create item: ${error.message}`);
@@ -98,6 +116,9 @@ export default function Inventory() {
   const resetItemForm = () => {
     setItemForm({
       itemNumber: "",
+      primaryClass: "",
+      subType: "",
+      form: "",
       name: "",
       longDescription: "",
       itemStatus: "active",
@@ -113,7 +134,9 @@ export default function Inventory() {
       currentStock: "",
       reorderPoint: "",
       unitCost: "",
+      locationId: "",
     });
+    setSkuPreview("");
   };
 
   const resetLocationForm = () => {
@@ -126,7 +149,10 @@ export default function Inventory() {
 
   const handleCreateItem = () => {
     createItemMutation.mutate({
-      itemNumber: itemForm.itemNumber,
+      itemNumber: itemForm.itemNumber || undefined,
+      primaryClass: itemForm.primaryClass || undefined,
+      subType: itemForm.subType || undefined,
+      form: itemForm.form || undefined,
       name: itemForm.name,
       longDescription: itemForm.longDescription || undefined,
       itemStatus: itemForm.itemStatus,
@@ -142,6 +168,7 @@ export default function Inventory() {
       currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : 0,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
+      locationId: itemForm.locationId ? parseInt(itemForm.locationId) : undefined,
     });
   };
 
@@ -171,6 +198,9 @@ export default function Inventory() {
     setEditingItem(item);
     setItemForm({
       itemNumber: item.itemNumber,
+      primaryClass: "",
+      subType: "",
+      form: "",
       name: item.name,
       longDescription: item.longDescription || "",
       itemStatus: item.itemStatus || "active",
@@ -186,6 +216,7 @@ export default function Inventory() {
       currentStock: item.currentStock || "",
       reorderPoint: item.reorderPoint || "",
       unitCost: item.unitCost ? (item.unitCost / 100).toFixed(2) : "",
+      locationId: "",
     });
     setItemDialogOpen(true);
   };
@@ -495,30 +526,125 @@ export default function Inventory() {
 
       {/* Add/Edit Item Dialog */}
       <Dialog open={itemDialogOpen} onOpenChange={setItemDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingItem ? "Edit Item" : "Add New Item"}</DialogTitle>
             <DialogDescription>
               {editingItem ? "Update item details" : "Add a new item to your inventory catalog"}
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[70vh] overflow-y-auto space-y-6">
+          <div className="space-y-6 py-4">
+            {/* SKU Generation Section - Only show when creating new item */}
+            {!editingItem && (
+              <div className="space-y-4 border-b pb-4">
+                <div>
+                  <h3 className="text-sm font-medium mb-2">SKU Generation</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    {/* Primary Class */}
+                    <div className="space-y-2">
+                      <Label htmlFor="primaryClass">Primary Class *</Label>
+                      <Select
+                        value={itemForm.primaryClass}
+                        onValueChange={(value) => {
+                          setItemForm({ 
+                            ...itemForm, 
+                            primaryClass: value,
+                            subType: "", // Reset sub-type when primary class changes
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select class" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.values(PRIMARY_CLASSES).map((pc) => (
+                            <SelectItem key={pc.code} value={pc.code}>
+                              {pc.code} - {pc.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Sub-Type */}
+                    <div className="space-y-2">
+                      <Label htmlFor="subType">Sub-Type *</Label>
+                      <Select
+                        value={itemForm.subType}
+                        onValueChange={(value) =>
+                          setItemForm({ ...itemForm, subType: value })
+                        }
+                        disabled={!itemForm.primaryClass}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select sub-type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {itemForm.primaryClass &&
+                            SUB_TYPES[itemForm.primaryClass]?.map((st) => (
+                              <SelectItem key={st.code} value={st.code}>
+                                {st.code} - {st.label}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Form */}
+                    <div className="space-y-2">
+                      <Label htmlFor="form">Form *</Label>
+                      <Select
+                        value={itemForm.form}
+                        onValueChange={(value) =>
+                          setItemForm({ ...itemForm, form: value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select form" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FORMS.map((f) => (
+                            <SelectItem key={f.code} value={f.code}>
+                              {f.code} - {f.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* SKU Preview */}
+                  {skuPreview && (
+                    <div className="mt-3 p-3 bg-muted rounded-md">
+                      <p className="text-sm font-medium">Generated SKU Preview:</p>
+                      <p className="text-lg font-mono font-bold text-primary">{skuPreview}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Sequential number will be auto-assigned on creation
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Show SKU as read-only when editing */}
+            {editingItem && (
+              <div className="space-y-2">
+                <Label htmlFor="itemNumber">Item Number (SKU)</Label>
+                <Input
+                  id="itemNumber"
+                  value={itemForm.itemNumber}
+                  disabled
+                  className="bg-muted"
+                />
+                <p className="text-xs text-muted-foreground">SKU is immutable and cannot be changed</p>
+              </div>
+            )}
+
             {/* Basic Information */}
             <div>
               <h3 className="text-sm font-semibold mb-3 text-muted-foreground">Basic Information</h3>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="itemNumber">Item Number (SKU) *</Label>
-                  <Input
-                    id="itemNumber"
-                    value={itemForm.itemNumber}
-                    onChange={(e) => setItemForm({ ...itemForm, itemNumber: e.target.value })}
-                    disabled={!!editingItem}
-                    placeholder="FEED-001"
-                    title={editingItem ? "Item number cannot be changed after creation" : ""}
-                  />
-                  {editingItem && <p className="text-xs text-muted-foreground">SKU is immutable</p>}
-                </div>
                 <div className="space-y-2">
                   <Label htmlFor="name">Name *</Label>
                   <Input
@@ -526,6 +652,15 @@ export default function Inventory() {
                     value={itemForm.name}
                     onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })}
                     placeholder="Starter Feed Premium"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="unit">Unit *</Label>
+                  <Input
+                    id="unit"
+                    value={itemForm.unit}
+                    onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })}
+                    placeholder="kg, bags, liters"
                   />
                 </div>
                 <div className="col-span-2 space-y-2">
@@ -589,15 +724,6 @@ export default function Inventory() {
                       <SelectItem value="live_birds">Live Birds</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="unit">Unit *</Label>
-                  <Input
-                    id="unit"
-                    value={itemForm.unit}
-                    onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })}
-                    placeholder="kg, bags, liters"
-                  />
                 </div>
               </div>
             </div>
@@ -684,7 +810,7 @@ export default function Inventory() {
                     onChange={(e) => setItemForm({ ...itemForm, currentStock: e.target.value })}
                     placeholder="0"
                   />
-                  <p className="text-xs text-muted-foreground">Quantity on hand</p>
+                  <p className="text-xs text-muted-foreground">Initial quantity</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="reorderPoint">Reorder Point</Label>
@@ -696,6 +822,7 @@ export default function Inventory() {
                     onChange={(e) => setItemForm({ ...itemForm, reorderPoint: e.target.value })}
                     placeholder="100"
                   />
+                  <p className="text-xs text-muted-foreground">Alert threshold</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="unitCost">Unit Cost (R)</Label>
@@ -705,18 +832,46 @@ export default function Inventory() {
                     step="0.01"
                     value={itemForm.unitCost}
                     onChange={(e) => setItemForm({ ...itemForm, unitCost: e.target.value })}
-                    placeholder="25.50"
+                    placeholder="0.00"
                   />
+                  <p className="text-xs text-muted-foreground">Cost per unit</p>
                 </div>
               </div>
+
+              {/* Location Selector - Only show when creating new item with stock */}
+              {!editingItem && (
+                <div className="space-y-2 mt-4">
+                  <Label htmlFor="locationId">Stock Location *</Label>
+                  <Select
+                    value={itemForm.locationId}
+                    onValueChange={(value) =>
+                      setItemForm({ ...itemForm, locationId: value })
+                    }
+                  >
+                    <SelectTrigger id="locationId">
+                      <SelectValue placeholder="Select location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {locations.map((loc) => (
+                        <SelectItem key={loc.id} value={loc.id.toString()}>
+                          {loc.name} ({loc.locationType})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Where initial stock is stored
+                  </p>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setItemDialogOpen(false); setEditingItem(null); }}>
+            <Button variant="outline" onClick={() => setItemDialogOpen(false)}>
               Cancel
             </Button>
             <Button onClick={editingItem ? handleUpdateItem : handleCreateItem}>
-              {editingItem ? "Update" : "Create"}
+              {editingItem ? "Update Item" : "Create Item"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -727,11 +882,11 @@ export default function Inventory() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add New Location</DialogTitle>
-            <DialogDescription>Create a new storage location</DialogDescription>
+            <DialogDescription>Create a new storage location for inventory</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="locationName">Location Name</Label>
+              <Label htmlFor="locationName">Location Name *</Label>
               <Input
                 id="locationName"
                 value={locationForm.name}
@@ -740,7 +895,7 @@ export default function Inventory() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="locationType">Location Type</Label>
+              <Label htmlFor="locationType">Location Type *</Label>
               <Select value={locationForm.locationType} onValueChange={(value: any) => setLocationForm({ ...locationForm, locationType: value })}>
                 <SelectTrigger>
                   <SelectValue />
@@ -755,12 +910,13 @@ export default function Inventory() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="locationDescription">Description (optional)</Label>
-              <Input
+              <Label htmlFor="locationDescription">Description</Label>
+              <textarea
                 id="locationDescription"
+                className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 value={locationForm.description}
                 onChange={(e) => setLocationForm({ ...locationForm, description: e.target.value })}
-                placeholder="Primary storage facility"
+                placeholder="Additional details about this location..."
               />
             </div>
           </div>
@@ -768,10 +924,11 @@ export default function Inventory() {
             <Button variant="outline" onClick={() => setLocationDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateLocation}>Create</Button>
+            <Button onClick={handleCreateLocation}>Create Location</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
+
