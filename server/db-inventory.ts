@@ -1,7 +1,7 @@
-import { formatSKU } from "../shared/sku-constants";
 import { getDb } from "./db";
 import { inventoryItems, inventoryLocations, inventoryStock, inventoryTransactions } from "../drizzle/schema";
-import { eq, and, sql, desc, gte, lte } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lte, like } from "drizzle-orm";  // ← ADD 'like' HERE
+import { formatSKU } from "../shared/sku-constants";
 
 /**
  * Get the next sequential number for a SKU pattern
