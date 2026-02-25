@@ -16,7 +16,10 @@ export default function Inventory() {
   const [activeTab, setActiveTab] = useState("items");
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [transactionDialogOpen, setTransactionDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [selectedStock, setSelectedStock] = useState<any>(null);
+  const [transactionType, setTransactionType] = useState<"receipt" | "issue" | "transfer" | "adjustment">("receipt");
   const [itemForm, setItemForm] = useState({
     itemNumber: "",
     primaryClass: "",
@@ -44,12 +47,21 @@ export default function Inventory() {
     locationType: "warehouse" as "warehouse" | "house" | "silo" | "cold_storage" | "other",
     description: "",
   });
+  const [transactionForm, setTransactionForm] = useState({
+    quantity: "",
+    unitCost: "",
+    totalCost: "",
+    referenceNumber: "",
+    notes: "",
+    toLocationId: "", // For transfers
+    flockId: "", // For issues to flocks
+  });
 
   // Queries
   const { data: items = [], refetch: refetchItems } = trpc.inventory.listItems.useQuery({ isActive: true });
   const { data: locations = [], refetch: refetchLocations } = trpc.inventory.listLocations.useQuery({ isActive: true });
   const { data: stockLevels = [], refetch: refetchStockLevels } = trpc.inventory.getAllStockLevels.useQuery();
-  const { data: reorderAlerts = [] } = trpc.inventory.getReorderAlerts.useQuery();
+  const { data: reorderAlerts = [], refetch: refetchReorderAlerts } = trpc.inventory.getReorderAlerts.useQuery();
 
   // Mutations
   const createItemMutation = trpc.inventory.createItem.useMutation({
@@ -100,6 +112,19 @@ export default function Inventory() {
     },
   });
 
+  const recordTransactionMutation = trpc.inventory.recordTransaction.useMutation({
+    onSuccess: () => {
+      toast.success("Stock transaction recorded successfully");
+      setTransactionDialogOpen(false);
+      resetTransactionForm();
+      refetchStockLevels();
+      refetchReorderAlerts(); // Refresh reorder alerts after transaction
+    },
+    onError: (error) => {
+      toast.error(`Transaction failed: ${error.message}`);
+    },
+  });
+
   const resetItemForm = () => {
     setItemForm({
       itemNumber: "",
@@ -130,6 +155,49 @@ export default function Inventory() {
       name: "",
       locationType: "warehouse",
       description: "",
+    });
+  };
+
+  const resetTransactionForm = () => {
+    setTransactionForm({
+      quantity: "",
+      unitCost: "",
+      totalCost: "",
+      referenceNumber: "",
+      notes: "",
+      toLocationId: "",
+      flockId: "",
+    });
+  };
+
+  const openTransactionDialog = (stock: any, type: "receipt" | "issue" | "transfer" | "adjustment") => {
+    setSelectedStock(stock);
+    setTransactionType(type);
+    resetTransactionForm();
+    setTransactionDialogOpen(true);
+  };
+
+  const handleTransaction = () => {
+    if (!selectedStock) return;
+
+    const quantity = parseFloat(transactionForm.quantity);
+    if (isNaN(quantity) || quantity <= 0) {
+      toast.error("Please enter a valid quantity");
+      return;
+    }
+
+    recordTransactionMutation.mutate({
+      itemId: selectedStock.itemId,
+      locationId: selectedStock.locationId,
+      transactionType,
+      quantity,
+      unitCost: transactionForm.unitCost ? parseFloat(transactionForm.unitCost) : undefined,
+      totalCost: transactionForm.totalCost ? parseFloat(transactionForm.totalCost) : undefined,
+      referenceNumber: transactionForm.referenceNumber || undefined,
+      notes: transactionForm.notes || undefined,
+      transactionDate: new Date(),
+      toLocationId: transactionForm.toLocationId ? parseInt(transactionForm.toLocationId) : undefined,
+      flockId: transactionForm.flockId ? parseInt(transactionForm.flockId) : undefined,
     });
   };
 
@@ -434,6 +502,7 @@ export default function Inventory() {
                     <TableHead>Location</TableHead>
                     <TableHead>Quantity</TableHead>
                     <TableHead>Last Updated</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -463,6 +532,34 @@ export default function Inventory() {
                       </TableCell>
                       <TableCell>
                         {stock.lastUpdated ? new Date(stock.lastUpdated).toLocaleDateString() : "-"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openTransactionDialog(stock, "receipt")}
+                            title="Receive Stock"
+                          >
+                            📥 Receive
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openTransactionDialog(stock, "issue")}
+                            title="Issue Stock"
+                          >
+                            📤 Issue
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openTransactionDialog(stock, "transfer")}
+                            title="Transfer Stock"
+                          >
+                            🔄 Transfer
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -922,6 +1019,112 @@ export default function Inventory() {
               Cancel
             </Button>
             <Button onClick={handleCreateLocation}>Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transaction Dialog */}
+      <Dialog open={transactionDialogOpen} onOpenChange={setTransactionDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {transactionType === "receipt" && "📥 Receive Stock"}
+              {transactionType === "issue" && "📤 Issue Stock"}
+              {transactionType === "transfer" && "🔄 Transfer Stock"}
+              {transactionType === "adjustment" && "✏️ Adjust Stock"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedStock && (
+                <div className="space-y-1">
+                  <p><strong>Item:</strong> {selectedStock.itemName} ({selectedStock.itemNumber})</p>
+                  <p><strong>Location:</strong> {selectedStock.locationName}</p>
+                  <p><strong>Current Stock:</strong> {parseFloat(selectedStock.quantity || "0").toFixed(2)} {selectedStock.unit}</p>
+                </div>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Quantity */}
+            <div>
+              <Label htmlFor="quantity">Quantity *</Label>
+              <Input
+                id="quantity"
+                type="number"
+                step="0.01"
+                placeholder="Enter quantity"
+                value={transactionForm.quantity}
+                onChange={(e) => setTransactionForm({ ...transactionForm, quantity: e.target.value })}
+              />
+            </div>
+
+            {/* Transfer: To Location */}
+            {transactionType === "transfer" && (
+              <div>
+                <Label htmlFor="toLocation">To Location *</Label>
+                <Select
+                  value={transactionForm.toLocationId}
+                  onValueChange={(value) => setTransactionForm({ ...transactionForm, toLocationId: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select destination" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locations
+                      .filter((loc) => loc.id !== selectedStock?.locationId)
+                      .map((loc) => (
+                        <SelectItem key={loc.id} value={loc.id.toString()}>
+                          {loc.name} ({loc.locationType})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Receipt: Unit Cost */}
+            {transactionType === "receipt" && (
+              <div>
+                <Label htmlFor="unitCost">Unit Cost</Label>
+                <Input
+                  id="unitCost"
+                  type="number"
+                  step="0.01"
+                  placeholder="Cost per unit"
+                  value={transactionForm.unitCost}
+                  onChange={(e) => setTransactionForm({ ...transactionForm, unitCost: e.target.value })}
+                />
+              </div>
+            )}
+
+            {/* Reference Number */}
+            <div>
+              <Label htmlFor="referenceNumber">Reference Number</Label>
+              <Input
+                id="referenceNumber"
+                placeholder="PO#, Invoice#, etc."
+                value={transactionForm.referenceNumber}
+                onChange={(e) => setTransactionForm({ ...transactionForm, referenceNumber: e.target.value })}
+              />
+            </div>
+
+            {/* Notes */}
+            <div>
+              <Label htmlFor="notes">Notes</Label>
+              <Input
+                id="notes"
+                placeholder="Additional information"
+                value={transactionForm.notes}
+                onChange={(e) => setTransactionForm({ ...transactionForm, notes: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransactionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleTransaction} disabled={recordTransactionMutation.isPending}>
+              {recordTransactionMutation.isPending ? "Processing..." : "Confirm"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

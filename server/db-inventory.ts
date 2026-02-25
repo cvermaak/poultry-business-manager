@@ -207,7 +207,6 @@ export async function createInventoryItem(data: {
       itemId: insertId,
       locationId,
       quantity: data.currentStock.toString(),
-      lastUpdated: sql`NOW()`, // Explicitly set timestamp
       updatedBy: 1, // System user
     });
   }
@@ -306,16 +305,8 @@ export async function createInventoryLocation(data: {
   const db = await getDb();
   if (!db) return null;
 
-  const result = await db.insert(inventoryLocations).values(data as any);
-  
-  // Fetch the created location to return complete data
-  const insertId = Number(result[0].insertId);
-  const [createdLocation] = await db
-    .select()
-    .from(inventoryLocations)
-    .where(eq(inventoryLocations.id, insertId));
-  
-  return createdLocation || null;
+  const [location] = await db.insert(inventoryLocations).values(data as any);
+  return location;
 }
 
 export async function updateInventoryLocation(
@@ -435,28 +426,208 @@ export async function updateStock(
 // INVENTORY TRANSACTIONS
 // ============================================================================
 
+// Helper function to get current stock level
+async function getStockLevel(itemId: number, locationId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const [stock] = await db
+    .select()
+    .from(inventoryStock)
+    .where(and(
+      eq(inventoryStock.itemId, itemId),
+      eq(inventoryStock.locationId, locationId)
+    ));
+
+  return stock ? Number(stock.quantity) : 0;
+}
+
+// Helper function to update stock level (add or subtract)
+async function updateStockLevel(
+  itemId: number,
+  locationId: number,
+  quantity: number,
+  operation: "add" | "subtract",
+  updatedBy: number = 1
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database connection failed");
+
+  const currentStock = await getStockLevel(itemId, locationId);
+  const newStock = operation === "add" 
+    ? currentStock + quantity 
+    : currentStock - quantity;
+
+  if (newStock < 0) {
+    throw new Error(`Insufficient stock. Available: ${currentStock}, Requested: ${quantity}`);
+  }
+
+  // Check if stock record exists
+  const [existing] = await db
+    .select()
+    .from(inventoryStock)
+    .where(and(
+      eq(inventoryStock.itemId, itemId),
+      eq(inventoryStock.locationId, locationId)
+    ));
+
+  if (existing) {
+    // Update existing record
+    await db
+      .update(inventoryStock)
+      .set({
+        quantity: newStock.toString(),
+        lastUpdated: sql`NOW()`,
+        updatedBy,
+      })
+      .where(and(
+        eq(inventoryStock.itemId, itemId),
+        eq(inventoryStock.locationId, locationId)
+      ));
+  } else {
+    // Insert new record
+    await db.insert(inventoryStock).values({
+      itemId,
+      locationId,
+      quantity: newStock.toString(),
+      lastUpdated: sql`NOW()`,
+      updatedBy,
+    });
+  }
+}
+
+// Helper function to set stock level to exact value (for adjustments)
+async function setStockLevel(
+  itemId: number,
+  locationId: number,
+  quantity: number,
+  updatedBy: number = 1
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database connection failed");
+
+  // Check if stock record exists
+  const [existing] = await db
+    .select()
+    .from(inventoryStock)
+    .where(and(
+      eq(inventoryStock.itemId, itemId),
+      eq(inventoryStock.locationId, locationId)
+    ));
+
+  if (existing) {
+    // Update existing record
+    await db
+      .update(inventoryStock)
+      .set({
+        quantity: quantity.toString(),
+        lastUpdated: sql`NOW()`,
+        updatedBy,
+      })
+      .where(and(
+        eq(inventoryStock.itemId, itemId),
+        eq(inventoryStock.locationId, locationId)
+      ));
+  } else {
+    // Insert new record
+    await db.insert(inventoryStock).values({
+      itemId,
+      locationId,
+      quantity: quantity.toString(),
+      lastUpdated: sql`NOW()`,
+      updatedBy,
+    });
+  }
+}
+
 export async function recordTransaction(data: {
   itemId: number;
-  locationId?: number;
+  locationId: number; // Make required
   transactionType: "receipt" | "issue" | "transfer" | "adjustment";
   quantity: number;
   unitCost?: number;
   totalCost?: number;
-  referenceType?: string;
-  referenceId?: number;
+  referenceNumber?: string;
   notes?: string;
   transactionDate: Date;
   createdBy: number;
+  flockId?: number; // For linking to flocks
+  toLocationId?: number; // For transfers
 }) {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) throw new Error("Database connection failed");
 
-  const [transaction] = await db.insert(inventoryTransactions).values({
-    ...data,
+  // Validate sufficient stock for ISSUE/TRANSFER
+  if (data.transactionType === "issue" || data.transactionType === "transfer") {
+    const currentStock = await getStockLevel(data.itemId, data.locationId);
+    if (currentStock < data.quantity) {
+      throw new Error(`Insufficient stock. Available: ${currentStock} ${data.quantity > 1 ? 'units' : 'unit'}, Requested: ${data.quantity}`);
+    }
+  }
+
+  // Validate transfer has toLocationId
+  if (data.transactionType === "transfer" && !data.toLocationId) {
+    throw new Error("Transfer requires destination location (toLocationId)");
+  }
+
+  // Validate from and to locations are different for transfers
+  if (data.transactionType === "transfer" && data.locationId === data.toLocationId) {
+    throw new Error("Cannot transfer to the same location");
+  }
+
+  // Record the transaction
+  const result = await db.insert(inventoryTransactions).values({
+    itemId: data.itemId,
+    locationId: data.locationId,
+    transactionType: data.transactionType,
     quantity: data.quantity.toString(),
+    unitPrice: data.unitCost?.toString(),
+    totalCost: data.totalCost?.toString(),
+    referenceNumber: data.referenceNumber,
+    notes: data.notes,
+    transactionDate: data.transactionDate,
+    createdBy: data.createdBy,
+    flockId: data.flockId,
   } as any);
 
-  return transaction;
+  const transactionId = Number(result[0].insertId);
+
+  // Update stock levels based on transaction type
+  switch (data.transactionType) {
+    case "receipt":
+      await updateStockLevel(data.itemId, data.locationId, data.quantity, "add", data.createdBy);
+      break;
+
+    case "issue":
+      await updateStockLevel(data.itemId, data.locationId, data.quantity, "subtract", data.createdBy);
+      break;
+
+    case "transfer":
+      if (!data.toLocationId) throw new Error("Transfer requires toLocationId");
+      // Subtract from source location
+      await updateStockLevel(data.itemId, data.locationId, data.quantity, "subtract", data.createdBy);
+      // Add to destination location
+      await updateStockLevel(data.itemId, data.toLocationId, data.quantity, "add", data.createdBy);
+      // Record second transaction for destination
+      await db.insert(inventoryTransactions).values({
+        itemId: data.itemId,
+        locationId: data.toLocationId,
+        transactionType: "receipt",
+        quantity: data.quantity.toString(),
+        referenceNumber: `TRANSFER-${transactionId}`,
+        notes: `Transfer from location ${data.locationId}${data.notes ? ': ' + data.notes : ''}`,
+        transactionDate: data.transactionDate,
+        createdBy: data.createdBy,
+      } as any);
+      break;
+
+    case "adjustment":
+      // Set new stock level directly
+      await setStockLevel(data.itemId, data.locationId, data.quantity, data.createdBy);
+      break;
+  }
+
+  return transactionId;
 }
 
 export async function getTransactionHistory(
@@ -530,7 +701,7 @@ export async function getReorderAlerts() {
       )
     )
     .groupBy(inventoryItems.id)
-    .having(sql`COALESCE(SUM(${inventoryStock.quantity}), 0) < ${inventoryItems.reorderPoint}`);
+    .having(sql`COALESCE(SUM(${inventoryStock.quantity}), 0) <= ${inventoryItems.reorderPoint}`);
 
   return alerts;
 }
