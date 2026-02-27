@@ -482,6 +482,7 @@ export const inventoryItems = mysqlTable("inventory_items", {
 	model: varchar({ length: 100 }),
 	category: mysqlEnum(['live_birds','feed','raw_materials','supplies','equipment']).notNull(),
 	unit: varchar({ length: 50 }).notNull(),
+	bagSizeKg: decimal({ precision: 10, scale: 2 }),
 	currentStock: decimal({ precision: 10, scale: 2 }).default('0').notNull(),
 	reorderPoint: decimal({ precision: 10, scale: 2 }),
 	unitCost: int(),

@@ -10,7 +10,7 @@ import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, 
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
 import { sdk } from "./_core/sdk";
-import { slaughterRouter } from "./procedures/slaughter";
+// import { slaughterRouter } from "./procedures/slaughter";
 import { harvestRouter } from "./procedures/harvest";
 import { processorRouter } from "./procedures/processor";
 import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
@@ -313,6 +313,9 @@ export const appRouter = router({
           gpsLongitude: z.number().optional(),
           province: z.string().optional(),
           district: z.string().optional(),
+          mortalityRate: z.number().min(0).max(100).default(4.0),
+          targetSlaughterWeight: z.number().positive().default(1.9),
+          densityKgPerSqm: z.number().positive().optional(),
           beddingType: z.string().default("pine_shavings"),
           beddingDepth: z.number().int().default(30),
           numberOfFeeders: z.number().int().optional(),
@@ -323,16 +326,52 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
+        // Import capacity calculation helper
+        const { calculateHouseCapacity, validateDensity, getRecommendedDensity } = await import("./house-capacity");
+        
+        // Calculate floor area
+        const floorArea = input.length * input.width;
+        
+        // Use provided density or get recommended density for house type
+        const densityToUse = input.densityKgPerSqm || getRecommendedDensity(input.houseType);
+        
+        // Validate density is within safe range
+        const validation = validateDensity(input.houseType, densityToUse);
+        if (!validation.valid) {
+          throw new Error(validation.message);
+        }
+        
+        // Calculate capacity if not manually overridden
+        const capacityCalculation = calculateHouseCapacity({
+          floorArea,
+          houseType: input.houseType,
+          densityKgPerSqm: densityToUse,
+          targetSlaughterWeight: input.targetSlaughterWeight,
+          mortalityRate: input.mortalityRate,
+        });
+        
         await db.createHouse({ 
           ...input, 
           length: input.length.toString(),
           width: input.width.toString(),
           gpsLatitude: input.gpsLatitude?.toString(),
           gpsLongitude: input.gpsLongitude?.toString(),
+          mortalityRate: input.mortalityRate.toString(),
+          targetSlaughterWeight: input.targetSlaughterWeight.toString(),
+          densityKgPerSqm: densityToUse.toString(),
+          // Use calculated capacity if not manually overridden
+          capacity: input.capacity || capacityCalculation.placementCapacity,
           createdBy: ctx.user.id 
         });
         await db.logUserActivity(ctx.user.id, "create_house", "house", undefined, `Created house: ${input.name}`);
-        return { success: true };
+        return { 
+          success: true,
+          capacityCalculation: {
+            ...capacityCalculation,
+            calculatedCapacity: capacityCalculation.placementCapacity,
+            usedCapacity: input.capacity || capacityCalculation.placementCapacity,
+          },
+        };
       }),
 
     update: protectedProcedure
@@ -359,6 +398,9 @@ export const appRouter = router({
           district: z.string().optional(),
           gpsLatitude: z.string().optional(),
           gpsLongitude: z.string().optional(),
+          mortalityRate: z.number().min(0).max(100).optional(),
+          targetSlaughterWeight: z.number().positive().optional(),
+          densityKgPerSqm: z.number().positive().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -1462,7 +1504,7 @@ export const appRouter = router({
   // ============================================================================
   // SLAUGHTER TRACKING
   // ============================================================================
-  slaughter: slaughterRouter,
+  // slaughter: slaughterRouter, // Temporarily disabled - missing database schema
 
   // ============================================================================
   // HARVEST MANAGEMENT
