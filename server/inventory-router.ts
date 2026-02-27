@@ -171,22 +171,30 @@ export const inventoryRouter = router({
     .input(
       z.object({
         itemId: z.number(),
-        locationId: z.number().optional(),
+        locationId: z.number(), // Now required
         transactionType: z.enum(["receipt", "issue", "transfer", "adjustment"]),
-        quantity: z.number(),
+        quantity: z.number().positive("Quantity must be positive"),
         unitCost: z.number().optional(),
         totalCost: z.number().optional(),
-        referenceType: z.string().optional(),
-        referenceId: z.number().optional(),
+        referenceNumber: z.string().optional(),
         notes: z.string().optional(),
         transactionDate: z.date(),
+        flockId: z.number().optional(), // For linking to flocks
+        toLocationId: z.number().optional(), // For transfers
       })
     )
     .mutation(async ({ input, ctx }) => {
-      return await inventoryDb.recordTransaction({
-        ...input,
-        createdBy: ctx.user.id,
-      });
+      try {
+        return await inventoryDb.recordTransaction({
+          ...input,
+          createdBy: ctx.user.id,
+        });
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "Failed to record transaction",
+        });
+      }
     }),
 
   getTransactionHistory: protectedProcedure
@@ -207,11 +215,17 @@ export const inventoryRouter = router({
       );
     }),
 
-  // ============================================================================
+   // ============================================================================
   // REORDER ALERTS
   // ============================================================================
-
   getReorderAlerts: protectedProcedure.query(async () => {
     return await inventoryDb.getReorderAlerts();
+  }),
+
+  // ============================================================================
+  // STOCK VALUATION
+  // ============================================================================
+  getStockValuation: protectedProcedure.query(async () => {
+    return await inventoryDb.getStockValuation();
   }),
 });

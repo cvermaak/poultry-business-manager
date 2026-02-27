@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Package, MapPin, TrendingDown, Edit, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Package, MapPin, TrendingDown, Edit, Trash2, AlertTriangle, History, Download, Filter, TrendingUp, PieChart } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Inventory() {
@@ -47,6 +47,15 @@ export default function Inventory() {
     locationType: "warehouse" as "warehouse" | "house" | "silo" | "cold_storage" | "other",
     description: "",
   });
+  const [historyFilters, setHistoryFilters] = useState({
+    itemId: "all",
+    locationId: "all",
+    transactionType: "all",
+    startDate: "",
+    endDate: "",
+    searchQuery: "",
+  });
+
   const [transactionForm, setTransactionForm] = useState({
     quantity: "",
     unitCost: "",
@@ -62,6 +71,13 @@ export default function Inventory() {
   const { data: locations = [], refetch: refetchLocations } = trpc.inventory.listLocations.useQuery({ isActive: true });
   const { data: stockLevels = [], refetch: refetchStockLevels } = trpc.inventory.getAllStockLevels.useQuery();
   const { data: reorderAlerts = [], refetch: refetchReorderAlerts } = trpc.inventory.getReorderAlerts.useQuery();
+  const { data: stockValuation } = trpc.inventory.getStockValuation.useQuery();
+  const { data: transactionHistory = [] } = trpc.inventory.getTransactionHistory.useQuery({
+    itemId: historyFilters.itemId && historyFilters.itemId !== "all" ? parseInt(historyFilters.itemId) : undefined,
+    locationId: historyFilters.locationId && historyFilters.locationId !== "all" ? parseInt(historyFilters.locationId) : undefined,
+    startDate: historyFilters.startDate ? new Date(historyFilters.startDate) : undefined,
+    endDate: historyFilters.endDate ? new Date(historyFilters.endDate) : undefined,
+  });
 
   // Mutations
   const createItemMutation = trpc.inventory.createItem.useMutation({
@@ -305,6 +321,67 @@ export default function Inventory() {
     return colors[type] || "bg-gray-100 text-gray-800";
   };
 
+  // Filter transactions by search query
+  const filteredTransactions = transactionHistory.filter((transaction) => {
+    // Filter by transaction type
+    if (historyFilters.transactionType && historyFilters.transactionType !== "all" && transaction.transactionType !== historyFilters.transactionType) {
+      return false;
+    }
+    // Filter by search query (reference number)
+    if (historyFilters.searchQuery && !transaction.referenceNumber?.toLowerCase().includes(historyFilters.searchQuery.toLowerCase())) {
+      return false;
+    }
+    return true;
+  });
+
+  // CSV Export Function
+  const exportToCSV = (data: any[], filename: string) => {
+    if (data.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+
+    const headers = [
+      "Date",
+      "Type",
+      "Item",
+      "Location",
+      "Quantity",
+      "Unit Cost (R)",
+      "Total Cost (R)",
+      "Reference",
+      "Notes",
+    ];
+
+    const rows = data.map((transaction) => [
+      new Date(transaction.transactionDate!).toLocaleDateString(),
+      transaction.transactionType,
+      transaction.itemName,
+      transaction.locationName,
+      parseFloat(transaction.quantity || "0").toFixed(2),
+      transaction.unitCost ? (parseFloat(transaction.unitCost) / 100).toFixed(2) : "",
+      transaction.totalCost ? (parseFloat(transaction.totalCost) / 100).toFixed(2) : "",
+      transaction.referenceNumber || "",
+      transaction.notes || "",
+    ]);
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${filename}-${new Date().toISOString().split("T")[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("CSV exported successfully");
+  };
+
   // Calculate total stock per item
   const itemStockMap = stockLevels.reduce((acc, stock) => {
     if (!acc[stock.itemId!]) {
@@ -378,6 +455,14 @@ export default function Inventory() {
           <TabsTrigger value="locations">
             <MapPin className="h-4 w-4 mr-2" />
             Locations
+          </TabsTrigger>
+          <TabsTrigger value="history">
+            <History className="h-4 w-4 mr-2" />
+            Transaction History
+          </TabsTrigger>
+          <TabsTrigger value="valuation">
+            <TrendingUp className="h-4 w-4 mr-2" />
+            Stock Valuation
           </TabsTrigger>
         </TabsList>
 
@@ -602,6 +687,423 @@ export default function Inventory() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Transaction History Tab */}
+        <TabsContent value="history">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Transaction History</CardTitle>
+                  <CardDescription>Complete audit trail of all stock movements</CardDescription>
+                </div>
+                <Button onClick={() => exportToCSV(filteredTransactions, 'transaction-history')}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export to CSV
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6 p-4 bg-muted/50 rounded-lg">
+                <div className="space-y-2">
+                  <Label htmlFor="filterItem">Item</Label>
+                  <Select value={historyFilters.itemId} onValueChange={(value) => setHistoryFilters({ ...historyFilters, itemId: value })}>
+                    <SelectTrigger id="filterItem">
+                      <SelectValue placeholder="All items" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All items</SelectItem>
+                      {items.map((item) => (
+                        <SelectItem key={item.id} value={item.id!.toString()}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="filterLocation">Location</Label>
+                  <Select value={historyFilters.locationId} onValueChange={(value) => setHistoryFilters({ ...historyFilters, locationId: value })}>
+                    <SelectTrigger id="filterLocation">
+                      <SelectValue placeholder="All locations" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All locations</SelectItem>
+                      {locations.map((location) => (
+                        <SelectItem key={location.id} value={location.id!.toString()}>
+                          {location.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="filterType">Transaction Type</Label>
+                  <Select value={historyFilters.transactionType} onValueChange={(value) => setHistoryFilters({ ...historyFilters, transactionType: value })}>
+                    <SelectTrigger id="filterType">
+                      <SelectValue placeholder="All types" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All types</SelectItem>
+                      <SelectItem value="receipt">Receipt</SelectItem>
+                      <SelectItem value="issue">Issue</SelectItem>
+                      <SelectItem value="transfer">Transfer</SelectItem>
+                      <SelectItem value="adjustment">Adjustment</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="filterStartDate">Start Date</Label>
+                  <Input
+                    id="filterStartDate"
+                    type="date"
+                    value={historyFilters.startDate}
+                    onChange={(e) => setHistoryFilters({ ...historyFilters, startDate: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="filterEndDate">End Date</Label>
+                  <Input
+                    id="filterEndDate"
+                    type="date"
+                    value={historyFilters.endDate}
+                    onChange={(e) => setHistoryFilters({ ...historyFilters, endDate: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Search by Reference Number */}
+              <div className="mb-4">
+                <div className="relative">
+                  <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by reference number..."
+                    value={historyFilters.searchQuery}
+                    onChange={(e) => setHistoryFilters({ ...historyFilters, searchQuery: e.target.value })}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              {/* Transaction Table */}
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead className="text-right">Unit Cost</TableHead>
+                      <TableHead className="text-right">Total Cost</TableHead>
+                      <TableHead>Reference</TableHead>
+                      <TableHead>Notes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredTransactions.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                          No transactions found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredTransactions.map((transaction) => (
+                        <TableRow key={transaction.id}>
+                          <TableCell>
+                            {new Date(transaction.transactionDate!).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              className={
+                                transaction.transactionType === "receipt"
+                                  ? "bg-green-100 text-green-800"
+                                  : transaction.transactionType === "issue"
+                                  ? "bg-red-100 text-red-800"
+                                  : transaction.transactionType === "transfer"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-gray-100 text-gray-800"
+                              }
+                            >
+                              {transaction.transactionType}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{transaction.itemName}</TableCell>
+                          <TableCell>{transaction.locationName}</TableCell>
+                          <TableCell className="text-right">
+                            {parseFloat(transaction.quantity || "0").toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {transaction.unitCost
+                              ? `R${(parseFloat(transaction.unitCost) / 100).toFixed(2)}`
+                              : "-"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {transaction.totalCost
+                              ? `R${(parseFloat(transaction.totalCost) / 100).toFixed(2)}`
+                              : "-"}
+                          </TableCell>
+                          <TableCell>{transaction.referenceNumber || "-"}</TableCell>
+                          <TableCell className="max-w-xs truncate">
+                            {transaction.notes || "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Summary Stats */}
+              {filteredTransactions.length > 0 && (
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardDescription>Total Transactions</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">{filteredTransactions.length}</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardDescription>Receipts</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold text-green-600">
+                        {filteredTransactions.filter((t) => t.transactionType === "receipt").length}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardDescription>Issues</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold text-red-600">
+                        {filteredTransactions.filter((t) => t.transactionType === "issue").length}
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardDescription>Total Value</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold">
+                        R
+                        {(
+                          filteredTransactions.reduce(
+                            (sum, t) => sum + (parseFloat(t.totalCost || "0") / 100),
+                            0
+                          )
+                        ).toFixed(2)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Stock Valuation Tab */}
+        <TabsContent value="valuation">
+          <div className="space-y-6">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Total Inventory Value</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">R{stockValuation?.totalValue.toFixed(2) || "0.00"}</div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    As of {stockValuation?.generatedAt ? new Date(stockValuation.generatedAt).toLocaleString() : "-"}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Items in Stock</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{stockValuation?.items.length || 0}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Across all locations</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Categories</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold">{stockValuation?.byCategory.length || 0}</div>
+                  <p className="text-xs text-muted-foreground mt-1">Product categories</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Breakdown by Category */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <PieChart className="h-5 w-5" />
+                  Valuation by Category
+                </CardTitle>
+                <CardDescription>Stock value breakdown by product category</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Category</TableHead>
+                      <TableHead className="text-right">Items</TableHead>
+                      <TableHead className="text-right">Value</TableHead>
+                      <TableHead className="text-right">Percentage</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stockValuation?.byCategory.map((cat) => (
+                      <TableRow key={cat.category}>
+                        <TableCell className="font-medium capitalize">{cat.category.replace(/_/g, " ")}</TableCell>
+                        <TableCell className="text-right">{cat.items}</TableCell>
+                        <TableCell className="text-right font-mono">R{cat.value.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary"
+                                style={{ width: `${cat.percentage}%` }}
+                              />
+                            </div>
+                            <span className="text-sm text-muted-foreground">{cat.percentage.toFixed(1)}%</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(!stockValuation?.byCategory || stockValuation.byCategory.length === 0) && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                          No stock data available
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            {/* Breakdown by Location */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MapPin className="h-5 w-5" />
+                  Valuation by Location
+                </CardTitle>
+                <CardDescription>Stock value breakdown by storage location</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Items</TableHead>
+                      <TableHead className="text-right">Value</TableHead>
+                      <TableHead className="text-right">Percentage</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stockValuation?.byLocation.map((loc) => (
+                      <TableRow key={loc.location}>
+                        <TableCell className="font-medium">{loc.location}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="capitalize">
+                            {loc.locationType.replace(/_/g, " ")}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{loc.items}</TableCell>
+                        <TableCell className="text-right font-mono">R{loc.value.toFixed(2)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary"
+                                style={{ width: `${loc.percentage}%` }}
+                              />
+                            </div>
+                            <span className="text-sm text-muted-foreground">{loc.percentage.toFixed(1)}%</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(!stockValuation?.byLocation || stockValuation.byLocation.length === 0) && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                          No stock data available
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            {/* Top Items by Value */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Package className="h-5 w-5" />
+                  Top Items by Value
+                </CardTitle>
+                <CardDescription>Highest value items in stock</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item Number</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead className="text-right">Quantity</TableHead>
+                      <TableHead className="text-right">Unit Cost</TableHead>
+                      <TableHead className="text-right">Total Value</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stockValuation?.items.slice(0, 20).map((item, idx) => (
+                      <TableRow key={`${item.itemId}-${item.locationName}-${idx}`}>
+                        <TableCell className="font-mono text-sm">{item.itemNumber}</TableCell>
+                        <TableCell className="font-medium">{item.itemName}</TableCell>
+                        <TableCell>{item.locationName}</TableCell>
+                        <TableCell className="text-right">
+                          {parseFloat(item.quantity).toFixed(2)} {item.unit}
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {item.unitCost ? `R${parseFloat(item.unitCost).toFixed(2)}` : "-"}
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-semibold">
+                          R{item.totalValue.toFixed(2)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(!stockValuation?.items || stockValuation.items.length === 0) && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                          No stock data available
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 
