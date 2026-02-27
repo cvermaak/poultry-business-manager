@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as inventoryDb from "./db-inventory";
 
@@ -45,6 +46,7 @@ export const inventoryRouter = router({
         model: z.string().optional(),
         category: z.enum(["live_birds", "feed", "raw_materials", "supplies", "equipment"]),
         unit: z.string(),
+        bagSizeKg: z.number().optional(),
         currentStock: z.number().optional(),
         reorderPoint: z.number().optional(),
         unitCost: z.number().optional(),
@@ -72,6 +74,7 @@ export const inventoryRouter = router({
         model: z.string().optional(),
         category: z.enum(["live_birds", "feed", "raw_materials", "supplies", "equipment"]).optional(),
         unit: z.string().optional(),
+        bagSizeKg: z.number().optional(),
         currentStock: z.number().optional(),
         reorderPoint: z.number().optional(),
         unitCost: z.number().optional(),

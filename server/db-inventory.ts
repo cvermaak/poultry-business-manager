@@ -97,6 +97,7 @@ export async function createInventoryItem(data: {
   model?: string;
   category: string;
   unit: string;
+  bagSizeKg?: number;
   reorderPoint?: number;
   unitCost?: number;
   currentStock?: number;
@@ -151,6 +152,9 @@ export async function createInventoryItem(data: {
   if (data.brand) insertData.brand = data.brand;
   if (data.model) insertData.model = data.model;
 
+  if (data.bagSizeKg !== undefined) {
+    insertData.bagSizeKg = data.bagSizeKg.toString();
+  }
   if (data.reorderPoint !== undefined) {
     insertData.reorderPoint = data.reorderPoint.toString();
   }
@@ -230,6 +234,7 @@ export async function updateInventoryItem(
     model?: string;
     category?: string;
     unit?: string;
+    bagSizeKg?: number;
     reorderPoint?: number;
     unitCost?: number;
     currentStock?: number;
@@ -258,6 +263,9 @@ export async function updateInventoryItem(
   }
 
   const updateData: any = { ...data };
+  if (data.bagSizeKg !== undefined) {
+    updateData.bagSizeKg = data.bagSizeKg.toString();
+  }
   if (data.reorderPoint !== undefined) {
     updateData.reorderPoint = data.reorderPoint.toString();
   }
@@ -980,7 +988,7 @@ export async function getStockValuation() {
 
   for (const stock of stockWithDetails) {
     const qty = parseFloat(stock.quantity);
-    const cost = stock.unitCost ? parseFloat(stock.unitCost) : 0;
+    const cost = stock.unitCost ? parseFloat(stock.unitCost) / 100 : 0; // unitCost stored in cents, convert to Rand
     const value = qty * cost;
 
     totalValue += value;
