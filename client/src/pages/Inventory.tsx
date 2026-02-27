@@ -37,6 +37,7 @@ export default function Inventory() {
     model: "",
     category: "feed" as "feed" | "raw_materials" | "supplies" | "equipment" | "live_birds",
     unit: "",
+    bagSizeKg: "",
     currentStock: "",
     reorderPoint: "",
     unitCost: "",
@@ -66,6 +67,9 @@ export default function Inventory() {
     flockId: "", // For issues to flocks
   });
 
+  // Utils for invalidating queries
+  const utils = trpc.useUtils();
+
   // Queries
   const { data: items = [], refetch: refetchItems } = trpc.inventory.listItems.useQuery({ isActive: true });
   const { data: locations = [], refetch: refetchLocations } = trpc.inventory.listLocations.useQuery({ isActive: true });
@@ -85,8 +89,12 @@ export default function Inventory() {
       toast.success("Item created successfully");
       setItemDialogOpen(false);
       resetItemForm();
-      refetchItems();
-      refetchStockLevels(); // Refresh stock levels after creating item with initial stock
+      // Invalidate all inventory queries to refresh all tabs
+      utils.inventory.listItems.invalidate();
+      utils.inventory.getAllStockLevels.invalidate();
+      utils.inventory.getTransactionHistory.invalidate();
+      utils.inventory.getStockValuation.invalidate();
+      utils.inventory.getReorderAlerts.invalidate();
     },
     onError: (error) => {
       toast.error(`Failed to create item: ${error.message}`);
@@ -133,8 +141,11 @@ export default function Inventory() {
       toast.success("Stock transaction recorded successfully");
       setTransactionDialogOpen(false);
       resetTransactionForm();
-      refetchStockLevels();
-      refetchReorderAlerts(); // Refresh reorder alerts after transaction
+      // Invalidate all inventory queries to refresh all tabs
+      utils.inventory.getAllStockLevels.invalidate();
+      utils.inventory.getTransactionHistory.invalidate();
+      utils.inventory.getStockValuation.invalidate();
+      utils.inventory.getReorderAlerts.invalidate();
     },
     onError: (error) => {
       toast.error(`Transaction failed: ${error.message}`);
@@ -159,6 +170,7 @@ export default function Inventory() {
       model: "",
       category: "feed",
       unit: "",
+      bagSizeKg: "",
       currentStock: "",
       reorderPoint: "",
       unitCost: "",
@@ -207,8 +219,8 @@ export default function Inventory() {
       locationId: selectedStock.locationId,
       transactionType,
       quantity,
-      unitCost: transactionForm.unitCost ? parseFloat(transactionForm.unitCost) : undefined,
-      totalCost: transactionForm.totalCost ? parseFloat(transactionForm.totalCost) : undefined,
+      unitCost: transactionForm.unitCost ? Math.round(parseFloat(transactionForm.unitCost) * 100) : undefined,
+      totalCost: transactionForm.totalCost ? Math.round(parseFloat(transactionForm.totalCost) * 100) : undefined,
       referenceNumber: transactionForm.referenceNumber || undefined,
       notes: transactionForm.notes || undefined,
       transactionDate: new Date(),
@@ -234,6 +246,7 @@ export default function Inventory() {
       model: itemForm.model || undefined,
       category: itemForm.category,
       unit: itemForm.unit,
+      bagSizeKg: itemForm.bagSizeKg ? parseFloat(itemForm.bagSizeKg) : undefined,
       currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : 0,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
@@ -257,6 +270,7 @@ export default function Inventory() {
       model: itemForm.model || undefined,
       category: itemForm.category,
       unit: itemForm.unit,
+      bagSizeKg: itemForm.bagSizeKg ? parseFloat(itemForm.bagSizeKg) : undefined,
       currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : undefined,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
@@ -282,6 +296,7 @@ export default function Inventory() {
       model: item.model || "",
       category: item.category,
       unit: item.unit,
+      bagSizeKg: item.bagSizeKg || "",
       currentStock: item.currentStock || "",
       reorderPoint: item.reorderPoint || "",
       unitCost: item.unitCost ? (item.unitCost / 100).toFixed(2) : "",
@@ -298,6 +313,14 @@ export default function Inventory() {
   const handleCreateLocation = () => {
     createLocationMutation.mutate(locationForm);
   };
+
+  // Format a Rand value (already in Rand, not cents) with thousand separators
+  const formatCurrency = (value: number) =>
+    `R${value.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // Format a quantity with thousand separators
+  const formatQty = (value: number | string) =>
+    parseFloat(String(value)).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const getCategoryBadge = (category: string) => {
     const colors: Record<string, string> = {
@@ -490,6 +513,7 @@ export default function Inventory() {
                     <TableHead>Status</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead>Category</TableHead>
+                    <TableHead>Unit</TableHead>
                     <TableHead>Barcode</TableHead>
                     <TableHead>Brand</TableHead>
                     <TableHead>Total Stock</TableHead>
@@ -542,17 +566,25 @@ export default function Inventory() {
                           </Badge>
                         </TableCell>
                         <TableCell>
+                          <div className="text-sm">
+                            <span className="font-medium">{item.unit || "-"}</span>
+                            {item.bagSizeKg && (
+                              <span className="text-xs text-muted-foreground block">{item.bagSizeKg} kg/bag</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
                           <span className="text-sm font-mono">{item.barcode || "-"}</span>
                         </TableCell>
                         <TableCell>
                           <span className="text-sm">{item.brand || "-"}</span>
                         </TableCell>
                         <TableCell>
-                          {stock.total.toFixed(2)} {item.unit}
+                          {formatQty(stock.total)} {item.unit}
                           {isLowStock && <AlertTriangle className="inline h-4 w-4 ml-2 text-orange-500" />}
                         </TableCell>
                         <TableCell>
-                          {item.unitCost ? `R${(item.unitCost / 100).toFixed(2)}` : "-"}
+                          {item.unitCost ? formatCurrency(item.unitCost / 100) : "-"}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm" onClick={() => handleEditItem(item)}>
@@ -613,7 +645,7 @@ export default function Inventory() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        {parseFloat(stock.quantity || "0").toFixed(2)} {stock.unit}
+                        {formatQty(stock.quantity || "0")} {stock.unit}
                       </TableCell>
                       <TableCell>
                         {stock.lastUpdated ? new Date(stock.lastUpdated).toLocaleDateString() : "-"}
@@ -834,16 +866,16 @@ export default function Inventory() {
                           <TableCell>{transaction.itemName}</TableCell>
                           <TableCell>{transaction.locationName}</TableCell>
                           <TableCell className="text-right">
-                            {parseFloat(transaction.quantity || "0").toFixed(2)}
+                            {formatQty(transaction.quantity || "0")}
                           </TableCell>
                           <TableCell className="text-right">
                             {transaction.unitCost
-                              ? `R${(parseFloat(transaction.unitCost) / 100).toFixed(2)}`
+                              ? formatCurrency(parseFloat(transaction.unitCost) / 100)
                               : "-"}
                           </TableCell>
                           <TableCell className="text-right">
                             {transaction.totalCost
-                              ? `R${(parseFloat(transaction.totalCost) / 100).toFixed(2)}`
+                              ? formatCurrency(parseFloat(transaction.totalCost) / 100)
                               : "-"}
                           </TableCell>
                           <TableCell>{transaction.referenceNumber || "-"}</TableCell>
@@ -920,7 +952,7 @@ export default function Inventory() {
                   <CardTitle className="text-sm font-medium text-muted-foreground">Total Inventory Value</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-3xl font-bold">R{stockValuation?.totalValue.toFixed(2) || "0.00"}</div>
+                  <div className="text-3xl font-bold">{stockValuation ? formatCurrency(stockValuation.totalValue) : "R0.00"}</div>
                   <p className="text-xs text-muted-foreground mt-1">
                     As of {stockValuation?.generatedAt ? new Date(stockValuation.generatedAt).toLocaleString() : "-"}
                   </p>
@@ -972,7 +1004,7 @@ export default function Inventory() {
                       <TableRow key={cat.category}>
                         <TableCell className="font-medium capitalize">{cat.category.replace(/_/g, " ")}</TableCell>
                         <TableCell className="text-right">{cat.items}</TableCell>
-                        <TableCell className="text-right font-mono">R{cat.value.toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatCurrency(cat.value)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
                             <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
@@ -1028,7 +1060,7 @@ export default function Inventory() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">{loc.items}</TableCell>
-                        <TableCell className="text-right font-mono">R{loc.value.toFixed(2)}</TableCell>
+                        <TableCell className="text-right font-mono">{formatCurrency(loc.value)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
                             <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
@@ -1082,13 +1114,13 @@ export default function Inventory() {
                         <TableCell className="font-medium">{item.itemName}</TableCell>
                         <TableCell>{item.locationName}</TableCell>
                         <TableCell className="text-right">
-                          {parseFloat(item.quantity).toFixed(2)} {item.unit}
+                          {formatQty(item.quantity)} {item.unit}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {item.unitCost ? `R${parseFloat(item.unitCost).toFixed(2)}` : "-"}
+                          {item.unitCost ? formatCurrency(parseFloat(item.unitCost)) : "-"}
                         </TableCell>
                         <TableCell className="text-right font-mono font-semibold">
-                          R{item.totalValue.toFixed(2)}
+                          {formatCurrency(item.totalValue)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1332,6 +1364,20 @@ export default function Inventory() {
                     placeholder="kg, bags, liters"
                   />
                 </div>
+                {/* Bag Size - only show when unit is bags */}
+                {itemForm.unit.toLowerCase().includes('bag') && (
+                  <div className="space-y-2">
+                    <Label htmlFor="bagSizeKg">Bag Size (kg)</Label>
+                    <Input
+                      id="bagSizeKg"
+                      type="number"
+                      step="0.01"
+                      value={itemForm.bagSizeKg}
+                      onChange={(e) => setItemForm({ ...itemForm, bagSizeKg: e.target.value })}
+                      placeholder="50"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
