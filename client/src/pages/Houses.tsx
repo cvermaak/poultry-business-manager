@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,6 +84,9 @@ type HouseFormData = {
   length: string;
   width: string;
   capacity: string;
+  mortalityRate: string;
+  targetSlaughterWeight: string;
+  densityKgPerSqm: string;
   houseType: "open_sided" | "closed" | "semi_closed";
   breed: "ross_308" | "cobb_500" | "arbor_acres";
   farmName: string;
@@ -107,6 +110,9 @@ const emptyFormData: HouseFormData = {
   length: "",
   width: "",
   capacity: "",
+  mortalityRate: "4.0",
+  targetSlaughterWeight: "1.9",
+  densityKgPerSqm: "",
   houseType: "closed",
   breed: "ross_308",
   farmName: "",
@@ -131,6 +137,26 @@ export default function Houses() {
   const [selectedHouseId, setSelectedHouseId] = useState<number | null>(null);
   const [formData, setFormData] = useState<HouseFormData>(emptyFormData);
   const [showMapPicker, setShowMapPicker] = useState(false);
+
+  // Auto-calculate capacity when relevant fields change
+  useEffect(() => {
+    if (formData.length && formData.width && formData.mortalityRate && formData.targetSlaughterWeight) {
+      const floorArea = parseFloat(formData.length) * parseFloat(formData.width);
+      const densityRanges = {
+        open_sided: { min: 30, max: 34, recommended: 32 },
+        semi_closed: { min: 33, max: 36, recommended: 35 },
+        closed: { min: 36, max: 40, recommended: 38 },
+      };
+      const density = formData.densityKgPerSqm ? parseFloat(formData.densityKgPerSqm) : densityRanges[formData.houseType].recommended;
+      const totalKg = floorArea * density;
+      const finishedBirds = Math.floor(totalKg / parseFloat(formData.targetSlaughterWeight));
+      const survivalRate = 1 - (parseFloat(formData.mortalityRate) / 100);
+      const placementCapacity = Math.floor(finishedBirds / survivalRate);
+      
+      // Always update capacity when calculation inputs change
+      setFormData(prev => ({ ...prev, capacity: placementCapacity.toString() }));
+    }
+  }, [formData.length, formData.width, formData.mortalityRate, formData.targetSlaughterWeight, formData.densityKgPerSqm, formData.houseType]);
 
   const utils = trpc.useUtils();
   const { data: houses, isLoading } = trpc.houses.list.useQuery();
@@ -184,6 +210,9 @@ export default function Houses() {
       length: house.length?.toString() || "",
       width: house.width?.toString() || "",
       capacity: house.capacity?.toString() || "",
+      mortalityRate: house.mortalityRate?.toString() || "4.0",
+      targetSlaughterWeight: house.targetSlaughterWeight?.toString() || "1.9",
+      densityKgPerSqm: house.densityKgPerSqm?.toString() || "",
       houseType: house.houseType || "closed",
       breed: house.breed || "ross_308",
       farmName: house.farmName || "",
@@ -215,7 +244,10 @@ export default function Houses() {
       houseNumber: formData.houseNumber || undefined,
       length: parseFloat(formData.length),
       width: parseFloat(formData.width),
-      capacity: parseInt(formData.capacity),
+      capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
+      mortalityRate: parseFloat(formData.mortalityRate),
+      targetSlaughterWeight: parseFloat(formData.targetSlaughterWeight),
+      densityKgPerSqm: formData.densityKgPerSqm ? parseFloat(formData.densityKgPerSqm) : undefined,
       houseType: formData.houseType,
       breed: formData.breed,
       farmName: formData.farmName || undefined,
@@ -244,7 +276,10 @@ export default function Houses() {
       houseNumber: formData.houseNumber || undefined,
       length: parseFloat(formData.length),
       width: parseFloat(formData.width),
-      capacity: parseInt(formData.capacity),
+      capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
+      mortalityRate: parseFloat(formData.mortalityRate),
+      targetSlaughterWeight: parseFloat(formData.targetSlaughterWeight),
+      densityKgPerSqm: formData.densityKgPerSqm ? parseFloat(formData.densityKgPerSqm) : undefined,
       houseType: formData.houseType,
       beddingType: formData.beddingType,
       beddingDepth: parseInt(formData.beddingDepth),
@@ -317,16 +352,90 @@ export default function Houses() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="capacity">Capacity (birds) *</Label>
+            <Label htmlFor="capacity">Capacity (birds)</Label>
             <Input
               id="capacity"
               type="number"
               value={formData.capacity}
               onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
+              placeholder="Auto-calculated if left empty"
+            />
+            <p className="text-xs text-muted-foreground">Leave empty for automatic calculation based on density</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="mortalityRate">Mortality Rate (%) *</Label>
+            <Input
+              id="mortalityRate"
+              type="number"
+              step="0.1"
+              value={formData.mortalityRate}
+              onChange={(e) => setFormData({ ...formData, mortalityRate: e.target.value })}
               required
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="targetSlaughterWeight">Target Weight (kg) *</Label>
+            <Input
+              id="targetSlaughterWeight"
+              type="number"
+              step="0.1"
+              value={formData.targetSlaughterWeight}
+              onChange={(e) => setFormData({ ...formData, targetSlaughterWeight: e.target.value })}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="densityKgPerSqm">Density (kg/m²)</Label>
+            <Input
+              id="densityKgPerSqm"
+              type="number"
+              step="0.1"
+              value={formData.densityKgPerSqm}
+              onChange={(e) => setFormData({ ...formData, densityKgPerSqm: e.target.value })}
+              placeholder="Auto-selected by house type"
+            />
+            <p className="text-xs text-muted-foreground">
+              {formData.houseType === 'open_sided' && 'Recommended: 32 kg/m² (Range: 30-34)'}
+              {formData.houseType === 'semi_closed' && 'Recommended: 35 kg/m² (Range: 33-36)'}
+              {formData.houseType === 'closed' && 'Recommended: 38 kg/m² (Range: 36-40)'}
+            </p>
+          </div>
         </div>
+
+        {/* Capacity Calculation Preview */}
+        {formData.length && formData.width && formData.mortalityRate && formData.targetSlaughterWeight && (() => {
+          const floorArea = parseFloat(formData.length) * parseFloat(formData.width);
+          const densityRanges = {
+            open_sided: { min: 30, max: 34, recommended: 32 },
+            semi_closed: { min: 33, max: 36, recommended: 35 },
+            closed: { min: 36, max: 40, recommended: 38 },
+          };
+          const density = formData.densityKgPerSqm ? parseFloat(formData.densityKgPerSqm) : densityRanges[formData.houseType].recommended;
+          const totalKg = floorArea * density;
+          const finishedBirds = Math.floor(totalKg / parseFloat(formData.targetSlaughterWeight));
+          const survivalRate = 1 - (parseFloat(formData.mortalityRate) / 100);
+          const placementCapacity = Math.floor(finishedBirds / survivalRate);
+          
+          return (
+            <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+              <h4 className="font-semibold text-sm">📊 Capacity Calculation Preview</h4>
+              <div className="text-sm space-y-1 text-muted-foreground">
+                <p>• Floor Area: {floorArea.toFixed(2)} m²</p>
+                <p>• Density: {density.toFixed(2)} kg/m² ({formData.houseType.replace('_', ' ')})</p>
+                <p>• Total kg capacity: {floorArea.toFixed(2)} × {density.toFixed(2)} = {totalKg.toFixed(2)} kg</p>
+                <p>• Finished birds: {totalKg.toFixed(2)} ÷ {parseFloat(formData.targetSlaughterWeight).toFixed(2)} kg = {finishedBirds.toLocaleString()} birds</p>
+                <p>• Mortality rate: {parseFloat(formData.mortalityRate).toFixed(2)}% (survival: {(survivalRate * 100).toFixed(2)}%)</p>
+                <p className="font-semibold text-foreground">• Placement capacity: {finishedBirds.toLocaleString()} ÷ {survivalRate.toFixed(4)} = {placementCapacity.toLocaleString()} chicks</p>
+              </div>
+              {formData.capacity && parseInt(formData.capacity) !== placementCapacity && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">⚠️ Manual override: Using {parseInt(formData.capacity).toLocaleString()} instead of calculated {placementCapacity.toLocaleString()}</p>
+              )}
+            </div>
+          );
+        })()}
 
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -678,6 +787,24 @@ export default function Houses() {
                     <dt className="text-muted-foreground">Capacity:</dt>
                     <dd className="font-medium">{house.capacity.toLocaleString()} birds</dd>
                   </div>
+                  {house.densityKgPerSqm && (
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Density:</dt>
+                      <dd className="font-medium">{house.densityKgPerSqm} kg/m²</dd>
+                    </div>
+                  )}
+                  {house.mortalityRate && (
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Mortality Rate:</dt>
+                      <dd className="font-medium">{house.mortalityRate}%</dd>
+                    </div>
+                  )}
+                  {house.targetSlaughterWeight && (
+                    <div className="flex justify-between">
+                      <dt className="text-muted-foreground">Target Weight:</dt>
+                      <dd className="font-medium">{house.targetSlaughterWeight} kg</dd>
+                    </div>
+                  )}
                   {house.farmName && (
                     <div className="flex justify-between">
                       <dt className="text-muted-foreground">Farm:</dt>
