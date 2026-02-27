@@ -1,1191 +1,992 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, boolean, index, json, tinyint } from "drizzle-orm/mysql-core";
-
-/**
- * POULTRY BUSINESS MANAGER - DATABASE SCHEMA
- * 
- * This schema supports comprehensive broiler chicken business management including:
- * - User management with role-based access control
- * - House configuration and flock management
- * - Feed manufacturing and raw material inventory
- * - Customer relationship management
- * - Sales, invoicing, and payment tracking
- * - Financial accounting (double-entry bookkeeping)
- * - Procurement automation and supplier management
- * - Inventory management across multiple locations
- * - Document storage and management
- * 
- * All monetary values are stored in cents (integer) to avoid floating-point precision issues
- * All timestamps are stored as MySQL timestamp type for consistency
- */
-
-// ============================================================================
-// USER MANAGEMENT
-// ============================================================================
-
-export const users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
-  openId: varchar("openId", { length: 64 }).unique(), // Optional for email/password users
-  username: varchar("username", { length: 50 }).unique(), // Unique username for login
-  name: text("name"),
-  email: varchar("email", { length: 320 }).unique(), // Unique email for login
-  passwordHash: varchar("passwordHash", { length: 255 }), // Bcrypt hash for email/password auth
-  loginMethod: varchar("loginMethod", { length: 64 }).default("email").notNull(), // 'oauth' or 'email'
-  role: mysqlEnum("role", ["admin", "farm_manager", "accountant", "sales_staff", "production_worker"]).default("production_worker").notNull(),
-  isActive: boolean("isActive").default(true).notNull(),
-  mustChangePassword: boolean("mustChangePassword").default(true).notNull(), // Force password change on first login
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  lastSignedIn: timestamp("lastSignedIn"),
-  createdBy: int("createdBy"), // Admin who created this user
-});
-
-export const userActivityLogs = mysqlTable("user_activity_logs", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().references(() => users.id),
-  action: varchar("action", { length: 100 }).notNull(),
-  entityType: varchar("entityType", { length: 50 }),
-  entityId: int("entityId"),
-  details: text("details"),
-  ipAddress: varchar("ipAddress", { length: 45 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  userIdIdx: index("idx_user_activity_logs_user_id").on(table.userId),
-  createdAtIdx: index("idx_user_activity_logs_created_at").on(table.createdAt),
-}));
-
-// ============================================================================
-// HOUSE CONFIGURATION
-// ============================================================================
-
-export const houses = mysqlTable("houses", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 100 }).notNull().unique(),
-  houseNumber: varchar("houseNumber", { length: 50 }),
-  // Physical specifications
-  length: decimal("length", { precision: 10, scale: 2 }).notNull(), // meters
-  width: decimal("width", { precision: 10, scale: 2 }).notNull(), // meters
-  floorArea: decimal("floorArea", { precision: 10, scale: 2 }).notNull(), // calculated: length × width
-  capacity: int("capacity").notNull(), // maximum bird count
-  houseType: mysqlEnum("houseType", ["open_sided", "closed", "semi_closed"]).default("closed").notNull(),
-  // Breed specification
-  breed: mysqlEnum("breed", ["ross_308", "cobb_500", "arbor_acres"]).default("ross_308").notNull(),
-  // Location information
-  farmName: varchar("farmName", { length: 100 }),
-  physicalAddress: text("physicalAddress"),
-  gpsLatitude: decimal("gpsLatitude", { precision: 10, scale: 7 }),
-  gpsLongitude: decimal("gpsLongitude", { precision: 10, scale: 7 }),
-  province: varchar("province", { length: 50 }),
-  district: varchar("district", { length: 50 }),
-  // Bedding and equipment
-  beddingType: varchar("beddingType", { length: 50 }).default("pine_shavings"),
-  beddingDepth: int("beddingDepth").default(30), // millimeters
-  numberOfFeeders: int("numberOfFeeders"),
-  numberOfDrinkers: int("numberOfDrinkers"),
-  heatingType: varchar("heatingType", { length: 50 }),
-  ventilationType: varchar("ventilationType", { length: 50 }),
-  notes: text("notes"),
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-});
-
-// ============================================================================
-// BROILER PRODUCTION MANAGEMENT
-// ============================================================================
-
-export const flocks = mysqlTable("flocks", {
-  id: int("id").autoincrement().primaryKey(),
-  flockNumber: varchar("flockNumber", { length: 50 }).notNull().unique(),
-  houseId: int("houseId").notNull().references(() => houses.id),
-  placementDate: timestamp("placementDate").notNull(),
-  initialCount: int("initialCount").notNull(),
-  currentCount: int("currentCount").notNull(),
-  targetSlaughterWeight: decimal("targetSlaughterWeight", { precision: 10, scale: 2 }).default("1.70"), // kg
-  targetDeliveredWeight: decimal("targetDeliveredWeight", { precision: 10, scale: 3 }), // kg - target weight at processor after shrinkage
-  targetCatchingWeight: decimal("targetCatchingWeight", { precision: 10, scale: 3 }), // kg - target weight on farm before shrinkage (auto-calculated)
-  growingPeriod: int("growingPeriod").default(42), // days
-  weightUnit: mysqlEnum("weightUnit", ["grams", "kg"]).default("kg").notNull(),
-  
-  // Feed planning
-  starterFeedType: mysqlEnum("starterFeedType", ["premium", "value", "econo"]),
-  starterFromDay: int("starterFromDay").default(0),
-  starterToDay: int("starterToDay"),
-  growerFeedType: mysqlEnum("growerFeedType", ["premium", "value", "econo"]),
-  growerFromDay: int("growerFromDay"),
-  growerToDay: int("growerToDay"),
-  finisherFeedType: mysqlEnum("finisherFeedType", ["premium", "value", "econo"]),
-  finisherFromDay: int("finisherFromDay"),
-  finisherToDay: int("finisherToDay"),
-  
-  status: mysqlEnum("status", ["planned", "active", "harvesting", "completed", "cancelled"]).default("planned").notNull(),
-  
-  // Status change audit trail
-  statusChangedAt: timestamp("statusChangedAt"),
-  statusChangedBy: int("statusChangedBy").references(() => users.id),
-  statusChangeReason: text("statusChangeReason"),
-  isManualStatusChange: tinyint("isManualStatusChange").default(0), // 0 = automatic, 1 = manual
-  
-  // Destination and travel planning
-  destinationName: varchar("destinationName", { length: 255 }),
-  destinationAddress: text("destinationAddress"),
-  destinationGpsLat: varchar("destinationGpsLat", { length: 50 }),
-  destinationGpsLng: varchar("destinationGpsLng", { length: 50 }),
-  collectionDate: timestamp("collectionDate"),
-  travelDurationHours: decimal("travelDurationHours", { precision: 5, scale: 2 }),
-  feedWithdrawalHours: int("feedWithdrawalHours"),
-  
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  houseIdIdx: index("idx_flocks_house_id").on(table.houseId),
-  statusIdx: index("idx_flocks_status").on(table.status),
-  placementDateIdx: index("idx_flocks_placement_date").on(table.placementDate),
-}));
-
-export const flockDailyRecords = mysqlTable("flock_daily_records", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().references(() => flocks.id),
-  recordDate: timestamp("recordDate").notNull(),
-  dayNumber: int("dayNumber").notNull(), // calculated from placement date
-  mortality: int("mortality").default(0).notNull(),
-  feedConsumed: decimal("feedConsumed", { precision: 10, scale: 2 }).default("0"), // kg
-  feedType: mysqlEnum("feedType", ["starter", "grower", "finisher"]),
-  waterConsumed: decimal("waterConsumed", { precision: 10, scale: 2 }), // liters
-  averageWeight: decimal("averageWeight", { precision: 10, scale: 3 }), // kg, from weight samples
-  weightSamples: text("weightSamples"), // JSON array of individual weights
-  temperature: decimal("temperature", { precision: 5, scale: 2 }), // celsius
-  humidity: decimal("humidity", { precision: 5, scale: 2 }), // percentage
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  recordedBy: int("recordedBy").references(() => users.id),
-}, (table) => ({
-  flockIdIdx: index("idx_flock_daily_records_flock_id").on(table.flockId),
-  recordDateIdx: index("idx_flock_daily_records_record_date").on(table.recordDate),
-}));
-
-export const vaccinationSchedules = mysqlTable("vaccination_schedules", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().references(() => flocks.id),
-  vaccineName: varchar("vaccineName", { length: 200 }).notNull(),
-  scheduledDate: timestamp("scheduledDate").notNull(),
-  scheduledDayNumber: int("scheduledDayNumber").notNull(),
-  administeredDate: timestamp("administeredDate"),
-  dosage: varchar("dosage", { length: 100 }),
-  administrationMethod: varchar("administrationMethod", { length: 100 }),
-  batchNumber: varchar("batchNumber", { length: 100 }),
-  status: mysqlEnum("status", ["scheduled", "completed", "skipped", "overdue"]).default("scheduled").notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  administeredBy: int("administeredBy").references(() => users.id),
-}, (table) => ({
-  flockIdIdx: index("idx_vaccination_schedules_flock_id").on(table.flockId),
-  scheduledDateIdx: index("idx_vaccination_schedules_scheduled_date").on(table.scheduledDate),
-}));
-
-export const healthRecords = mysqlTable("health_records", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().references(() => flocks.id),
-  recordDate: timestamp("recordDate").notNull(),
-  recordType: mysqlEnum("recordType", ["observation", "treatment", "veterinary_visit", "medication", "other"]).notNull(),
-  description: text("description").notNull(),
-  affectedBirds: int("affectedBirds"),
-  treatment: text("treatment"),
-  medication: varchar("medication", { length: 200 }),
-  dosage: varchar("dosage", { length: 100 }),
-  veterinarianName: varchar("veterinarianName", { length: 200 }),
-  cost: int("cost"), // cents
-  followUpRequired: boolean("followUpRequired").default(false),
-  followUpDate: timestamp("followUpDate"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  recordedBy: int("recordedBy").references(() => users.id),
-}, (table) => ({
-  flockIdIdx: index("idx_health_records_flock_id").on(table.flockId),
-  recordDateIdx: index("idx_health_records_record_date").on(table.recordDate),
-}));
-
-export const mortalityRecords = mysqlTable("mortality_records", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().references(() => flocks.id),
-  recordDate: timestamp("recordDate").notNull(),
-  count: int("count").notNull(),
-  cause: varchar("cause", { length: 200 }),
-  ageAtDeath: int("ageAtDeath"), // days
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  recordedBy: int("recordedBy").references(() => users.id),
-}, (table) => ({
-  flockIdIdx: index("idx_mortality_records_flock_id").on(table.flockId),
-  recordDateIdx: index("idx_mortality_records_record_date").on(table.recordDate),
-}));
-
-/**
- * Harvest Records - tracks bird catches for slaughtering
- * Supports multi-catch scenarios (partial depletion over multiple days)
- */
-export const harvestRecords = mysqlTable("harvest_records", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().references(() => flocks.id),
-  
-  // Harvest timing
-  harvestDate: timestamp("harvestDate").notNull(),
-  harvestStartTime: timestamp("harvestStartTime").notNull(),
-  harvestDurationMinutes: int("harvestDurationMinutes"), // Total time for catching, crating, weighing, loading
-  
-  // Feed withdrawal
-  feedWithdrawalStartTime: timestamp("feedWithdrawalStartTime"),
-  feedWithdrawalDurationHours: decimal("feedWithdrawalDurationHours", { precision: 5, scale: 2 }), // Auto-calculated
-  
-  // Destination
-  destination: varchar("destination", { length: 255 }), // Processor/Abattoir name (free text for now)
-  
-  // Loading data
-  chickenCountLoaded: int("chickenCountLoaded").notNull(),
-  totalLoadedWeightKg: decimal("totalLoadedWeightKg", { precision: 10, scale: 3 }).notNull(),
-  averageLoadedWeightKg: decimal("averageLoadedWeightKg", { precision: 10, scale: 3 }), // Auto-calculated
-  
-  // Crate tracking
-  totalCrates: int("totalCrates"),
-  oddCrateCount: int("oddCrateCount"), // Number of chickens in odd crate
-  oddCrateWeightKg: decimal("oddCrateWeightKg", { precision: 10, scale: 3 }), // Weight of odd crate
-  
-  // Transport
-  transportDepartTime: timestamp("transportDepartTime"),
-  transportArrivalTime: timestamp("transportArrivalTime"),
-  travelDurationHours: decimal("travelDurationHours", { precision: 5, scale: 2 }), // Auto-calculated
-  
-  // Delivery data
-  chickenCountDelivered: int("chickenCountDelivered"),
-  totalDeliveredWeightKg: decimal("totalDeliveredWeightKg", { precision: 10, scale: 3 }),
-  averageDeliveredWeightKg: decimal("averageDeliveredWeightKg", { precision: 10, scale: 3 }), // Auto-calculated
-  transportMortalities: int("transportMortalities").default(0), // Deaths during transport
-  shrinkagePercentage: decimal("shrinkagePercentage", { precision: 5, scale: 2 }), // Auto-calculated: (loaded - delivered) / loaded * 100
-  
-  // Financial data
-  pricePerKg: decimal("pricePerKg", { precision: 10, scale: 2 }), // Price per kg at delivery (in currency units)
-  totalRevenue: decimal("totalRevenue", { precision: 12, scale: 2 }), // Auto-calculated: deliveredWeight * pricePerKg
-  paymentTerms: varchar("paymentTerms", { length: 100 }), // e.g., "Net 30", "COD"
-  invoiceReference: varchar("invoiceReference", { length: 100 }),
-  
-  // Notes
-  notes: text("notes"), // Weather conditions, issues, etc.
-  
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  recordedBy: int("recordedBy").references(() => users.id),
-}, (table) => ({
-  flockIdIdx: index("idx_harvest_records_flock_id").on(table.flockId),
-  harvestDateIdx: index("idx_harvest_records_harvest_date").on(table.harvestDate),
-}));
-
-/**
- * PROCESSORS/DESTINATIONS
- * Manage processor/abattoir information for harvest destinations
- */
-export const processors = mysqlTable("processors", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 255 }).notNull().unique(),
-  
-  // Contact information
-  contactPerson: varchar("contactPerson", { length: 255 }),
-  email: varchar("email", { length: 320 }),
-  phone: varchar("phone", { length: 50 }),
-  
-  // Address
-  physicalAddress: text("physicalAddress"),
-  gpsLatitude: decimal("gpsLatitude", { precision: 10, scale: 7 }),
-  gpsLongitude: decimal("gpsLongitude", { precision: 10, scale: 7 }),
-  
-  // Business details
-  paymentTerms: varchar("paymentTerms", { length: 100 }), // e.g., "Net 30", "COD"
-  defaultPricePerKg: decimal("defaultPricePerKg", { precision: 10, scale: 2 }), // Default price in currency units
-  
-  // Operational details
-  averageTravelTimeHours: decimal("averageTravelTimeHours", { precision: 5, scale: 2 }), // Typical travel time from farm
-  operatingDays: varchar("operatingDays", { length: 100 }), // e.g., "Mon-Fri", "Mon-Sat"
-  operatingHours: varchar("operatingHours", { length: 100 }), // e.g., "6:00-18:00"
-  
-  notes: text("notes"),
-  isActive: boolean("isActive").default(true).notNull(),
-  
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-});
-
-// ============================================================================
-// FEED MANUFACTURING
-// ============================================================================
-
-export const feedFormulations = mysqlTable("feed_formulations", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 200 }).notNull(),
-  feedRange: mysqlEnum("feedRange", ["premium", "value", "econo"]).notNull(),
-  feedStage: mysqlEnum("feedStage", ["starter", "grower", "finisher"]).notNull(),
-  version: int("version").default(1).notNull(),
-  description: text("description"),
-  ingredients: text("ingredients").notNull(), // JSON array of {rawMaterialId, percentage, quantity}
-  proteinPercentage: decimal("proteinPercentage", { precision: 5, scale: 2 }),
-  energyContent: decimal("energyContent", { precision: 10, scale: 2 }), // ME (Metabolizable Energy)
-  crudeProtein: decimal("crudeProtein", { precision: 5, scale: 2 }),
-  crudeFiber: decimal("crudeFiber", { precision: 5, scale: 2 }),
-  calcium: decimal("calcium", { precision: 5, scale: 2 }),
-  phosphorus: decimal("phosphorus", { precision: 5, scale: 2 }),
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  rangeStageIdx: index("idx_feed_formulations_range_stage").on(table.feedRange, table.feedStage),
-}));
-
-export const feedBatches = mysqlTable("feed_batches", {
-  id: int("id").autoincrement().primaryKey(),
-  batchNumber: varchar("batchNumber", { length: 100 }).notNull().unique(),
-  formulationId: int("formulationId").notNull().references(() => feedFormulations.id),
-  productionDate: timestamp("productionDate").notNull(),
-  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(), // tons
-  rawMaterialCost: int("rawMaterialCost").notNull(), // cents
-  laborCost: int("laborCost").default(0), // cents
-  overheadCost: int("overheadCost").default(0), // cents
-  totalCost: int("totalCost").notNull(), // cents
-  costPerTon: int("costPerTon").notNull(), // cents
-  qualityStatus: mysqlEnum("qualityStatus", ["pending", "in_progress", "passed", "failed"]).default("pending").notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  productionDateIdx: index("idx_feed_batches_production_date").on(table.productionDate),
-  formulationIdIdx: index("idx_feed_batches_formulation_id").on(table.formulationId),
-}));
-
-export const rawMaterials = mysqlTable("raw_materials", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 200 }).notNull().unique(),
-  category: varchar("category", { length: 100 }),
-  unit: varchar("unit", { length: 50 }).notNull(), // kg, tons, liters
-  currentStock: decimal("currentStock", { precision: 10, scale: 2 }).default("0").notNull(),
-  reorderPoint: decimal("reorderPoint", { precision: 10, scale: 2 }),
-  reorderQuantity: decimal("reorderQuantity", { precision: 10, scale: 2 }),
-  unitCost: int("unitCost"), // cents per unit
-  supplierId: int("supplierId"),
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export const rawMaterialTransactions = mysqlTable("raw_material_transactions", {
-  id: int("id").autoincrement().primaryKey(),
-  rawMaterialId: int("rawMaterialId").notNull().references(() => rawMaterials.id),
-  transactionType: mysqlEnum("transactionType", ["purchase", "usage", "adjustment", "return"]).notNull(),
-  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
-  unitCost: int("unitCost"), // cents per unit
-  totalCost: int("totalCost"), // cents
-  referenceType: varchar("referenceType", { length: 50 }), // feed_batch, procurement_order
-  referenceId: int("referenceId"),
-  notes: text("notes"),
-  transactionDate: timestamp("transactionDate").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  rawMaterialIdIdx: index("idx_raw_material_transactions_material_id").on(table.rawMaterialId),
-  transactionDateIdx: index("idx_raw_material_transactions_date").on(table.transactionDate),
-}));
-
-export const qualityControlRecords = mysqlTable("quality_control_records", {
-  id: int("id").autoincrement().primaryKey(),
-  batchId: int("batchId").notNull().references(() => feedBatches.id),
-  testDate: timestamp("testDate").notNull(),
-  testType: varchar("testType", { length: 100 }).notNull(),
-  parameter: varchar("parameter", { length: 100 }).notNull(),
-  measuredValue: decimal("measuredValue", { precision: 10, scale: 3 }),
-  targetValue: decimal("targetValue", { precision: 10, scale: 3 }),
-  tolerance: decimal("tolerance", { precision: 10, scale: 3 }),
-  result: mysqlEnum("result", ["pass", "fail", "pending"]).notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  testedBy: int("testedBy").references(() => users.id),
-}, (table) => ({
-  batchIdIdx: index("idx_quality_control_records_batch_id").on(table.batchId),
-}));
-
-// ============================================================================
-// CUSTOMER RELATIONSHIP MANAGEMENT
-// ============================================================================
-
-export const customers = mysqlTable("customers", {
-  id: int("id").autoincrement().primaryKey(),
-  customerNumber: varchar("customerNumber", { length: 50 }).notNull().unique(),
-  name: varchar("name", { length: 200 }).notNull(),
-  contactPerson: varchar("contactPerson", { length: 200 }),
-  email: varchar("email", { length: 320 }),
-  phone: varchar("phone", { length: 50 }),
-  whatsapp: varchar("whatsapp", { length: 50 }),
-  segment: mysqlEnum("segment", ["wholesale", "retail", "contract"]).default("retail").notNull(),
-  creditLimit: int("creditLimit").default(0), // cents
-  paymentTerms: varchar("paymentTerms", { length: 100 }).default("cash"), // cash, net_7, net_15, net_30, net_60
-  taxNumber: varchar("taxNumber", { length: 100 }),
-  isActive: boolean("isActive").default(true).notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-});
-
-export const customerAddresses = mysqlTable("customer_addresses", {
-  id: int("id").autoincrement().primaryKey(),
-  customerId: int("customerId").notNull().references(() => customers.id),
-  addressType: mysqlEnum("addressType", ["billing", "delivery", "both"]).default("both").notNull(),
-  addressLine1: varchar("addressLine1", { length: 200 }).notNull(),
-  addressLine2: varchar("addressLine2", { length: 200 }),
-  city: varchar("city", { length: 100 }),
-  province: varchar("province", { length: 100 }),
-  postalCode: varchar("postalCode", { length: 20 }),
-  country: varchar("country", { length: 100 }).default("South Africa"),
-  isDefault: boolean("isDefault").default(false),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  customerIdIdx: index("idx_customer_addresses_customer_id").on(table.customerId),
-}));
-
-// ============================================================================
-// SALES & INVOICING
-// ============================================================================
-
-export const salesOrders = mysqlTable("sales_orders", {
-  id: int("id").autoincrement().primaryKey(),
-  orderNumber: varchar("orderNumber", { length: 50 }).notNull().unique(),
-  customerId: int("customerId").notNull().references(() => customers.id),
-  orderDate: timestamp("orderDate").notNull(),
-  deliveryDate: timestamp("deliveryDate"),
-  deliveryAddressId: int("deliveryAddressId").references(() => customerAddresses.id),
-  status: mysqlEnum("status", ["draft", "confirmed", "processing", "delivered", "cancelled"]).default("draft").notNull(),
-  subtotal: int("subtotal").notNull(), // cents
-  taxAmount: int("taxAmount").notNull(), // cents
-  totalAmount: int("totalAmount").notNull(), // cents
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  customerIdIdx: index("idx_sales_orders_customer_id").on(table.customerId),
-  orderDateIdx: index("idx_sales_orders_order_date").on(table.orderDate),
-  statusIdx: index("idx_sales_orders_status").on(table.status),
-}));
-
-export const salesOrderItems = mysqlTable("sales_order_items", {
-  id: int("id").autoincrement().primaryKey(),
-  orderId: int("orderId").notNull().references(() => salesOrders.id),
-  itemType: mysqlEnum("itemType", ["live_birds", "feed", "other"]).notNull(),
-  description: varchar("description", { length: 500 }).notNull(),
-  flockId: int("flockId").references(() => flocks.id),
-  feedBatchId: int("feedBatchId").references(() => feedBatches.id),
-  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
-  unit: varchar("unit", { length: 50 }).notNull(),
-  unitPrice: int("unitPrice").notNull(), // cents
-  subtotal: int("subtotal").notNull(), // cents
-  taxRate: decimal("taxRate", { precision: 5, scale: 2 }).default("15.00"), // percentage
-  taxAmount: int("taxAmount").notNull(), // cents
-  totalAmount: int("totalAmount").notNull(), // cents
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  orderIdIdx: index("idx_sales_order_items_order_id").on(table.orderId),
-}));
-
-export const invoices = mysqlTable("invoices", {
-  id: int("id").autoincrement().primaryKey(),
-  invoiceNumber: varchar("invoiceNumber", { length: 50 }).notNull().unique(),
-  customerId: int("customerId").notNull().references(() => customers.id),
-  orderId: int("orderId").references(() => salesOrders.id),
-  invoiceDate: timestamp("invoiceDate").notNull(),
-  dueDate: timestamp("dueDate").notNull(),
-  subtotal: int("subtotal").notNull(), // cents
-  taxAmount: int("taxAmount").notNull(), // cents
-  totalAmount: int("totalAmount").notNull(), // cents
-  paidAmount: int("paidAmount").default(0).notNull(), // cents
-  balanceDue: int("balanceDue").notNull(), // cents
-  status: mysqlEnum("status", ["draft", "sent", "paid", "partial", "overdue", "cancelled"]).default("draft").notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  customerIdIdx: index("idx_invoices_customer_id").on(table.customerId),
-  invoiceDateIdx: index("idx_invoices_invoice_date").on(table.invoiceDate),
-  statusIdx: index("idx_invoices_status").on(table.status),
-  dueDateIdx: index("idx_invoices_due_date").on(table.dueDate),
-}));
-
-export const invoiceItems = mysqlTable("invoice_items", {
-  id: int("id").autoincrement().primaryKey(),
-  invoiceId: int("invoiceId").notNull().references(() => invoices.id),
-  description: varchar("description", { length: 500 }).notNull(),
-  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
-  unit: varchar("unit", { length: 50 }).notNull(),
-  unitPrice: int("unitPrice").notNull(), // cents
-  subtotal: int("subtotal").notNull(), // cents
-  taxRate: decimal("taxRate", { precision: 5, scale: 2 }).default("15.00"),
-  taxAmount: int("taxAmount").notNull(), // cents
-  totalAmount: int("totalAmount").notNull(), // cents
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  invoiceIdIdx: index("idx_invoice_items_invoice_id").on(table.invoiceId),
-}));
-
-export const payments = mysqlTable("payments", {
-  id: int("id").autoincrement().primaryKey(),
-  paymentNumber: varchar("paymentNumber", { length: 50 }).notNull().unique(),
-  customerId: int("customerId").notNull().references(() => customers.id),
-  paymentDate: timestamp("paymentDate").notNull(),
-  amount: int("amount").notNull(), // cents
-  paymentMethod: varchar("paymentMethod", { length: 100 }).notNull(), // cash, bank_transfer, check, card
-  referenceNumber: varchar("referenceNumber", { length: 200 }),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  recordedBy: int("recordedBy").references(() => users.id),
-}, (table) => ({
-  customerIdIdx: index("idx_payments_customer_id").on(table.customerId),
-  paymentDateIdx: index("idx_payments_payment_date").on(table.paymentDate),
-}));
-
-export const paymentAllocations = mysqlTable("payment_allocations", {
-  id: int("id").autoincrement().primaryKey(),
-  paymentId: int("paymentId").notNull().references(() => payments.id),
-  invoiceId: int("invoiceId").notNull().references(() => invoices.id),
-  amount: int("amount").notNull(), // cents
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  paymentIdIdx: index("idx_payment_allocations_payment_id").on(table.paymentId),
-  invoiceIdIdx: index("idx_payment_allocations_invoice_id").on(table.invoiceId),
-}));
-
-// ============================================================================
-// PROCUREMENT & SUPPLIER MANAGEMENT
-// ============================================================================
-
-export const suppliers = mysqlTable("suppliers", {
-  id: int("id").autoincrement().primaryKey(),
-  supplierNumber: varchar("supplierNumber", { length: 50 }).notNull().unique(),
-  name: varchar("name", { length: 200 }).notNull(),
-  contactPerson: varchar("contactPerson", { length: 200 }),
-  email: varchar("email", { length: 320 }),
-  phone: varchar("phone", { length: 50 }),
-  whatsapp: varchar("whatsapp", { length: 50 }),
-  preferredContactMethod: mysqlEnum("preferredContactMethod", ["email", "whatsapp", "phone", "both"]).default("email"),
-  category: varchar("category", { length: 100 }), // chicks, feed_ingredients, cleaning, biosecurity, etc.
-  paymentTerms: varchar("paymentTerms", { length: 100 }).default("cash"),
-  taxNumber: varchar("taxNumber", { length: 100 }),
-  bankName: varchar("bankName", { length: 200 }),
-  bankAccountNumber: varchar("bankAccountNumber", { length: 100 }),
-  isActive: boolean("isActive").default(true).notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export const itemTemplates = mysqlTable("item_templates", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 200 }).notNull(),
-  category: varchar("category", { length: 100 }).notNull(), // bedding, cleaning, vaccination, biosecurity, feed, chicks
-  calculationType: mysqlEnum("calculationType", ["area_based", "bird_count_based", "worker_based", "fixed", "custom"]).notNull(),
-  formula: text("formula"), // calculation formula using variables
-  bufferPercentage: decimal("bufferPercentage", { precision: 5, scale: 2 }).default("10.00"),
-  unit: varchar("unit", { length: 50 }).notNull(),
-  conversionFactor: decimal("conversionFactor", { precision: 10, scale: 4 }), // e.g., cubic meters to bales
-  orderTriggerDays: int("orderTriggerDays").notNull(), // days before placement
-  deliveryLeadDays: int("deliveryLeadDays").default(0), // days between order and delivery
-  defaultSupplierId: int("defaultSupplierId").references(() => suppliers.id),
-  estimatedUnitCost: int("estimatedUnitCost"), // cents
-  isActive: boolean("isActive").default(true).notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export const procurementSchedules = mysqlTable("procurement_schedules", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().references(() => flocks.id),
-  itemTemplateId: int("itemTemplateId").notNull().references(() => itemTemplates.id),
-  supplierId: int("supplierId").notNull().references(() => suppliers.id),
-  calculatedQuantity: decimal("calculatedQuantity", { precision: 10, scale: 2 }).notNull(),
-  adjustedQuantity: decimal("adjustedQuantity", { precision: 10, scale: 2 }), // manual override
-  finalQuantity: decimal("finalQuantity", { precision: 10, scale: 2 }).notNull(),
-  unit: varchar("unit", { length: 50 }).notNull(),
-  estimatedCost: int("estimatedCost"), // cents
-  scheduledOrderDate: timestamp("scheduledOrderDate").notNull(),
-  scheduledDeliveryDate: timestamp("scheduledDeliveryDate"),
-  actualOrderDate: timestamp("actualOrderDate"),
-  actualDeliveryDate: timestamp("actualDeliveryDate"),
-  status: mysqlEnum("status", ["pending", "ordered", "confirmed", "delivered", "cancelled"]).default("pending").notNull(),
-  orderReference: varchar("orderReference", { length: 200 }),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => ({
-  flockIdIdx: index("idx_procurement_schedules_flock_id").on(table.flockId),
-  statusIdx: index("idx_procurement_schedules_status").on(table.status),
-  scheduledOrderDateIdx: index("idx_procurement_schedules_order_date").on(table.scheduledOrderDate),
-}));
-
-export const procurementOrders = mysqlTable("procurement_orders", {
-  id: int("id").autoincrement().primaryKey(),
-  orderNumber: varchar("orderNumber", { length: 50 }).notNull().unique(),
-  supplierId: int("supplierId").notNull().references(() => suppliers.id),
-  orderDate: timestamp("orderDate").notNull(),
-  expectedDeliveryDate: timestamp("expectedDeliveryDate"),
-  actualDeliveryDate: timestamp("actualDeliveryDate"),
-  totalAmount: int("totalAmount"), // cents
-  status: mysqlEnum("status", ["draft", "sent", "confirmed", "delivered", "cancelled"]).default("draft").notNull(),
-  sentVia: mysqlEnum("sentVia", ["email", "whatsapp", "phone", "manual"]),
-  sentAt: timestamp("sentAt"),
-  confirmedAt: timestamp("confirmedAt"),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  supplierIdIdx: index("idx_procurement_orders_supplier_id").on(table.supplierId),
-  orderDateIdx: index("idx_procurement_orders_order_date").on(table.orderDate),
-}));
-
-export const procurementOrderItems = mysqlTable("procurement_order_items", {
-  id: int("id").autoincrement().primaryKey(),
-  orderId: int("orderId").notNull().references(() => procurementOrders.id),
-  scheduleId: int("scheduleId").references(() => procurementSchedules.id),
-  description: varchar("description", { length: 500 }).notNull(),
-  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
-  unit: varchar("unit", { length: 50 }).notNull(),
-  unitPrice: int("unitPrice"), // cents
-  totalAmount: int("totalAmount"), // cents
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  orderIdIdx: index("idx_procurement_order_items_order_id").on(table.orderId),
-}));
-
-// ============================================================================
-// FINANCIAL ACCOUNTING
-// ============================================================================
-
-export const chartOfAccounts = mysqlTable("chart_of_accounts", {
-  id: int("id").autoincrement().primaryKey(),
-  accountNumber: varchar("accountNumber", { length: 50 }).notNull().unique(),
-  accountName: varchar("accountName", { length: 200 }).notNull(),
-  accountType: mysqlEnum("accountType", ["asset", "liability", "equity", "revenue", "expense"]).notNull(),
-  accountSubtype: varchar("accountSubtype", { length: 100 }),
-  parentAccountId: int("parentAccountId"),
-  isActive: boolean("isActive").default(true).notNull(),
-  description: text("description"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => ({
-  accountTypeIdx: index("idx_chart_of_accounts_type").on(table.accountType),
-}));
-
-export const generalLedgerEntries = mysqlTable("general_ledger_entries", {
-  id: int("id").autoincrement().primaryKey(),
-  entryNumber: varchar("entryNumber", { length: 50 }).notNull().unique(),
-  entryDate: timestamp("entryDate").notNull(),
-  accountId: int("accountId").notNull().references(() => chartOfAccounts.id),
-  debit: int("debit").default(0).notNull(), // cents
-  credit: int("credit").default(0).notNull(), // cents
-  description: varchar("description", { length: 500 }).notNull(),
-  referenceType: varchar("referenceType", { length: 50 }), // invoice, payment, procurement_order, etc.
-  referenceId: int("referenceId"),
-  isReconciled: boolean("isReconciled").default(false),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  accountIdIdx: index("idx_general_ledger_entries_account_id").on(table.accountId),
-  entryDateIdx: index("idx_general_ledger_entries_entry_date").on(table.entryDate),
-}));
-
-// ============================================================================
-// INVENTORY MANAGEMENT
-// ============================================================================
-
-export const inventoryItems = mysqlTable("inventory_items", {
-  id: int("id").autoincrement().primaryKey(),
-  itemNumber: varchar("itemNumber", { length: 50 }).notNull().unique(),
-  name: varchar("name", { length: 200 }).notNull(),
-  category: mysqlEnum("category", ["live_birds", "feed", "raw_materials", "supplies", "equipment"]).notNull(),
-  unit: varchar("unit", { length: 50 }).notNull(),
-  currentStock: decimal("currentStock", { precision: 10, scale: 2 }).default("0").notNull(),
-  reorderPoint: decimal("reorderPoint", { precision: 10, scale: 2 }),
-  unitCost: int("unitCost"), // cents, average cost
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export const inventoryLocations = mysqlTable("inventory_locations", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 200 }).notNull().unique(),
-  locationType: mysqlEnum("locationType", ["house", "warehouse", "silo", "cold_storage", "other"]).notNull(),
-  description: text("description"),
-  isActive: boolean("isActive").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
-
-export const inventoryTransactions = mysqlTable("inventory_transactions", {
-  id: int("id").autoincrement().primaryKey(),
-  itemId: int("itemId").notNull().references(() => inventoryItems.id),
-  locationId: int("locationId").references(() => inventoryLocations.id),
-  transactionType: mysqlEnum("transactionType", ["receipt", "issue", "transfer", "adjustment"]).notNull(),
-  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull(),
-  unitCost: int("unitCost"), // cents
-  totalCost: int("totalCost"), // cents
-  referenceType: varchar("referenceType", { length: 50 }),
-  referenceId: int("referenceId"),
-  notes: text("notes"),
-  transactionDate: timestamp("transactionDate").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  itemIdIdx: index("idx_inventory_transactions_item_id").on(table.itemId),
-  transactionDateIdx: index("idx_inventory_transactions_date").on(table.transactionDate),
-}));
-
-// ============================================================================
-// DOCUMENT MANAGEMENT
-// ============================================================================
-
-export const documents = mysqlTable("documents", {
-  id: int("id").autoincrement().primaryKey(),
-  title: varchar("title", { length: 500 }).notNull(),
-  description: text("description"),
-  category: mysqlEnum("category", [
-    "contract", "certificate", "lab_report", "invoice", "compliance",
-    "vaccination_record", "biosecurity", "financial_statement", "other"
-  ]).notNull(),
-  fileKey: varchar("fileKey", { length: 500 }).notNull(), // S3 key
-  fileUrl: varchar("fileUrl", { length: 1000 }).notNull(), // S3 URL
-  fileName: varchar("fileName", { length: 500 }).notNull(),
-  fileSize: int("fileSize"), // bytes
-  mimeType: varchar("mimeType", { length: 100 }),
-  tags: text("tags"), // JSON array
-  relatedEntityType: varchar("relatedEntityType", { length: 50 }), // customer, flock, supplier, etc.
-  relatedEntityId: int("relatedEntityId"),
-  expiryDate: timestamp("expiryDate"),
-  status: mysqlEnum("status", ["active", "archived", "expired"]).default("active").notNull(),
-  uploadedAt: timestamp("uploadedAt").defaultNow().notNull(),
-  uploadedBy: int("uploadedBy").references(() => users.id),
-}, (table) => ({
-  categoryIdx: index("idx_documents_category").on(table.category),
-  relatedEntityIdx: index("idx_documents_related_entity").on(table.relatedEntityType, table.relatedEntityId),
-}));
-
-// ============================================================================
-// REMINDERS & ALERTS
-// ============================================================================
-
-export const reminders = mysqlTable("reminders", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").references(() => flocks.id),
-  houseId: int("houseId").references(() => houses.id),
-  reminderType: mysqlEnum("reminderType", [
-    "vaccination",
-    "feed_transition",
-    "house_preparation",
-    "environmental_check",
-    "routine_task",
-    "milestone",
-    "biosecurity",
-    "performance_alert",
-    "house_light_timing"
-  ]).notNull(),
-  title: varchar("title", { length: 200 }).notNull(),
-  description: text("description"),
-  dueDate: timestamp("dueDate").notNull(),
-  priority: mysqlEnum("priority", ["urgent", "high", "medium", "low"]).default("medium").notNull(),
-  status: mysqlEnum("status", ["pending", "completed", "dismissed"]).default("pending").notNull(),
-  completedAt: timestamp("completedAt"),
-  completedBy: int("completedBy").references(() => users.id),
-  templateId: int("templateId").references(() => reminderTemplates.id),
-  actionNotes: text("actionNotes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => ({
-  flockIdIdx: index("idx_reminders_flock_id").on(table.flockId),
-  houseIdIdx: index("idx_reminders_house_id").on(table.houseId),
-  dueDateIdx: index("idx_reminders_due_date").on(table.dueDate),
-  statusIdx: index("idx_reminders_status").on(table.status),
-}));
-
-/**
- * Reminder templates - reusable reminder definitions that can be applied to flocks
- */
-export const reminderTemplates = mysqlTable("reminder_templates", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 200 }).notNull(),
-  description: text("description"),
-  reminderType: mysqlEnum("reminderType", [
-    "vaccination",
-    "feed_transition",
-    "house_preparation",
-    "environmental_check",
-    "routine_task",
-    "milestone",
-    "biosecurity",
-    "performance_alert",
-    "house_light_timing"
-  ]).notNull(),
-  priority: mysqlEnum("priority", ["urgent", "high", "medium", "low"]).default("medium").notNull(),
-  dayOffset: int("day_offset").notNull(), // Days relative to flock placement (0 = placement day, 7 = day 7, etc.)
-  isBundle: boolean("is_bundle").default(false).notNull(), // True if this template generates multiple reminders
-  bundleConfig: json("bundle_config"), // JSON array of sub-reminder configurations for bundle templates
-  isActive: boolean("is_active").default(true).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-// ============================================================================
-// HEALTH MANAGEMENT
-// ============================================================================
-
-/**
- * Vaccine database - stores information about available vaccines
- */
-export const vaccines = mysqlTable("vaccines", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
-  brand: varchar("brand", { length: 255 }).notNull(),
-  manufacturer: varchar("manufacturer", { length: 255 }),
-  diseaseType: mysqlEnum("disease_type", ["newcastle_disease", "infectious_bronchitis", "gumboro", "mareks", "coccidiosis", "fowl_pox", "other"]).notNull(),
-  vaccineType: mysqlEnum("vaccine_type", ["live", "inactivated", "recombinant", "vector"]).notNull(),
-  applicationMethod: mysqlEnum("application_method", ["drinking_water", "spray", "eye_drop", "injection", "wing_web"]).notNull(),
-  dosagePerBird: varchar("dosage_per_bird", { length: 100 }),
-  boosterIntervalDays: int("booster_interval_days"),
-  instructions: text("instructions"),
-  storageTemperature: varchar("storage_temperature", { length: 100 }),
-  shelfLifeDays: int("shelf_life_days"),
-  withdrawalPeriodDays: int("withdrawal_period_days").default(0),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
-
-/**
- * Stress pack database - stores information about stress pack products
- */
-export const stressPacks = mysqlTable("stress_packs", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
-  brand: varchar("brand", { length: 255 }).notNull(),
-  manufacturer: varchar("manufacturer", { length: 255 }),
-  activeIngredients: text("active_ingredients"),
-  dosageStrength: mysqlEnum("dosage_strength", ["single", "double", "triple"]).default("single"),
-  dosagePerLiter: varchar("dosage_per_liter", { length: 100 }),
-  recommendedDurationDays: int("recommended_duration_days"),
-  instructions: text("instructions"),
-  costPerKg: varchar("cost_per_kg", { length: 20 }),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
-
-/**
- * Flock vaccination schedules - tracks vaccination schedule for each flock
- */
-export const flockVaccinationSchedules = mysqlTable("flock_vaccination_schedules", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flock_id").notNull(),
-  vaccineId: int("vaccine_id").notNull(),
-  scheduledDay: int("scheduled_day").notNull(),
-  status: mysqlEnum("status", ["scheduled", "completed", "missed", "rescheduled"]).default("scheduled"),
-  actualDate: timestamp("actual_date"),
-  dosageUsed: varchar("dosage_used", { length: 100 }),
-  notes: text("notes"),
-  administeredBy: int("administered_by"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
-
-/**
- * Flock stress pack schedules - tracks stress pack application for each flock
- */
-export const flockStressPackSchedules = mysqlTable("flock_stress_pack_schedules", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flock_id").notNull(),
-  stressPackId: int("stress_pack_id").notNull(),
-  startDay: int("start_day").notNull(),
-  endDay: int("end_day").notNull(),
-  dosageStrength: mysqlEnum("dosage_strength", ["single", "double", "triple"]).default("single"),
-  status: mysqlEnum("status", ["scheduled", "active", "completed", "cancelled"]).default("scheduled"),
-  quantityUsed: varchar("quantity_used", { length: 100 }),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
-
-/**
- * Health protocol templates - reusable vaccination and stress pack schedules
- * Stores a complete health protocol that can be applied to new flocks
- */
-export const healthProtocolTemplates = mysqlTable("health_protocol_templates", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
-  description: text("description"),
-  // JSON array of vaccination schedules: [{ vaccineId: number, scheduledDay: number }]
-  vaccinationSchedules: json("vaccination_schedules"),
-  // JSON array of stress pack schedules: [{ stressPackId: number, startDay: number, endDay: number, dosageStrength: string }]
-  stressPackSchedules: json("stress_pack_schedules"),
-  isDefault: boolean("is_default").default(false),
-  isActive: boolean("is_active").default(true),
-  createdBy: int("created_by").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
-
-// ============================================================================
-// TYPE EXPORTS
-// ============================================================================
-
-export type User = typeof users.$inferSelect;
-export type InsertUser = typeof users.$inferInsert;
-
-export type House = typeof houses.$inferSelect;
-export type InsertHouse = typeof houses.$inferInsert;
-
-export type Flock = typeof flocks.$inferSelect;
-export type InsertFlock = typeof flocks.$inferInsert;
-
-export type FlockDailyRecord = typeof flockDailyRecords.$inferSelect;
-export type InsertFlockDailyRecord = typeof flockDailyRecords.$inferInsert;
-
-export type VaccinationSchedule = typeof vaccinationSchedules.$inferSelect;
-export type InsertVaccinationSchedule = typeof vaccinationSchedules.$inferInsert;
-
-export type HealthRecord = typeof healthRecords.$inferSelect;
-export type InsertHealthRecord = typeof healthRecords.$inferInsert;
-
-export type FeedFormulation = typeof feedFormulations.$inferSelect;
-export type InsertFeedFormulation = typeof feedFormulations.$inferInsert;
-
-export type FeedBatch = typeof feedBatches.$inferSelect;
-export type InsertFeedBatch = typeof feedBatches.$inferInsert;
-
-export type RawMaterial = typeof rawMaterials.$inferSelect;
-export type InsertRawMaterial = typeof rawMaterials.$inferInsert;
-
-export type Customer = typeof customers.$inferSelect;
-export type InsertCustomer = typeof customers.$inferInsert;
-
-export type SalesOrder = typeof salesOrders.$inferSelect;
-export type InsertSalesOrder = typeof salesOrders.$inferInsert;
-
-export type Invoice = typeof invoices.$inferSelect;
-export type InsertInvoice = typeof invoices.$inferInsert;
-
-export type Payment = typeof payments.$inferSelect;
-export type InsertPayment = typeof payments.$inferInsert;
-
-export type Supplier = typeof suppliers.$inferSelect;
-export type InsertSupplier = typeof suppliers.$inferInsert;
-
-export type ItemTemplate = typeof itemTemplates.$inferSelect;
-export type InsertItemTemplate = typeof itemTemplates.$inferInsert;
-
-export type ProcurementSchedule = typeof procurementSchedules.$inferSelect;
-export type InsertProcurementSchedule = typeof procurementSchedules.$inferInsert;
-
-export type ProcurementOrder = typeof procurementOrders.$inferSelect;
-export type InsertProcurementOrder = typeof procurementOrders.$inferInsert;
-
-export type ChartOfAccount = typeof chartOfAccounts.$inferSelect;
-export type InsertChartOfAccount = typeof chartOfAccounts.$inferInsert;
-
-export type GeneralLedgerEntry = typeof generalLedgerEntries.$inferSelect;
-export type InsertGeneralLedgerEntry = typeof generalLedgerEntries.$inferInsert;
-
-export type InventoryItem = typeof inventoryItems.$inferSelect;
-export type InsertInventoryItem = typeof inventoryItems.$inferInsert;
-
-export type Document = typeof documents.$inferSelect;
-export type InsertDocument = typeof documents.$inferInsert;
-
-export type Reminder = typeof reminders.$inferSelect;
-export type InsertReminder = typeof reminders.$inferInsert;
-
-export type Vaccine = typeof vaccines.$inferSelect;
-export type InsertVaccine = typeof vaccines.$inferInsert;
-
-export type StressPack = typeof stressPacks.$inferSelect;
-export type InsertStressPack = typeof stressPacks.$inferInsert;
-
-export type FlockVaccinationSchedule = typeof flockVaccinationSchedules.$inferSelect;
-export type InsertFlockVaccinationSchedule = typeof flockVaccinationSchedules.$inferInsert;
-
-export type FlockStressPackSchedule = typeof flockStressPackSchedules.$inferSelect;
-export type InsertFlockStressPackSchedule = typeof flockStressPackSchedules.$inferInsert;
-
-
-// ============================================================================
-// CATCH PLANNING & TARGET WEIGHT MANAGEMENT
-// ============================================================================
+import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint } from "drizzle-orm/mysql-core"
+import { sql } from "drizzle-orm"
+
+export const catchBatches = mysqlTable("catch_batches", {
+	id: int().autoincrement().notNull(),
+	sessionId: int().notNull().references(() => catchSessions.id),
+	crateTypeId: int().notNull().references(() => crateTypes.id),
+	batchNumber: int().notNull(),
+	numberOfCrates: int().notNull(),
+	birdsPerCrate: int().notNull(),
+	totalBirds: int().notNull(),
+	totalGrossWeight: decimal({ precision: 10, scale: 3 }).notNull(),
+	crateWeight: decimal({ precision: 8, scale: 3 }).notNull(),
+	palletWeight: decimal({ precision: 8, scale: 3 }),
+	totalNetWeight: decimal({ precision: 10, scale: 3 }).notNull(),
+	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
+	recordedAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	notes: text(),
+},
+(table) => [
+	index("idx_catch_batches_session_id").on(table.sessionId),
+	index("idx_catch_batches_crate_type_id").on(table.crateTypeId),
+]);
 
 export const catchConfigurations = mysqlTable("catch_configurations", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().unique().references(() => flocks.id),
-  
-  // Target weights
-  targetDeliveredWeight: decimal("targetDeliveredWeight", { precision: 10, scale: 3 }).notNull(), // kg - what processor requires
-  calculatedCatchingWeight: decimal("calculatedCatchingWeight", { precision: 10, scale: 3 }).notNull(), // kg - target weight on farm before shrinkage
-  
-  // Shrinkage component percentages (configurable per flock)
-  feedWithdrawalLossPercent: decimal("feedWithdrawalLossPercent", { precision: 5, scale: 2 }).default("4.00").notNull(),
-  catchingLoadingLossPercent: decimal("catchingLoadingLossPercent", { precision: 5, scale: 2 }).default("0.70").notNull(),
-  transportLossPercentPerHour: decimal("transportLossPercentPerHour", { precision: 5, scale: 2 }).default("0.30").notNull(),
-  lairageLossPercent: decimal("lairageLossPercent", { precision: 5, scale: 2 }).default("0.20").notNull(),
-  
-  // Transport details
-  transportDurationHours: decimal("transportDurationHours", { precision: 5, scale: 2 }).default("2.00").notNull(),
-  
-  // Calculated total shrinkage
-  totalShrinkagePercent: decimal("totalShrinkagePercent", { precision: 5, scale: 2 }).notNull(),
-  
-  // Planned catch dates (for multi-day catches)
-  plannedCatchDates: text("plannedCatchDates"), // JSON array of {date: string, dayNumber: number, estimatedBirds: number}
-  
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  flockIdIdx: index("idx_catch_config_flock_id").on(table.flockId),
-}));
-
-export type CatchConfiguration = typeof catchConfigurations.$inferSelect;
-export type InsertCatchConfiguration = typeof catchConfigurations.$inferInsert;
-
-// ============================================================================
-// CATCH OPERATIONS - Real-time catch data recording
-// ============================================================================
-
-export const crateTypes = mysqlTable("crate_types", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 100 }).notNull(),
-  length: decimal("length", { precision: 6, scale: 2 }).notNull(), // cm
-  width: decimal("width", { precision: 6, scale: 2 }).notNull(), // cm
-  height: decimal("height", { precision: 6, scale: 2 }).notNull(), // cm
-  tareWeight: decimal("tareWeight", { precision: 6, scale: 3 }).notNull(), // kg
-  isActive: tinyint("isActive").default(1).notNull(),
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => ({
-  nameIdx: index("idx_crate_types_name").on(table.name),
-}));
-
-export const catchSessions = mysqlTable("catch_sessions", {
-  id: int("id").autoincrement().primaryKey(),
-  flockId: int("flockId").notNull().references(() => flocks.id),
-  catchDate: timestamp("catchDate").notNull(),
-  catchTeam: varchar("catchTeam", { length: 200 }),
-  weighingMethod: mysqlEnum("weighingMethod", ["individual", "digital_scale_stack", "platform_scale"]).default("individual").notNull(),
-  palletWeight: decimal("palletWeight", { precision: 6, scale: 3 }), // kg - for platform scale method
-  targetBirds: int("targetBirds"),
-  targetWeight: decimal("targetWeight", { precision: 10, scale: 3 }),
-  status: varchar("status", { length: 20 }).default("active").notNull(),
-  startTime: timestamp("startTime").notNull(),
-  endTime: timestamp("endTime"),
-  totalBirdsCaught: int("totalBirdsCaught").default(0).notNull(),
-  totalNetWeight: decimal("totalNetWeight", { precision: 10, scale: 3 }).default("0.000").notNull(),
-  totalCrates: int("totalCrates").default(0).notNull(),
-  averageBirdWeight: decimal("averageBirdWeight", { precision: 8, scale: 3 }),
-  harvestRecordId: int("harvestRecordId").references(() => harvestRecords.id),
-  // Planned distribution fields for seasonal density recommendations
-  crateTypeId: int("crateTypeId").references(() => crateTypes.id),
-  transportDurationHours: decimal("transportDurationHours", { precision: 4, scale: 1 }), // Expected transport duration
-  season: varchar("season", { length: 20 }), // 'summer', 'winter', 'moderate' - auto-detected from catchDate
-  plannedStandardDensity: int("plannedStandardDensity"), // Primary birds/crate (e.g., 10)
-  plannedStandardCrates: int("plannedStandardCrates"), // Number of crates at standard density
-  plannedOddDensity: int("plannedOddDensity"), // Secondary birds/crate (e.g., 12)
-  plannedOddCrates: int("plannedOddCrates"), // Number of crates at odd density
-  plannedTotalBirds: int("plannedTotalBirds"), // Expected total birds from plan
-  availableCrates: int("availableCrates"), // Total crates available for this session
-  notes: text("notes"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  createdBy: int("createdBy").references(() => users.id),
-}, (table) => ({
-  flockIdIdx: index("idx_catch_sessions_flock_id").on(table.flockId),
-  catchDateIdx: index("idx_catch_sessions_catch_date").on(table.catchDate),
-  statusIdx: index("idx_catch_sessions_status").on(table.status),
-}));
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	targetDeliveredWeight: decimal({ precision: 10, scale: 3 }).notNull(),
+	calculatedCatchingWeight: decimal({ precision: 10, scale: 3 }).notNull(),
+	feedWithdrawalLossPercent: decimal({ precision: 5, scale: 2 }).default('4.00').notNull(),
+	catchingLoadingLossPercent: decimal({ precision: 5, scale: 2 }).default('0.70').notNull(),
+	transportLossPercentPerHour: decimal({ precision: 5, scale: 2 }).default('0.30').notNull(),
+	lairageLossPercent: decimal({ precision: 5, scale: 2 }).default('0.20').notNull(),
+	transportDurationHours: decimal({ precision: 5, scale: 2 }).default('2.00').notNull(),
+	totalShrinkagePercent: decimal({ precision: 5, scale: 2 }).notNull(),
+	plannedCatchDates: text(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("flockId").on(table.flockId),
+	index("idx_catch_config_flock_id").on(table.flockId),
+]);
 
 export const catchCrates = mysqlTable("catch_crates", {
-  id: int("id").autoincrement().primaryKey(),
-  sessionId: int("sessionId").notNull().references(() => catchSessions.id, { onDelete: "cascade" }),
-  crateTypeId: int("crateTypeId").notNull().references(() => crateTypes.id),
-  batchId: varchar("batchId", { length: 50 }), // Groups crates weighed together (e.g., "batch-1", "batch-2")
-  crateNumber: int("crateNumber").notNull(),
-  birdCount: int("birdCount").notNull(),
-  grossWeight: decimal("grossWeight", { precision: 8, scale: 3 }).notNull(),
-  netWeight: decimal("netWeight", { precision: 8, scale: 3 }).notNull(),
-  averageBirdWeight: decimal("averageBirdWeight", { precision: 8, scale: 3 }).notNull(),
-  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
-  notes: text("notes"),
-}, (table) => ({
-  sessionIdIdx: index("idx_catch_crates_session_id").on(table.sessionId),
-  crateTypeIdIdx: index("idx_catch_crates_crate_type_id").on(table.crateTypeId),
-}));
+	id: int().autoincrement().notNull(),
+	sessionId: int().notNull().references(() => catchSessions.id),
+	crateTypeId: int().notNull().references(() => crateTypes.id),
+	batchId: varchar({ length: 50 }),
+	crateNumber: int().notNull(),
+	birdCount: int().notNull(),
+	grossWeight: decimal({ precision: 8, scale: 3 }).notNull(),
+	netWeight: decimal({ precision: 8, scale: 3 }).notNull(),
+	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
+	recordedAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	notes: text(),
+},
+(table) => [
+	index("idx_catch_crates_session_id").on(table.sessionId),
+	index("idx_catch_crates_crate_type_id").on(table.crateTypeId),
+]);
 
-// Batch weighing records (for digital_scale_stack and platform_scale methods)
-export const catchBatches = mysqlTable("catch_batches", {
-  id: int("id").autoincrement().primaryKey(),
-  sessionId: int("sessionId").notNull().references(() => catchSessions.id, { onDelete: "cascade" }),
-  crateTypeId: int("crateTypeId").notNull().references(() => crateTypes.id),
-  batchNumber: int("batchNumber").notNull(), // Sequential batch number within session
-  numberOfCrates: int("numberOfCrates").notNull(),
-  birdsPerCrate: int("birdsPerCrate").notNull(),
-  totalBirds: int("totalBirds").notNull(), // numberOfCrates * birdsPerCrate
-  totalGrossWeight: decimal("totalGrossWeight", { precision: 10, scale: 3 }).notNull(),
-  crateWeight: decimal("crateWeight", { precision: 8, scale: 3 }).notNull(), // Weight per crate
-  palletWeight: decimal("palletWeight", { precision: 8, scale: 3 }), // For platform_scale method
-  totalNetWeight: decimal("totalNetWeight", { precision: 10, scale: 3 }).notNull(),
-  averageBirdWeight: decimal("averageBirdWeight", { precision: 8, scale: 3 }).notNull(),
-  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
-  notes: text("notes"),
-}, (table) => ({
-  sessionIdIdx: index("idx_catch_batches_session_id").on(table.sessionId),
-  crateTypeIdIdx: index("idx_catch_batches_crate_type_id").on(table.crateTypeId),
-}));
+export const catchSessions = mysqlTable("catch_sessions", {
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	catchDate: timestamp({ mode: 'string' }).notNull(),
+	catchTeam: varchar({ length: 200 }),
+	targetBirds: int(),
+	targetWeight: decimal({ precision: 10, scale: 3 }),
+	status: varchar({ length: 20 }).default('active').notNull(),
+	startTime: timestamp({ mode: 'string' }).notNull(),
+	endTime: timestamp({ mode: 'string' }),
+	totalBirdsCaught: int().default(0).notNull(),
+	totalNetWeight: decimal({ precision: 10, scale: 3 }).default('0.000').notNull(),
+	totalCrates: int().default(0).notNull(),
+	averageBirdWeight: decimal({ precision: 8, scale: 3 }),
+	harvestRecordId: int().references(() => harvestRecords.id),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+	weighingMethod: mysqlEnum(['individual','digital_scale_stack','platform_scale']).default('individual').notNull(),
+	palletWeight: decimal({ precision: 6, scale: 3 }),
+	crateTypeId: int().references(() => crateTypes.id),
+	transportDurationHours: decimal({ precision: 4, scale: 1 }),
+	season: varchar({ length: 20 }),
+	plannedStandardDensity: int(),
+	plannedStandardCrates: int(),
+	plannedOddDensity: int(),
+	plannedOddCrates: int(),
+	plannedTotalBirds: int(),
+	availableCrates: int(),
+},
+(table) => [
+	index("idx_catch_sessions_flock_id").on(table.flockId),
+	index("idx_catch_sessions_catch_date").on(table.catchDate),
+	index("idx_catch_sessions_status").on(table.status),
+]);
+
+export const chartOfAccounts = mysqlTable("chart_of_accounts", {
+	id: int().autoincrement().notNull(),
+	accountNumber: varchar({ length: 50 }).notNull(),
+	accountName: varchar({ length: 200 }).notNull(),
+	accountType: mysqlEnum(['asset','liability','equity','revenue','expense']).notNull(),
+	accountSubtype: varchar({ length: 100 }),
+	parentAccountId: int(),
+	isActive: tinyint().default(1).notNull(),
+	description: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("chart_of_accounts_accountNumber_unique").on(table.accountNumber),
+	index("idx_chart_of_accounts_type").on(table.accountType),
+]);
+
+export const crateTypes = mysqlTable("crate_types", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 100 }).notNull(),
+	length: decimal({ precision: 6, scale: 2 }).notNull(),
+	width: decimal({ precision: 6, scale: 2 }).notNull(),
+	height: decimal({ precision: 6, scale: 2 }).notNull(),
+	tareWeight: decimal({ precision: 6, scale: 3 }).notNull(),
+	isActive: tinyint().default(1).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_crate_types_name").on(table.name),
+]);
+
+export const customerAddresses = mysqlTable("customer_addresses", {
+	id: int().autoincrement().notNull(),
+	customerId: int().notNull().references(() => customers.id),
+	addressType: mysqlEnum(['billing','delivery','both']).default('both').notNull(),
+	addressLine1: varchar({ length: 200 }).notNull(),
+	addressLine2: varchar({ length: 200 }),
+	city: varchar({ length: 100 }),
+	province: varchar({ length: 100 }),
+	postalCode: varchar({ length: 20 }),
+	country: varchar({ length: 100 }).default('South Africa'),
+	isDefault: tinyint().default(0),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("idx_customer_addresses_customer_id").on(table.customerId),
+]);
+
+export const customers = mysqlTable("customers", {
+	id: int().autoincrement().notNull(),
+	customerNumber: varchar({ length: 50 }).notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	contactPerson: varchar({ length: 200 }),
+	email: varchar({ length: 320 }),
+	phone: varchar({ length: 50 }),
+	whatsapp: varchar({ length: 50 }),
+	segment: mysqlEnum(['wholesale','retail','contract']).default('retail').notNull(),
+	creditLimit: int().default(0),
+	paymentTerms: varchar({ length: 100 }).default('cash'),
+	taxNumber: varchar({ length: 100 }),
+	isActive: tinyint().default(1).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("customers_customerNumber_unique").on(table.customerNumber),
+]);
+
+export const documents = mysqlTable("documents", {
+	id: int().autoincrement().notNull(),
+	title: varchar({ length: 500 }).notNull(),
+	description: text(),
+	category: mysqlEnum(['contract','certificate','lab_report','invoice','compliance','vaccination_record','biosecurity','financial_statement','other']).notNull(),
+	fileKey: varchar({ length: 500 }).notNull(),
+	fileUrl: varchar({ length: 1000 }).notNull(),
+	fileName: varchar({ length: 500 }).notNull(),
+	fileSize: int(),
+	mimeType: varchar({ length: 100 }),
+	tags: text(),
+	relatedEntityType: varchar({ length: 50 }),
+	relatedEntityId: int(),
+	expiryDate: timestamp({ mode: 'string' }),
+	status: mysqlEnum(['active','archived','expired']).default('active').notNull(),
+	uploadedAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	uploadedBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_documents_category").on(table.category),
+	index("idx_documents_related_entity").on(table.relatedEntityType, table.relatedEntityId),
+]);
+
+export const feedBatches = mysqlTable("feed_batches", {
+	id: int().autoincrement().notNull(),
+	batchNumber: varchar({ length: 100 }).notNull(),
+	formulationId: int().notNull().references(() => feedFormulations.id),
+	productionDate: timestamp({ mode: 'string' }).notNull(),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	rawMaterialCost: int().notNull(),
+	laborCost: int().default(0),
+	overheadCost: int().default(0),
+	totalCost: int().notNull(),
+	costPerTon: int().notNull(),
+	qualityStatus: mysqlEnum(['pending','in_progress','passed','failed']).default('pending').notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("feed_batches_batchNumber_unique").on(table.batchNumber),
+	index("idx_feed_batches_production_date").on(table.productionDate),
+	index("idx_feed_batches_formulation_id").on(table.formulationId),
+]);
+
+export const feedFormulations = mysqlTable("feed_formulations", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	feedRange: mysqlEnum(['premium','value','econo']).notNull(),
+	feedStage: mysqlEnum(['starter','grower','finisher']).notNull(),
+	version: int().default(1).notNull(),
+	description: text(),
+	ingredients: text().notNull(),
+	proteinPercentage: decimal({ precision: 5, scale: 2 }),
+	energyContent: decimal({ precision: 10, scale: 2 }),
+	crudeProtein: decimal({ precision: 5, scale: 2 }),
+	crudeFiber: decimal({ precision: 5, scale: 2 }),
+	calcium: decimal({ precision: 5, scale: 2 }),
+	phosphorus: decimal({ precision: 5, scale: 2 }),
+	isActive: tinyint().default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_feed_formulations_range_stage").on(table.feedRange, table.feedStage),
+]);
+
+export const flockDailyRecords = mysqlTable("flock_daily_records", {
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	recordDate: timestamp({ mode: 'string' }).notNull(),
+	dayNumber: int().notNull(),
+	mortality: int().default(0).notNull(),
+	feedConsumed: decimal({ precision: 10, scale: 2 }).default('0'),
+	feedType: mysqlEnum(['starter','grower','finisher']),
+	waterConsumed: decimal({ precision: 10, scale: 2 }),
+	averageWeight: decimal({ precision: 10, scale: 3 }),
+	weightSamples: text(),
+	temperature: decimal({ precision: 5, scale: 2 }),
+	humidity: decimal({ precision: 5, scale: 2 }),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	recordedBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_flock_daily_records_flock_id").on(table.flockId),
+	index("idx_flock_daily_records_record_date").on(table.recordDate),
+]);
+
+export const flockStressPackSchedules = mysqlTable("flock_stress_pack_schedules", {
+	id: int().autoincrement().notNull(),
+	flockId: int("flock_id").notNull(),
+	stressPackId: int("stress_pack_id").notNull(),
+	startDay: int("start_day").notNull(),
+	endDay: int("end_day").notNull(),
+	dosageStrength: mysqlEnum("dosage_strength", ['single','double','triple']).default('single'),
+	status: mysqlEnum(['scheduled','active','completed','cancelled']).default('scheduled'),
+	quantityUsed: varchar("quantity_used", { length: 100 }),
+	notes: text(),
+	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+});
+
+export const flockVaccinationSchedules = mysqlTable("flock_vaccination_schedules", {
+	id: int().autoincrement().notNull(),
+	flockId: int("flock_id").notNull(),
+	vaccineId: int("vaccine_id").notNull(),
+	scheduledDay: int("scheduled_day").notNull(),
+	status: mysqlEnum(['scheduled','completed','missed','rescheduled']).default('scheduled'),
+	actualDate: timestamp("actual_date", { mode: 'string' }),
+	dosageUsed: varchar("dosage_used", { length: 100 }),
+	notes: text(),
+	administeredBy: int("administered_by"),
+	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+});
+
+export const flocks = mysqlTable("flocks", {
+	id: int().autoincrement().notNull(),
+	flockNumber: varchar({ length: 50 }).notNull(),
+	houseId: int().notNull().references(() => houses.id),
+	placementDate: timestamp({ mode: 'string' }).notNull(),
+	initialCount: int().notNull(),
+	currentCount: int().notNull(),
+	targetSlaughterWeight: decimal({ precision: 10, scale: 2 }).default('1.70'),
+	growingPeriod: int().default(42),
+	status: mysqlEnum(['planned','active','harvesting','completed','cancelled']).default('planned').notNull(),
+	collectionDate: timestamp({ mode: 'string' }),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+	weightUnit: mysqlEnum(['grams','kg']).default('kg').notNull(),
+	starterFeedType: mysqlEnum(['premium','value','econo']),
+	starterFromDay: int().default(0),
+	starterToDay: int(),
+	growerFeedType: mysqlEnum(['premium','value','econo']),
+	growerFromDay: int(),
+	growerToDay: int(),
+	finisherFeedType: mysqlEnum(['premium','value','econo']),
+	finisherFromDay: int(),
+	finisherToDay: int(),
+	destinationName: varchar({ length: 255 }),
+	destinationAddress: text(),
+	destinationGpsLat: varchar({ length: 50 }),
+	destinationGpsLng: varchar({ length: 50 }),
+	travelDurationHours: decimal({ precision: 5, scale: 2 }),
+	feedWithdrawalHours: int(),
+	statusChangedAt: timestamp({ mode: 'string' }),
+	statusChangedBy: int().references(() => users.id),
+	statusChangeReason: text(),
+	isManualStatusChange: tinyint().default(0),
+	targetDeliveredWeight: decimal({ precision: 10, scale: 3 }),
+	targetCatchingWeight: decimal({ precision: 10, scale: 3 }),
+},
+(table) => [
+	index("flocks_flockNumber_unique").on(table.flockNumber),
+	index("idx_flocks_house_id").on(table.houseId),
+	index("idx_flocks_status").on(table.status),
+	index("idx_flocks_placement_date").on(table.placementDate),
+]);
+
+export const generalLedgerEntries = mysqlTable("general_ledger_entries", {
+	id: int().autoincrement().notNull(),
+	entryNumber: varchar({ length: 50 }).notNull(),
+	entryDate: timestamp({ mode: 'string' }).notNull(),
+	accountId: int().notNull().references(() => chartOfAccounts.id),
+	debit: int().default(0).notNull(),
+	credit: int().default(0).notNull(),
+	description: varchar({ length: 500 }).notNull(),
+	referenceType: varchar({ length: 50 }),
+	referenceId: int(),
+	isReconciled: tinyint().default(0),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("general_ledger_entries_entryNumber_unique").on(table.entryNumber),
+	index("idx_general_ledger_entries_account_id").on(table.accountId),
+	index("idx_general_ledger_entries_entry_date").on(table.entryDate),
+]);
+
+export const harvestRecords = mysqlTable("harvest_records", {
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	harvestDate: timestamp({ mode: 'string' }).notNull(),
+	harvestStartTime: timestamp({ mode: 'string' }).notNull(),
+	harvestDurationMinutes: int(),
+	feedWithdrawalStartTime: timestamp({ mode: 'string' }),
+	feedWithdrawalDurationHours: decimal({ precision: 5, scale: 2 }),
+	destination: varchar({ length: 255 }),
+	chickenCountLoaded: int().notNull(),
+	totalLoadedWeightKg: decimal({ precision: 10, scale: 3 }).notNull(),
+	averageLoadedWeightKg: decimal({ precision: 10, scale: 3 }),
+	totalCrates: int(),
+	oddCrateCount: int(),
+	oddCrateWeightKg: decimal({ precision: 10, scale: 3 }),
+	transportDepartTime: timestamp({ mode: 'string' }),
+	transportArrivalTime: timestamp({ mode: 'string' }),
+	travelDurationHours: decimal({ precision: 5, scale: 2 }),
+	chickenCountDelivered: int(),
+	totalDeliveredWeightKg: decimal({ precision: 10, scale: 3 }),
+	averageDeliveredWeightKg: decimal({ precision: 10, scale: 3 }),
+	transportMortalities: int().default(0),
+	shrinkagePercentage: decimal({ precision: 5, scale: 2 }),
+	pricePerKg: decimal({ precision: 10, scale: 2 }),
+	totalRevenue: decimal({ precision: 12, scale: 2 }),
+	paymentTerms: varchar({ length: 100 }),
+	invoiceReference: varchar({ length: 100 }),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	recordedBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_harvest_records_flock_id").on(table.flockId),
+	index("idx_harvest_records_harvest_date").on(table.harvestDate),
+]);
+
+export const healthProtocolTemplates = mysqlTable("health_protocol_templates", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 255 }).notNull(),
+	description: text(),
+	vaccinationSchedules: json("vaccination_schedules"),
+	stressPackSchedules: json("stress_pack_schedules"),
+	isDefault: tinyint("is_default").default(0),
+	isActive: tinyint("is_active").default(1),
+	createdBy: int("created_by").references(() => users.id),
+	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+});
+
+export const healthRecords = mysqlTable("health_records", {
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	recordDate: timestamp({ mode: 'string' }).notNull(),
+	recordType: mysqlEnum(['observation','treatment','veterinary_visit','medication','other']).notNull(),
+	description: text().notNull(),
+	affectedBirds: int(),
+	treatment: text(),
+	medication: varchar({ length: 200 }),
+	dosage: varchar({ length: 100 }),
+	veterinarianName: varchar({ length: 200 }),
+	cost: int(),
+	followUpRequired: tinyint().default(0),
+	followUpDate: timestamp({ mode: 'string' }),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	recordedBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_health_records_flock_id").on(table.flockId),
+	index("idx_health_records_record_date").on(table.recordDate),
+]);
+
+export const houses = mysqlTable("houses", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 100 }).notNull(),
+	houseNumber: varchar({ length: 50 }),
+	length: decimal({ precision: 10, scale: 2 }).notNull(),
+	width: decimal({ precision: 10, scale: 2 }).notNull(),
+	floorArea: decimal({ precision: 10, scale: 2 }).notNull(),
+	capacity: int().notNull(),
+	houseType: mysqlEnum(['open_sided','closed','semi_closed']).default('closed').notNull(),
+	beddingType: varchar({ length: 50 }).default('pine_shavings'),
+	beddingDepth: int().default(30),
+	numberOfFeeders: int(),
+	numberOfDrinkers: int(),
+	heatingType: varchar({ length: 50 }),
+	ventilationType: varchar({ length: 50 }),
+	notes: text(),
+	isActive: tinyint().default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+	breed: mysqlEnum(['ross_308','cobb_500','arbor_acres']).default('ross_308').notNull(),
+	farmName: varchar({ length: 100 }),
+	physicalAddress: text(),
+	gpsLatitude: decimal({ precision: 10, scale: 7 }),
+	gpsLongitude: decimal({ precision: 10, scale: 7 }),
+	province: varchar({ length: 50 }),
+	district: varchar({ length: 50 }),
+	mortalityRate: decimal("mortality_rate", { precision: 5, scale: 2 }).default('4.00').notNull(),
+	targetSlaughterWeight: decimal("target_slaughter_weight", { precision: 5, scale: 2 }).default('1.90').notNull(),
+	densityKgPerSqm: decimal("density_kg_per_sqm", { precision: 5, scale: 2 }),
+},
+(table) => [
+	index("houses_name_unique").on(table.name),
+]);
+
+export const inventoryItems = mysqlTable("inventory_items", {
+	id: int().autoincrement().notNull(),
+	itemNumber: varchar({ length: 50 }).notNull(),
+	primaryClass: varchar("primary_class", { length: 2 }),
+	subType: varchar("sub_type", { length: 2 }),
+	form: varchar({ length: 3 }),
+	name: varchar({ length: 200 }).notNull(),
+	longDescription: text("long_description"),
+	itemStatus: mysqlEnum("item_status", ['active','inactive','discontinued','obsolete']).default('active').notNull(),
+	itemType: mysqlEnum("item_type", ['stocked_item','non_stocked','service','raw_material','finished_good','consumable']).default('stocked_item').notNull(),
+	barcode: varchar({ length: 100 }),
+	manufacturerPartNumber: varchar("manufacturer_part_number", { length: 100 }),
+	internalReference: varchar("internal_reference", { length: 100 }),
+	supplierPartNumber: varchar("supplier_part_number", { length: 100 }),
+	brand: varchar({ length: 100 }),
+	model: varchar({ length: 100 }),
+	category: mysqlEnum(['live_birds','feed','raw_materials','supplies','equipment']).notNull(),
+	unit: varchar({ length: 50 }).notNull(),
+	currentStock: decimal({ precision: 10, scale: 2 }).default('0').notNull(),
+	reorderPoint: decimal({ precision: 10, scale: 2 }),
+	unitCost: int(),
+	isActive: tinyint().default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("inventory_items_itemNumber_unique").on(table.itemNumber),
+	index("idx_inventory_items_barcode").on(table.barcode),
+	index("idx_inventory_items_status").on(table.itemStatus),
+	index("idx_inventory_items_type").on(table.itemType),
+	index("idx_inventory_items_brand").on(table.brand),
+	index("idx_inventory_items_mpn").on(table.manufacturerPartNumber),
+]);
+
+export const inventoryLocations = mysqlTable("inventory_locations", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	locationType: mysqlEnum(['house','warehouse','silo','cold_storage','other']).notNull(),
+	description: text(),
+	isActive: tinyint().default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("inventory_locations_name_unique").on(table.name),
+]);
 
 export const inventoryStock = mysqlTable("inventory_stock", {
-  id: int("id").primaryKey().autoincrement(),
-  itemId: int("item_id").notNull().references(() => inventoryItems.id, { onDelete: "cascade" }),
-  locationId: int("location_id").notNull().references(() => inventoryLocations.id, { onDelete: "cascade" }),
-  quantity: decimal("quantity", { precision: 10, scale: 2 }).notNull().default("0"),
-  lastUpdated: timestamp("last_updated").defaultNow(),
-  updatedBy: int("updated_by").references(() => users.id, { onDelete: "set null" }),
-}, (table) => ({
-  uniqueItemLocation: unique().on(table.itemId, table.locationId),
-}));
+	id: int().autoincrement().notNull(),
+	itemId: int().notNull().references(() => inventoryItems.id),
+	locationId: int().notNull().references(() => inventoryLocations.id),
+	quantity: decimal({ precision: 10, scale: 2 }).default('0').notNull(),
+	lastUpdated: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	updatedBy: int().references(() => users.id),
+},
+(table) => [
+	index("unique_item_location").on(table.itemId, table.locationId),
+	index("idx_inventory_stock_item_location").on(table.itemId, table.locationId),
+]);
 
-export type CrateType = typeof crateTypes.$inferSelect;
-export type InsertCrateType = typeof crateTypes.$inferInsert;
-export type CatchSession = typeof catchSessions.$inferSelect;
-export type InsertCatchSession = typeof catchSessions.$inferInsert;
-export type CatchBatch = typeof catchBatches.$inferSelect;
-export type InsertCatchBatch = typeof catchBatches.$inferInsert;
-export type CatchCrate = typeof catchCrates.$inferSelect;
-export type InsertCatchCrate = typeof catchCrates.$inferInsert;
+export const inventoryTransactions = mysqlTable("inventory_transactions", {
+	id: int().autoincrement().notNull(),
+	itemId: int().notNull().references(() => inventoryItems.id),
+	locationId: int().references(() => inventoryLocations.id),
+	transactionType: mysqlEnum(['receipt','issue','transfer','adjustment']).notNull(),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	unitCost: int(),
+	totalCost: int(),
+	referenceType: varchar({ length: 50 }),
+	referenceId: int(),
+	notes: text(),
+	transactionDate: timestamp({ mode: 'string' }).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_inventory_transactions_item_id").on(table.itemId),
+	index("idx_inventory_transactions_date").on(table.transactionDate),
+]);
 
-// Re-export slaughter tracking tables from schema-slaughter
-export {
-  slaughterBatches,
-  slaughterCatchRecords,
-  slaughterhouseRecords,
-  type SlaughterBatch,
-  type InsertSlaughterBatch,
-  type SlaughterCatchRecord,
-  type InsertSlaughterCatchRecord,
-  type SlaughterhouseRecord,
-  type InsertSlaughterhouseRecord,
-} from "./schema-slaughter";
+export const invoiceItems = mysqlTable("invoice_items", {
+	id: int().autoincrement().notNull(),
+	invoiceId: int().notNull().references(() => invoices.id),
+	description: varchar({ length: 500 }).notNull(),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	unit: varchar({ length: 50 }).notNull(),
+	unitPrice: int().notNull(),
+	subtotal: int().notNull(),
+	taxRate: decimal({ precision: 5, scale: 2 }).default('15.00'),
+	taxAmount: int().notNull(),
+	totalAmount: int().notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("idx_invoice_items_invoice_id").on(table.invoiceId),
+]);
+
+export const invoices = mysqlTable("invoices", {
+	id: int().autoincrement().notNull(),
+	invoiceNumber: varchar({ length: 50 }).notNull(),
+	customerId: int().notNull().references(() => customers.id),
+	orderId: int().references(() => salesOrders.id),
+	invoiceDate: timestamp({ mode: 'string' }).notNull(),
+	dueDate: timestamp({ mode: 'string' }).notNull(),
+	subtotal: int().notNull(),
+	taxAmount: int().notNull(),
+	totalAmount: int().notNull(),
+	paidAmount: int().default(0).notNull(),
+	balanceDue: int().notNull(),
+	status: mysqlEnum(['draft','sent','paid','partial','overdue','cancelled']).default('draft').notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
+	index("idx_invoices_customer_id").on(table.customerId),
+	index("idx_invoices_invoice_date").on(table.invoiceDate),
+	index("idx_invoices_status").on(table.status),
+	index("idx_invoices_due_date").on(table.dueDate),
+]);
+
+export const itemTemplates = mysqlTable("item_templates", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	category: varchar({ length: 100 }).notNull(),
+	calculationType: mysqlEnum(['area_based','bird_count_based','worker_based','fixed','custom']).notNull(),
+	formula: text(),
+	bufferPercentage: decimal({ precision: 5, scale: 2 }).default('10.00'),
+	unit: varchar({ length: 50 }).notNull(),
+	conversionFactor: decimal({ precision: 10, scale: 4 }),
+	orderTriggerDays: int().notNull(),
+	deliveryLeadDays: int().default(0),
+	defaultSupplierId: int().references(() => suppliers.id),
+	estimatedUnitCost: int(),
+	isActive: tinyint().default(1).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+});
+
+export const mortalityRecords = mysqlTable("mortality_records", {
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	recordDate: timestamp({ mode: 'string' }).notNull(),
+	count: int().notNull(),
+	cause: varchar({ length: 200 }),
+	ageAtDeath: int(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	recordedBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_mortality_records_flock_id").on(table.flockId),
+	index("idx_mortality_records_record_date").on(table.recordDate),
+]);
+
+export const paymentAllocations = mysqlTable("payment_allocations", {
+	id: int().autoincrement().notNull(),
+	paymentId: int().notNull().references(() => payments.id),
+	invoiceId: int().notNull().references(() => invoices.id),
+	amount: int().notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("idx_payment_allocations_payment_id").on(table.paymentId),
+	index("idx_payment_allocations_invoice_id").on(table.invoiceId),
+]);
+
+export const payments = mysqlTable("payments", {
+	id: int().autoincrement().notNull(),
+	paymentNumber: varchar({ length: 50 }).notNull(),
+	customerId: int().notNull().references(() => customers.id),
+	paymentDate: timestamp({ mode: 'string' }).notNull(),
+	amount: int().notNull(),
+	paymentMethod: varchar({ length: 100 }).notNull(),
+	referenceNumber: varchar({ length: 200 }),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	recordedBy: int().references(() => users.id),
+},
+(table) => [
+	index("payments_paymentNumber_unique").on(table.paymentNumber),
+	index("idx_payments_customer_id").on(table.customerId),
+	index("idx_payments_payment_date").on(table.paymentDate),
+]);
+
+export const processors = mysqlTable("processors", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 255 }).notNull(),
+	contactPerson: varchar({ length: 255 }),
+	email: varchar({ length: 320 }),
+	phone: varchar({ length: 50 }),
+	physicalAddress: text(),
+	gpsLatitude: decimal({ precision: 10, scale: 7 }),
+	gpsLongitude: decimal({ precision: 10, scale: 7 }),
+	paymentTerms: varchar({ length: 100 }),
+	defaultPricePerKg: decimal({ precision: 10, scale: 2 }),
+	averageTravelTimeHours: decimal({ precision: 5, scale: 2 }),
+	operatingDays: varchar({ length: 100 }),
+	operatingHours: varchar({ length: 100 }),
+	notes: text(),
+	isActive: tinyint().default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("name").on(table.name),
+]);
+
+export const procurementOrderItems = mysqlTable("procurement_order_items", {
+	id: int().autoincrement().notNull(),
+	orderId: int().notNull().references(() => procurementOrders.id),
+	scheduleId: int().references(() => procurementSchedules.id),
+	description: varchar({ length: 500 }).notNull(),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	unit: varchar({ length: 50 }).notNull(),
+	unitPrice: int(),
+	totalAmount: int(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("idx_procurement_order_items_order_id").on(table.orderId),
+]);
+
+export const procurementOrders = mysqlTable("procurement_orders", {
+	id: int().autoincrement().notNull(),
+	orderNumber: varchar({ length: 50 }).notNull(),
+	supplierId: int().notNull().references(() => suppliers.id),
+	orderDate: timestamp({ mode: 'string' }).notNull(),
+	expectedDeliveryDate: timestamp({ mode: 'string' }),
+	actualDeliveryDate: timestamp({ mode: 'string' }),
+	totalAmount: int(),
+	status: mysqlEnum(['draft','sent','confirmed','delivered','cancelled']).default('draft').notNull(),
+	sentVia: mysqlEnum(['email','whatsapp','phone','manual']),
+	sentAt: timestamp({ mode: 'string' }),
+	confirmedAt: timestamp({ mode: 'string' }),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("procurement_orders_orderNumber_unique").on(table.orderNumber),
+	index("idx_procurement_orders_supplier_id").on(table.supplierId),
+	index("idx_procurement_orders_order_date").on(table.orderDate),
+]);
+
+export const procurementSchedules = mysqlTable("procurement_schedules", {
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	itemTemplateId: int().notNull().references(() => itemTemplates.id),
+	supplierId: int().notNull().references(() => suppliers.id),
+	calculatedQuantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	adjustedQuantity: decimal({ precision: 10, scale: 2 }),
+	finalQuantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	unit: varchar({ length: 50 }).notNull(),
+	estimatedCost: int(),
+	scheduledOrderDate: timestamp({ mode: 'string' }).notNull(),
+	scheduledDeliveryDate: timestamp({ mode: 'string' }),
+	actualOrderDate: timestamp({ mode: 'string' }),
+	actualDeliveryDate: timestamp({ mode: 'string' }),
+	status: mysqlEnum(['pending','ordered','confirmed','delivered','cancelled']).default('pending').notNull(),
+	orderReference: varchar({ length: 200 }),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_procurement_schedules_flock_id").on(table.flockId),
+	index("idx_procurement_schedules_status").on(table.status),
+	index("idx_procurement_schedules_order_date").on(table.scheduledOrderDate),
+]);
+
+export const qualityControlRecords = mysqlTable("quality_control_records", {
+	id: int().autoincrement().notNull(),
+	batchId: int().notNull().references(() => feedBatches.id),
+	testDate: timestamp({ mode: 'string' }).notNull(),
+	testType: varchar({ length: 100 }).notNull(),
+	parameter: varchar({ length: 100 }).notNull(),
+	measuredValue: decimal({ precision: 10, scale: 3 }),
+	targetValue: decimal({ precision: 10, scale: 3 }),
+	tolerance: decimal({ precision: 10, scale: 3 }),
+	result: mysqlEnum(['pass','fail','pending']).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	testedBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_quality_control_records_batch_id").on(table.batchId),
+]);
+
+export const rawMaterialTransactions = mysqlTable("raw_material_transactions", {
+	id: int().autoincrement().notNull(),
+	rawMaterialId: int().notNull().references(() => rawMaterials.id),
+	transactionType: mysqlEnum(['purchase','usage','adjustment','return']).notNull(),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	unitCost: int(),
+	totalCost: int(),
+	referenceType: varchar({ length: 50 }),
+	referenceId: int(),
+	notes: text(),
+	transactionDate: timestamp({ mode: 'string' }).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_raw_material_transactions_material_id").on(table.rawMaterialId),
+	index("idx_raw_material_transactions_date").on(table.transactionDate),
+]);
+
+export const rawMaterials = mysqlTable("raw_materials", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	category: varchar({ length: 100 }),
+	unit: varchar({ length: 50 }).notNull(),
+	currentStock: decimal({ precision: 10, scale: 2 }).default('0').notNull(),
+	reorderPoint: decimal({ precision: 10, scale: 2 }),
+	reorderQuantity: decimal({ precision: 10, scale: 2 }),
+	unitCost: int(),
+	supplierId: int(),
+	isActive: tinyint().default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("raw_materials_name_unique").on(table.name),
+]);
+
+export const reminderTemplates = mysqlTable("reminder_templates", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	description: text(),
+	reminderType: mysqlEnum(['vaccination','feed_transition','house_preparation','environmental_check','routine_task','milestone','biosecurity','performance_alert','house_light_timing']).notNull(),
+	priority: mysqlEnum(['urgent','high','medium','low']).default('medium').notNull(),
+	dayOffset: int("day_offset").notNull(),
+	isActive: tinyint("is_active").default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	isBundle: tinyint("is_bundle").default(0).notNull(),
+	bundleConfig: json("bundle_config"),
+});
+
+export const reminders = mysqlTable("reminders", {
+	id: int().autoincrement().notNull(),
+	flockId: int().references(() => flocks.id),
+	houseId: int().references(() => houses.id),
+	reminderType: mysqlEnum(['vaccination','feed_transition','house_preparation','environmental_check','routine_task','milestone','biosecurity','performance_alert','house_light_timing']).notNull(),
+	title: varchar({ length: 200 }).notNull(),
+	description: text(),
+	dueDate: timestamp({ mode: 'string' }).notNull(),
+	priority: mysqlEnum(['urgent','high','medium','low']).default('medium').notNull(),
+	status: mysqlEnum(['pending','completed','dismissed']).default('pending').notNull(),
+	completedAt: timestamp({ mode: 'string' }),
+	completedBy: int().references(() => users.id),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	actionNotes: text(),
+	templateId: int().references(() => reminderTemplates.id),
+},
+(table) => [
+	index("idx_reminders_flock_id").on(table.flockId),
+	index("idx_reminders_house_id").on(table.houseId),
+	index("idx_reminders_due_date").on(table.dueDate),
+	index("idx_reminders_status").on(table.status),
+]);
+
+export const salesOrderItems = mysqlTable("sales_order_items", {
+	id: int().autoincrement().notNull(),
+	orderId: int().notNull().references(() => salesOrders.id),
+	itemType: mysqlEnum(['live_birds','feed','other']).notNull(),
+	description: varchar({ length: 500 }).notNull(),
+	flockId: int().references(() => flocks.id),
+	feedBatchId: int().references(() => feedBatches.id),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	unit: varchar({ length: 50 }).notNull(),
+	unitPrice: int().notNull(),
+	subtotal: int().notNull(),
+	taxRate: decimal({ precision: 5, scale: 2 }).default('15.00'),
+	taxAmount: int().notNull(),
+	totalAmount: int().notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("idx_sales_order_items_order_id").on(table.orderId),
+]);
+
+export const salesOrders = mysqlTable("sales_orders", {
+	id: int().autoincrement().notNull(),
+	orderNumber: varchar({ length: 50 }).notNull(),
+	customerId: int().notNull().references(() => customers.id),
+	orderDate: timestamp({ mode: 'string' }).notNull(),
+	deliveryDate: timestamp({ mode: 'string' }),
+	deliveryAddressId: int().references(() => customerAddresses.id),
+	status: mysqlEnum(['draft','confirmed','processing','delivered','cancelled']).default('draft').notNull(),
+	subtotal: int().notNull(),
+	taxAmount: int().notNull(),
+	totalAmount: int().notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("sales_orders_orderNumber_unique").on(table.orderNumber),
+	index("idx_sales_orders_customer_id").on(table.customerId),
+	index("idx_sales_orders_order_date").on(table.orderDate),
+	index("idx_sales_orders_status").on(table.status),
+]);
+
+export const stressPacks = mysqlTable("stress_packs", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 255 }).notNull(),
+	brand: varchar({ length: 255 }).notNull(),
+	manufacturer: varchar({ length: 255 }),
+	dosageStrength: mysqlEnum("dosage_strength", ['single','double','triple']).default('single'),
+	dosagePerLiter: varchar("dosage_per_liter", { length: 100 }),
+	recommendedDurationDays: int("recommended_duration_days"),
+	instructions: text(),
+	costPerKg: varchar("cost_per_kg", { length: 20 }),
+	isActive: tinyint("is_active").default(1),
+	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	activeIngredients: text("active_ingredients"),
+});
+
+export const suppliers = mysqlTable("suppliers", {
+	id: int().autoincrement().notNull(),
+	supplierNumber: varchar({ length: 50 }).notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	contactPerson: varchar({ length: 200 }),
+	email: varchar({ length: 320 }),
+	phone: varchar({ length: 50 }),
+	whatsapp: varchar({ length: 50 }),
+	preferredContactMethod: mysqlEnum(['email','whatsapp','phone','both']).default('email'),
+	category: varchar({ length: 100 }),
+	paymentTerms: varchar({ length: 100 }).default('cash'),
+	taxNumber: varchar({ length: 100 }),
+	bankName: varchar({ length: 200 }),
+	bankAccountNumber: varchar({ length: 100 }),
+	isActive: tinyint().default(1).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("suppliers_supplierNumber_unique").on(table.supplierNumber),
+]);
+
+export const userActivityLogs = mysqlTable("user_activity_logs", {
+	id: int().autoincrement().notNull(),
+	userId: int().notNull().references(() => users.id),
+	action: varchar({ length: 100 }).notNull(),
+	entityType: varchar({ length: 50 }),
+	entityId: int(),
+	details: text(),
+	ipAddress: varchar({ length: 45 }),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("idx_user_activity_logs_user_id").on(table.userId),
+	index("idx_user_activity_logs_created_at").on(table.createdAt),
+]);
+
+export const users = mysqlTable("users", {
+	id: int().autoincrement().notNull(),
+	openId: varchar({ length: 64 }),
+	name: text(),
+	email: varchar({ length: 320 }),
+	loginMethod: varchar({ length: 64 }).default('email').notNull(),
+	role: mysqlEnum(['admin','farm_manager','accountant','sales_staff','production_worker']).default('production_worker').notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	lastSignedIn: timestamp({ mode: 'string' }),
+	isActive: tinyint().default(1).notNull(),
+	username: varchar({ length: 50 }),
+	passwordHash: varchar({ length: 255 }),
+	mustChangePassword: tinyint().default(1).notNull(),
+	createdBy: int(),
+},
+(table) => [
+	index("users_openId_unique").on(table.openId),
+	index("users_username_unique").on(table.username),
+	index("users_email_unique").on(table.email),
+]);
+
+export const vaccinationSchedules = mysqlTable("vaccination_schedules", {
+	id: int().autoincrement().notNull(),
+	flockId: int().notNull().references(() => flocks.id),
+	vaccineName: varchar({ length: 200 }).notNull(),
+	scheduledDate: timestamp({ mode: 'string' }).notNull(),
+	scheduledDayNumber: int().notNull(),
+	administeredDate: timestamp({ mode: 'string' }),
+	dosage: varchar({ length: 100 }),
+	administrationMethod: varchar({ length: 100 }),
+	batchNumber: varchar({ length: 100 }),
+	status: mysqlEnum(['scheduled','completed','skipped','overdue']).default('scheduled').notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	administeredBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_vaccination_schedules_flock_id").on(table.flockId),
+	index("idx_vaccination_schedules_scheduled_date").on(table.scheduledDate),
+]);
+
+export const vaccines = mysqlTable("vaccines", {
+	id: int().autoincrement().notNull(),
+	name: varchar({ length: 255 }).notNull(),
+	brand: varchar({ length: 255 }).notNull(),
+	manufacturer: varchar({ length: 255 }),
+	diseaseType: mysqlEnum("disease_type", ['newcastle_disease','infectious_bronchitis','gumboro','mareks','coccidiosis','fowl_pox','other']).notNull(),
+	applicationMethod: mysqlEnum("application_method", ['drinking_water','spray','eye_drop','injection','wing_web']).notNull(),
+	dosagePerBird: varchar("dosage_per_bird", { length: 100 }),
+	boosterIntervalDays: int("booster_interval_days"),
+	instructions: text(),
+	withdrawalPeriodDays: int("withdrawal_period_days").default(0),
+	isActive: tinyint("is_active").default(1),
+	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	vaccineType: mysqlEnum("vaccine_type", ['live','inactivated','recombinant','vector']).notNull(),
+	storageTemperature: varchar("storage_temperature", { length: 100 }),
+	shelfLifeDays: int("shelf_life_days"),
+});
