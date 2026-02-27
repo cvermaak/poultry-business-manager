@@ -213,6 +213,24 @@ export async function createInventoryItem(data: {
       quantity: data.currentStock.toString(),
       updatedBy: 1, // System user
     });
+
+    // Record an initial receipt transaction so FIFO costing has all stock layers
+    const initialUnitCost = data.unitCost ?? null;
+    const initialTotalCost = initialUnitCost !== null
+      ? Math.round(initialUnitCost * data.currentStock)
+      : null;
+    await db.insert(inventoryTransactions).values({
+      itemId: insertId,
+      locationId,
+      transactionType: "receipt",
+      quantity: data.currentStock.toString(),
+      unitCost: initialUnitCost !== null ? initialUnitCost.toString() : null,
+      totalCost: initialTotalCost !== null ? initialTotalCost.toString() : null,
+      referenceType: "initial_stock",
+      notes: "Initial stock on item creation",
+      transactionDate: new Date(),
+      createdBy: 1,
+    });
   }
   
   return createdItem || null;
