@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import { inventoryItems, inventoryLocations, inventoryStock, inventoryTransactions } from "../drizzle/schema";
-import { eq, and, sql, desc, gte, lte, like } from "drizzle-orm";
+import { eq, and, sql, desc, gte, lte, like, gt } from "drizzle-orm";
 import { formatSKU } from "../shared/sku-constants";
 
 // ============================================================================
@@ -540,6 +540,74 @@ async function setStockLevel(
   }
 }
 
+/**
+ * Calculate FIFO cost for issuing/transferring stock
+ * Returns the total cost based on oldest receipt transactions first
+ */
+export async function calculateFIFOCost(
+  itemId: number,
+  locationId: number,
+  quantityToIssue: number
+): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  // Get all receipt transactions for this item/location, ordered by date (FIFO)
+  const receipts = await db
+    .select({
+      id: inventoryTransactions.id,
+      quantity: inventoryTransactions.quantity,
+      unitCost: inventoryTransactions.unitCost,
+      transactionDate: inventoryTransactions.transactionDate,
+    })
+    .from(inventoryTransactions)
+    .where(
+      and(
+        eq(inventoryTransactions.itemId, itemId),
+        eq(inventoryTransactions.locationId, locationId),
+        eq(inventoryTransactions.transactionType, "receipt")
+      )
+    )
+    .orderBy(inventoryTransactions.transactionDate); // FIFO: oldest first
+
+  let remainingQty = quantityToIssue;
+  let totalCost = 0;
+
+  for (const receipt of receipts) {
+    if (remainingQty <= 0) break;
+
+    const receiptQty = parseFloat(receipt.quantity);
+    const receiptUnitCost = receipt.unitCost ? parseInt(receipt.unitCost) : 0;
+
+    // If no unit cost, skip (can't calculate cost)
+    if (receiptUnitCost === 0) continue;
+
+    // Calculate how much to take from this receipt
+    const qtyToTake = Math.min(remainingQty, receiptQty);
+    
+    // Add cost (unitCost is stored as integer cents)
+    totalCost += qtyToTake * receiptUnitCost;
+    
+    remainingQty -= qtyToTake;
+  }
+
+  // If we couldn't find enough receipts with costs, use item's default unit cost
+  if (remainingQty > 0) {
+    const item = await db
+      .select({ unitCost: inventoryItems.unitCost })
+      .from(inventoryItems)
+      .where(eq(inventoryItems.id, itemId))
+      .limit(1);
+
+    if (item[0]?.unitCost) {
+      const defaultUnitCost = parseInt(item[0].unitCost);
+      totalCost += remainingQty * defaultUnitCost;
+    }
+  }
+
+  return Math.round(totalCost); // Return as integer (cents)
+}
+
 export async function recordTransaction(data: {
   itemId: number;
   locationId: number; // Make required
@@ -575,14 +643,23 @@ export async function recordTransaction(data: {
     throw new Error("Cannot transfer to the same location");
   }
 
+  // Calculate FIFO cost for Issue and Transfer transactions
+  let calculatedTotalCost = data.totalCost;
+  if (data.transactionType === "issue" || data.transactionType === "transfer") {
+    calculatedTotalCost = await calculateFIFOCost(data.itemId, data.locationId, data.quantity);
+  } else if (data.transactionType === "receipt" && data.unitCost) {
+    // For receipts, calculate totalCost from unitCost * quantity
+    calculatedTotalCost = Math.round(data.unitCost * data.quantity);
+  }
+
   // Record the transaction
   const result = await db.insert(inventoryTransactions).values({
     itemId: data.itemId,
     locationId: data.locationId,
     transactionType: data.transactionType,
     quantity: data.quantity.toString(),
-    unitPrice: data.unitCost?.toString(),
-    totalCost: data.totalCost?.toString(),
+    unitCost: data.unitCost?.toString(),
+    totalCost: calculatedTotalCost?.toString(),
     referenceNumber: data.referenceNumber,
     notes: data.notes,
     transactionDate: data.transactionDate,
@@ -608,12 +685,14 @@ export async function recordTransaction(data: {
       await updateStockLevel(data.itemId, data.locationId, data.quantity, "subtract", data.createdBy);
       // Add to destination location
       await updateStockLevel(data.itemId, data.toLocationId, data.quantity, "add", data.createdBy);
-      // Record second transaction for destination
+      // Record second transaction for destination (with same cost)
       await db.insert(inventoryTransactions).values({
         itemId: data.itemId,
         locationId: data.toLocationId,
         transactionType: "receipt",
         quantity: data.quantity.toString(),
+        unitCost: calculatedTotalCost ? (calculatedTotalCost / data.quantity).toString() : undefined,
+        totalCost: calculatedTotalCost?.toString(),
         referenceNumber: `TRANSFER-${transactionId}`,
         notes: `Transfer from location ${data.locationId}${data.notes ? ': ' + data.notes : ''}`,
         transactionDate: data.transactionDate,
@@ -854,4 +933,102 @@ export async function searchInventoryItems(
     .select()
     .from(inventoryItems)
     .where(and(...conditions));
+}
+
+
+/**
+ * Get stock valuation report with breakdown by category and location
+ */
+export async function getStockValuation() {
+  const db = await getDb();
+  if (!db) throw new Error("Database connection failed");
+
+  // Get all stock with item details
+  const stockWithDetails = await db
+    .select({
+      itemId: inventoryStock.itemId,
+      itemName: inventoryItems.name,
+      itemNumber: inventoryItems.itemNumber,
+      category: inventoryItems.category,
+      locationId: inventoryStock.locationId,
+      locationName: inventoryLocations.name,
+      locationType: inventoryLocations.locationType,
+      quantity: inventoryStock.quantity,
+      unit: inventoryItems.unit,
+      unitCost: inventoryItems.unitCost,
+    })
+    .from(inventoryStock)
+    .innerJoin(inventoryItems, eq(inventoryStock.itemId, inventoryItems.id))
+    .innerJoin(inventoryLocations, eq(inventoryStock.locationId, inventoryLocations.id))
+    .where(sql`CAST(${inventoryStock.quantity} AS DECIMAL(10,2)) > 0`);
+
+  // Calculate total value and breakdowns
+  let totalValue = 0;
+  const byCategory: Record<string, { value: number; items: number }> = {};
+  const byLocation: Record<string, { value: number; items: number; locationType: string }> = {};
+  const items: Array<{
+    itemId: number;
+    itemName: string;
+    itemNumber: string;
+    category: string;
+    locationName: string;
+    quantity: string;
+      unit: string;
+    unitCost: string | null;
+    totalValue: number;
+  }> = [];
+
+  for (const stock of stockWithDetails) {
+    const qty = parseFloat(stock.quantity);
+    const cost = stock.unitCost ? parseFloat(stock.unitCost) : 0;
+    const value = qty * cost;
+
+    totalValue += value;
+
+    // By category
+    if (!byCategory[stock.category]) {
+      byCategory[stock.category] = { value: 0, items: 0 };
+    }
+    byCategory[stock.category].value += value;
+    byCategory[stock.category].items += 1;
+
+    // By location
+    if (!byLocation[stock.locationName]) {
+      byLocation[stock.locationName] = { value: 0, items: 0, locationType: stock.locationType };
+    }
+    byLocation[stock.locationName].value += value;
+    byLocation[stock.locationName].items += 1;
+
+    // Item details
+    items.push({
+      itemId: stock.itemId,
+      itemName: stock.itemName,
+      itemNumber: stock.itemNumber,
+      category: stock.category,
+      locationName: stock.locationName,
+      quantity: stock.quantity,
+      unit: stock.unit,
+      unitCost: stock.unitCost,
+      totalValue: value,
+    });
+  }
+
+  return {
+    totalValue,
+    byCategory: Object.entries(byCategory).map(([category, data]) => ({
+      category,
+      value: data.value,
+      items: data.items,
+      percentage: totalValue > 0 ? (data.value / totalValue) * 100 : 0,
+    })),
+    byLocation: Object.entries(byLocation).map(([location, data]) => ({
+      location,
+      locationType: data.locationType,
+      value: data.value,
+      items: data.items,
+      percentage: totalValue > 0 ? (data.value / totalValue) * 100 : 0,
+    })),
+    items: items.sort((a, b) => b.totalValue - a.totalValue), // Sort by value descending
+    generatedAt: new Date(),
+  };
 }
