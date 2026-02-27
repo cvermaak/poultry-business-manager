@@ -156,14 +156,6 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <RemindersWidget />
-            <div className="space-y-4">
-              <div className="flex items-center">
-                <div className="ml-4 space-y-1">
-                  <p className="text-sm font-medium leading-none">System initialized</p>
-                  <p className="text-sm text-muted-foreground">Ready to start managing your poultry business</p>
-                </div>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
