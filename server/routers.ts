@@ -803,6 +803,38 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    updateHealthRecord: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          recordDate: z.date().optional(),
+          recordType: z.enum(["observation", "treatment", "veterinary_visit", "medication", "other"]).optional(),
+          description: z.string().optional(),
+          treatment: z.string().optional(),
+          medication: z.string().optional(),
+          dosage: z.string().optional(),
+          veterinarianName: z.string().optional(),
+          cost: z.number().optional(),
+          followUpDate: z.date().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...data } = input;
+        await db.updateHealthRecord(id, {
+          ...data,
+          cost: data.cost !== undefined ? data.cost : undefined,
+        });
+        await db.logUserActivity(
+          ctx.user.id,
+          "update_health_record",
+          "health_record",
+          id,
+          `Updated health record ${id}`
+        );
+        return { success: true };
+      }),
+
     createVaccinationSchedule: protectedProcedure
       .input(
         z.object({

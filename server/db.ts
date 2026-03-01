@@ -1043,6 +1043,14 @@ export async function createHealthRecord(data: typeof healthRecords.$inferInsert
   return result;
 }
 
+export async function updateHealthRecord(id: number, data: Partial<typeof healthRecords.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.update(healthRecords).set(data).where(eq(healthRecords.id, id));
+  return result;
+}
+
 export async function createVaccinationSchedule(data: typeof vaccinationSchedules.$inferInsert) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");

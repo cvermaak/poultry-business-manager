@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { formatRand } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -501,7 +502,7 @@ export default function Harvests() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">R{totalRevenue.toFixed(2)}</div>
+            <div className="text-2xl font-bold">{formatRand(totalRevenue)}</div>
             <p className="text-xs text-muted-foreground">From all harvests</p>
           </CardContent>
         </Card>
@@ -575,7 +576,7 @@ export default function Harvests() {
                         {harvest.shrinkagePercentage ? `${harvest.shrinkagePercentage}%` : "-"}
                       </TableCell>
                       <TableCell className="text-right">
-                        {harvest.totalRevenue ? `R${parseFloat(harvest.totalRevenue).toFixed(2)}` : "-"}
+                        {harvest.totalRevenue ? formatRand(parseFloat(harvest.totalRevenue)) : "-"}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">

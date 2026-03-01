@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { formatRand, formatCents, formatNumber } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -314,13 +315,9 @@ export default function Inventory() {
     createLocationMutation.mutate(locationForm);
   };
 
-  // Format a Rand value (already in Rand, not cents) with thousand separators
-  const formatCurrency = (value: number) =>
-    `R${value.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  // Format a quantity with thousand separators
-  const formatQty = (value: number | string) =>
-    parseFloat(String(value)).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Delegate to shared format utilities
+  const formatCurrency = (value: number) => formatRand(value);
+  const formatQty = (value: number | string) => formatNumber(value, 2);
 
   const getCategoryBadge = (category: string) => {
     const colors: Record<string, string> = {
@@ -376,14 +373,20 @@ export default function Inventory() {
       "Notes",
     ];
 
+    // Helper: format number for CSV (space thousands, dot decimal)
+    const fmtNum = (v: number, dec = 2) => {
+      const [i, d] = v.toFixed(dec).split('.');
+      return `${i.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}.${d}`;
+    };
+
     const rows = data.map((transaction) => [
       new Date(transaction.transactionDate!).toLocaleDateString(),
       transaction.transactionType,
       transaction.itemName,
       transaction.locationName,
-      parseFloat(transaction.quantity || "0").toFixed(2),
-      transaction.unitCost ? (parseFloat(transaction.unitCost) / 100).toFixed(2) : "",
-      transaction.totalCost ? (parseFloat(transaction.totalCost) / 100).toFixed(2) : "",
+      fmtNum(parseFloat(transaction.quantity || "0")),
+      transaction.unitCost ? fmtNum(parseFloat(transaction.unitCost) / 100) : "",
+      transaction.totalCost ? fmtNum(parseFloat(transaction.totalCost) / 100) : "",
       transaction.referenceNumber || "",
       transaction.notes || "",
     ]);
@@ -926,13 +929,12 @@ export default function Inventory() {
                     </CardHeader>
                     <CardContent>
                       <p className="text-2xl font-bold">
-                        R
-                        {(
+                        {formatCurrency(
                           filteredTransactions.reduce(
                             (sum, t) => sum + (parseFloat(t.totalCost || "0") / 100),
                             0
                           )
-                        ).toFixed(2)}
+                        )}
                       </p>
                     </CardContent>
                   </Card>
@@ -1025,6 +1027,18 @@ export default function Inventory() {
                         </TableCell>
                       </TableRow>
                     )}
+                    {stockValuation?.byCategory && stockValuation.byCategory.length > 0 && (
+                      <TableRow className="border-t-2 font-bold bg-muted/40">
+                        <TableCell className="font-bold">Grand Total</TableCell>
+                        <TableCell className="text-right font-bold">
+                          {stockValuation.byCategory.reduce((sum, c) => sum + c.items, 0)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-bold">
+                          {formatCurrency(stockValuation.totalValue)}
+                        </TableCell>
+                        <TableCell className="text-right font-bold">100.0%</TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -1079,6 +1093,19 @@ export default function Inventory() {
                         <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                           No stock data available
                         </TableCell>
+                      </TableRow>
+                    )}
+                    {stockValuation?.byLocation && stockValuation.byLocation.length > 0 && (
+                      <TableRow className="border-t-2 font-bold bg-muted/40">
+                        <TableCell className="font-bold">Grand Total</TableCell>
+                        <TableCell></TableCell>
+                        <TableCell className="text-right font-bold">
+                          {stockValuation.byLocation.reduce((sum, l) => sum + l.items, 0)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-bold">
+                          {formatCurrency(stockValuation.totalValue)}
+                        </TableCell>
+                        <TableCell className="text-right font-bold">100.0%</TableCell>
                       </TableRow>
                     )}
                   </TableBody>

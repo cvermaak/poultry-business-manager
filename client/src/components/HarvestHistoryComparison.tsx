@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatRand } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, Award, AlertCircle } from "lucide-react";
 
@@ -108,7 +109,7 @@ export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps
           <CardContent>
             <div className="text-2xl font-bold">{bestRevenue.flockNumber}</div>
             <p className="text-sm text-muted-foreground mt-1">
-              R{bestRevenue.totalRevenue.toFixed(2)}
+              {formatRand(bestRevenue.totalRevenue)}
             </p>
           </CardContent>
         </Card>
@@ -189,7 +190,7 @@ export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps
                         </span>
                       </TableCell>
                       <TableCell className="text-right font-medium">
-                        R{flock.totalRevenue.toFixed(2)}
+                        {formatRand(flock.totalRevenue)}
                       </TableCell>
                     </TableRow>
                   );

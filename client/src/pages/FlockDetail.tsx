@@ -17,6 +17,7 @@ import { useRoute, useLocation } from "wouter";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { formatWeight, getWeightValue, getUnitLabel } from "@/lib/weightUtils";
+import { formatRand } from "@/lib/format";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
@@ -116,6 +117,19 @@ export default function FlockDetail() {
     },
   });
 
+  const updateHealthRecord = trpc.flocks.updateHealthRecord.useMutation({
+    onSuccess: () => {
+      utils.flocks.getHealthRecords.invalidate({ flockId });
+      toast.success("Health record updated successfully");
+      setHealthRecordDialogOpen(false);
+      setEditingHealthRecordId(null);
+      resetHealthRecordForm();
+    },
+    onError: (error) => {
+      toast.error(`Failed to update health record: ${error.message}`);
+    },
+  });
+
   const createVaccination = trpc.flocks.createVaccinationSchedule.useMutation({
     onSuccess: () => {
       utils.flocks.getVaccinationSchedule.invalidate({ flockId });
@@ -131,6 +145,7 @@ export default function FlockDetail() {
   const updateVaccinationSchedule = trpc.flocks.updateVaccinationSchedule.useMutation({
     onSuccess: () => {
       utils.flocks.getVaccinationSchedules.invalidate({ flockId });
+      utils.flocks.getActivityLogs.invalidate({ flockId });
       toast.success("Vaccination updated successfully");
       setVaccinationUpdateDialog({ open: false, scheduleId: null });
       setVaccinationUpdateForm({ actualDate: format(new Date(), "yyyy-MM-dd"), dosageUsed: "", notes: "" });
@@ -143,6 +158,7 @@ export default function FlockDetail() {
   const updateStressPackSchedule = trpc.flocks.updateStressPackSchedule.useMutation({
     onSuccess: () => {
       utils.flocks.getStressPackSchedules.invalidate({ flockId });
+      utils.flocks.getActivityLogs.invalidate({ flockId });
       toast.success("Stress pack usage recorded successfully");
       setStressPackUpdateDialog({ open: false, scheduleId: null });
       setStressPackUpdateForm({ status: "active", quantityUsed: "", notes: "" });
@@ -191,6 +207,7 @@ export default function FlockDetail() {
   const [deleteConfirmDialogOpen, setDeleteConfirmDialogOpen] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<{ id: number; dayNumber: number; date: string } | null>(null);
   const [healthRecordDialogOpen, setHealthRecordDialogOpen] = useState(false);
+  const [editingHealthRecordId, setEditingHealthRecordId] = useState<number | null>(null);
   const [vaccinationDialogOpen, setVaccinationDialogOpen] = useState(false);
   const [vaccinationUpdateDialog, setVaccinationUpdateDialog] = useState<{ open: boolean; scheduleId: number | null }>({ open: false, scheduleId: null });
   const [stressPackUpdateDialog, setStressPackUpdateDialog] = useState<{ open: boolean; scheduleId: number | null }>({ open: false, scheduleId: null });
@@ -1920,6 +1937,7 @@ export default function FlockDetail() {
               </div>
               <Button
                 onClick={() => {
+                  setEditingHealthRecordId(null);
                   setHealthRecordDialogOpen(true);
                   setHealthRecordForm({
                     recordDate: format(new Date(), "yyyy-MM-dd"),
@@ -1955,26 +1973,27 @@ export default function FlockDetail() {
                     {healthRecords.map((record: any) => (
                       <TableRow key={record.id}>
                         <TableCell className="font-medium">
-                          {format(new Date(record.eventDate), 'dd MMM yyyy')}
+                          {record.recordDate ? format(new Date(record.recordDate), 'dd MMM yyyy') : '-'}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="capitalize">
-                            {record.eventType?.replace(/_/g, ' ')}
+                            {record.recordType?.replace(/_/g, ' ')}
                           </Badge>
                         </TableCell>
                         <TableCell className="max-w-xs truncate">{record.description}</TableCell>
                         <TableCell className="max-w-xs truncate">{record.treatment || '-'}</TableCell>
-                        <TableCell>{record.medicationUsed || '-'}</TableCell>
-                        <TableCell>{record.cost ? `R${parseFloat(record.cost).toFixed(2)}` : '-'}</TableCell>
+                        <TableCell>{record.medication || '-'}</TableCell>
+                        <TableCell>{record.cost ? formatRand(parseFloat(record.cost)) : '-'}</TableCell>
                         <TableCell className="text-right">
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => {
+                              setEditingHealthRecordId(record.id);
                               setHealthRecordDialogOpen(true);
                               setHealthRecordForm({
-                                recordDate: format(new Date(record.eventDate), "yyyy-MM-dd"),
-                                recordType: record.eventType,
+                                recordDate: record.recordDate ? format(new Date(record.recordDate), "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+                                recordType: record.recordType,
                                 description: record.description || "",
                                 treatment: record.treatment || "",
                                 medication: record.medication || "",
@@ -2407,7 +2426,7 @@ export default function FlockDetail() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {reminder.status === 'pending' && (
+                          {reminder.status === 'pending' ? (
                             <div className="flex gap-2">
                               <Button 
                                 size="sm" 
@@ -2425,6 +2444,18 @@ export default function FlockDetail() {
                               >
                                 Dismiss
                               </Button>
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted-foreground space-y-1">
+                              {reminder.completedAt && (
+                                <div className="text-xs">{format(new Date(reminder.completedAt), 'dd MMM yyyy')}</div>
+                              )}
+                              {reminder.actionNotes && (
+                                <div className="italic">{reminder.actionNotes}</div>
+                              )}
+                              {!reminder.completedAt && !reminder.actionNotes && (
+                                <span>—</span>
+                              )}
                             </div>
                           )}
                         </TableCell>
@@ -2527,7 +2558,7 @@ export default function FlockDetail() {
                                 {harvest.shrinkagePercentage ? `${harvest.shrinkagePercentage}%` : "-"}
                               </TableCell>
                               <TableCell className="text-right">
-                                {harvest.totalRevenue ? `R${parseFloat(harvest.totalRevenue).toFixed(2)}` : "-"}
+                                {harvest.totalRevenue ? formatRand(parseFloat(harvest.totalRevenue)) : "-"}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -2798,9 +2829,9 @@ export default function FlockDetail() {
       <Dialog open={healthRecordDialogOpen} onOpenChange={setHealthRecordDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Add Health Record</DialogTitle>
+            <DialogTitle>{editingHealthRecordId ? "Edit Health Record" : "Add Health Record"}</DialogTitle>
             <DialogDescription>
-              Record health observations, treatments, or veterinary visits for this flock.
+              {editingHealthRecordId ? "Update the health record details below." : "Record health observations, treatments, or veterinary visits for this flock."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -2907,25 +2938,44 @@ export default function FlockDetail() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setHealthRecordDialogOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => {
+              setHealthRecordDialogOpen(false);
+              setEditingHealthRecordId(null);
+              resetHealthRecordForm();
+            }}>Cancel</Button>
             <Button
               onClick={() => {
-                createHealthRecord.mutate({
-                  flockId,
-                  eventDate: new Date(healthRecordForm.recordDate),
-                  eventType: healthRecordForm.recordType,
-                  description: healthRecordForm.description,
-                  treatment: healthRecordForm.treatment || undefined,
-                  medication: healthRecordForm.medication || undefined,
-                  dosage: healthRecordForm.dosage || undefined,
-                  veterinarianName: healthRecordForm.veterinarianName || undefined,
-                  cost: healthRecordForm.cost.toString(),
-                  notes: healthRecordForm.notes || undefined,
-                });
+                if (editingHealthRecordId) {
+                  updateHealthRecord.mutate({
+                    id: editingHealthRecordId,
+                    recordDate: new Date(healthRecordForm.recordDate),
+                    recordType: healthRecordForm.recordType,
+                    description: healthRecordForm.description,
+                    treatment: healthRecordForm.treatment || undefined,
+                    medication: healthRecordForm.medication || undefined,
+                    dosage: healthRecordForm.dosage || undefined,
+                    veterinarianName: healthRecordForm.veterinarianName || undefined,
+                    cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined,
+                    notes: healthRecordForm.notes || undefined,
+                  });
+                } else {
+                  createHealthRecord.mutate({
+                    flockId,
+                    recordDate: new Date(healthRecordForm.recordDate),
+                    recordType: healthRecordForm.recordType,
+                    description: healthRecordForm.description,
+                    treatment: healthRecordForm.treatment || undefined,
+                    medication: healthRecordForm.medication || undefined,
+                    dosage: healthRecordForm.dosage || undefined,
+                    veterinarianName: healthRecordForm.veterinarianName || undefined,
+                    cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined,
+                    notes: healthRecordForm.notes || undefined,
+                  });
+                }
               }}
-              disabled={createHealthRecord.isPending || !healthRecordForm.description}
+              disabled={(editingHealthRecordId ? updateHealthRecord.isPending : createHealthRecord.isPending) || !healthRecordForm.description}
             >
-              {createHealthRecord.isPending ? "Saving..." : "Add Record"}
+              {(editingHealthRecordId ? updateHealthRecord.isPending : createHealthRecord.isPending) ? "Saving..." : (editingHealthRecordId ? "Save Changes" : "Add Record")}
             </Button>
           </DialogFooter>
         </DialogContent>
