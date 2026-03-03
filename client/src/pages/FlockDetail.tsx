@@ -833,8 +833,8 @@ export default function FlockDetail() {
           <TabsTrigger value="stress-packs">Stress Packs</TabsTrigger>
           <TabsTrigger value="harvests">Harvest Records</TabsTrigger>
           <TabsTrigger value="reminders">Reminders</TabsTrigger>
+		  <TabsTrigger value="catch-plan">Catch Plan</TabsTrigger>
           <TabsTrigger value="status-history">Activity Log</TabsTrigger>
-          <TabsTrigger value="catch-plan">Catch Plan</TabsTrigger>
         </TabsList>
 
         {/* Daily Records Tab */}
