@@ -73,7 +73,7 @@ describe("Reminders System", () => {
       reminderType: "vaccination",
       title: "Test Vaccination Reminder",
       description: "Administer Newcastle disease vaccine",
-      dueDate,
+      dueDate: dueDate.toISOString(),
       priority: "high",
     });
 
@@ -89,7 +89,7 @@ describe("Reminders System", () => {
     const createResult = await caller.reminders.create({
       reminderType: "routine_task",
       title: "Test Task",
-      dueDate,
+      dueDate: dueDate.toISOString(),
       priority: "medium",
     });
 
@@ -114,7 +114,7 @@ describe("Reminders System", () => {
     const createResult = await caller.reminders.create({
       reminderType: "routine_task",
       title: "Test Task to Delete",
-      dueDate,
+      dueDate: dueDate.toISOString(),
       priority: "low",
     });
 
@@ -155,7 +155,7 @@ describe("Reminders System", () => {
       reminderType: "performance_alert",
       title: "Critical FCR Alert",
       description: "FCR exceeds 2.0 - immediate action required",
-      dueDate: tomorrow,
+      dueDate: tomorrow.toISOString(),
       priority: "urgent",
     });
 
@@ -168,6 +168,7 @@ describe("Reminders System", () => {
 
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString();
 
     const reminderTypes = [
       "vaccination",
@@ -184,7 +185,7 @@ describe("Reminders System", () => {
       const result = await caller.reminders.create({
         reminderType: type,
         title: `Test ${type} reminder`,
-        dueDate: tomorrow,
+        dueDate: tomorrowStr,
         priority: "medium",
       });
 

@@ -129,14 +129,14 @@ export const startCatchSession = protectedProcedure
 
     const [result] = await db.insert(catchSessions).values({
       flockId: input.flockId,
-      catchDate: new Date(input.catchDate),
+      catchDate: new Date(input.catchDate).toISOString().slice(0, 19).replace('T', ' '),
       catchTeam: input.catchTeam,
       weighingMethod: input.weighingMethod,
       palletWeight: input.palletWeight?.toString(),
       targetBirds: input.targetBirds,
       targetWeight: input.targetWeight?.toString(),
       status: "active",
-      startTime: new Date(),
+      startTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
       createdBy: ctx.user.id,
       // Planned distribution
       crateTypeId: input.crateTypeId,
@@ -357,7 +357,7 @@ export const completeCatchSession = protectedProcedure
       .update(catchSessions)
       .set({
         status: "completed",
-        endTime: new Date(),
+        endTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
         harvestRecordId: Number(harvestResult.insertId),
         notes: input.notes,
       })
@@ -366,6 +366,8 @@ export const completeCatchSession = protectedProcedure
     return {
       success: true,
       harvestRecordId: Number(harvestResult.insertId),
+      totalBirdsCaught: sessionData.totalBirdsCaught ?? 0,
+      averageBirdWeight: sessionData.averageBirdWeight ?? null,
     };
   });
 
@@ -495,6 +497,73 @@ export const calculateRecommendedBirdsPerCrate = protectedProcedure
   });
 
 
+// ============================================================================
+// CATCH PLAN — Multi-day harvest weight planning
+// ============================================================================
+
+export const saveCatchPlanProcedure = protectedProcedure
+  .input(z.object({
+    flockId: z.number().int().positive(),
+    totalCatchDays: z.number().int().min(1).max(10),
+    dailyGainKg: z.number().positive(),
+    shrinkagePct: z.number().positive(),
+    overallTargetCatchingWeight: z.number().positive(),
+    overallTargetDeliveredWeight: z.number().positive(),
+    processorMaxCatchingWeight: z.number().positive().nullable().optional(),
+    days: z.array(z.object({
+      day: z.number().int().positive(),
+      targetBirds: z.number().int().positive(),
+      targetCatchingWeight: z.number().positive(),
+      targetDeliveredWeight: z.number().positive(),
+      percentOfFlock: z.number().positive(),
+    })),
+  }))
+  .mutation(async ({ input, ctx }: { input: any; ctx: any }) => {
+    const { saveCatchPlan } = await import("../db");
+    const now = new Date().toISOString();
+    const plan = {
+      totalCatchDays: input.totalCatchDays,
+      dailyGainKg: input.dailyGainKg,
+      shrinkagePct: input.shrinkagePct,
+      overallTargetCatchingWeight: input.overallTargetCatchingWeight,
+      overallTargetDeliveredWeight: input.overallTargetDeliveredWeight,
+      processorMaxCatchingWeight: input.processorMaxCatchingWeight ?? null,
+      days: input.days,
+      createdAt: now,
+      lastUpdatedAt: now,
+    };
+    await saveCatchPlan(input.flockId, plan);
+    return { success: true, plan };
+  });
+
+export const getCatchPlanProcedure = protectedProcedure
+  .input(z.object({ flockId: z.number().int().positive() }))
+  .query(async ({ input }: { input: any }) => {
+    const { getCatchPlanForFlock } = await import("../db");
+    const plan = await getCatchPlanForFlock(input.flockId);
+    return plan;
+  });
+
+export const reforecastCatchPlanProcedure = protectedProcedure
+  .input(z.object({
+    flockId: z.number().int().positive(),
+    dayIndex: z.number().int().min(0),
+    actualBirds: z.number().int().positive(),
+    actualAvgCatchingWeight: z.number().positive(),
+    completedAt: z.string(),
+  }))
+  .mutation(async ({ input }: { input: any }) => {
+    const { reforecastCatchPlan } = await import("../db");
+    const updatedPlan = await reforecastCatchPlan(
+      input.flockId,
+      input.dayIndex,
+      input.actualBirds,
+      input.actualAvgCatchingWeight,
+      input.completedAt
+    );
+    return updatedPlan;
+  });
+
 export const catchRouter = router({
   // Crate Types
   createCrateType,
@@ -517,4 +586,9 @@ export const catchRouter = router({
   
   // Reports
   generateTransportReport: catchReportProcedures.generateTransportReport,
+
+  // Catch Plan
+  saveCatchPlan: saveCatchPlanProcedure,
+  getCatchPlan: getCatchPlanProcedure,
+  reforecastCatchPlan: reforecastCatchPlanProcedure,
 });

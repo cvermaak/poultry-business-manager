@@ -20,7 +20,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText } from "lucide-react";
+import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText, CalendarDays, AlertTriangle, TrendingDown, Minus } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import { DensityCalculator } from "@/components/DensityCalculator";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -83,10 +86,36 @@ export default function CatchOperations() {
   // Queries
   const { data: flocks } = trpc.flocks.list.useQuery();
   const { data: crateTypes } = trpc.catch.listCrateTypes.useQuery();
+
+  // Catch plan for the selected flock
+  const { data: catchPlan } = trpc.catch.getCatchPlan.useQuery(
+    { flockId: parseInt(selectedFlockId) },
+    { enabled: !!selectedFlockId && parseInt(selectedFlockId) > 0 }
+  );
+
+  // Count completed sessions for the selected flock to determine which catch day this is
+  const { data: allCompletedSessions } = trpc.catch.listCatchSessions.useQuery(
+    { status: "completed" },
+    { enabled: !!selectedFlockId }
+  );
+  const completedForFlock = allCompletedSessions?.filter(
+    (s) => s.flockId === parseInt(selectedFlockId)
+  ).length ?? 0;
+  const currentCatchDay = completedForFlock + 1; // 1-based
+  const planDay = catchPlan?.days?.find((d) => d.day === currentCatchDay) ?? null;
   const { data: completedSessions } = trpc.catch.listCatchSessions.useQuery(
     { status: "completed" },
     { refetchInterval: 30000 } // Refetch every 30 seconds
   );
+
+  // Auto-fill target birds and weight from catch plan when flock/day changes
+  useEffect(() => {
+    if (planDay) {
+      setTargetBirds(planDay.targetBirds.toString());
+      const totalWeight = (planDay.targetBirds * planDay.targetCatchingWeight).toFixed(1);
+      setTargetWeight(totalWeight);
+    }
+  }, [planDay]);
 
   // Auto-populate crate weight when crate type is selected
   useEffect(() => {
@@ -172,9 +201,27 @@ export default function CatchOperations() {
     },
   });
 
+  const reforecastPlan = trpc.catch.reforecastCatchPlan.useMutation();
+
   const completeSession = trpc.catch.completeCatchSession.useMutation({
     onSuccess: (data) => {
       toast.success(`Session completed! Harvest record #${data.harvestRecordId} created`);
+      // If there is a catch plan for this flock, trigger a rolling reforecast
+      if (catchPlan && selectedFlockId) {
+        const flockIdNum = parseInt(selectedFlockId);
+        const dayIdx = completedForFlock; // 0-based index of the day just completed
+        const actualBirds = data.totalBirdsCaught ?? 0;
+        const actualAvgWeight = data.averageBirdWeight ? parseFloat(data.averageBirdWeight) : 0;
+        if (actualBirds > 0 && actualAvgWeight > 0) {
+          reforecastPlan.mutate({
+            flockId: flockIdNum,
+            dayIndex: dayIdx,
+            actualBirds,
+            actualAvgCatchingWeight: actualAvgWeight,
+            completedAt: new Date().toISOString(),
+          });
+        }
+      }
       setActiveSessionId(null);
       setShowCompleteDialog(false);
       setCompletionNotes("");
@@ -992,6 +1039,71 @@ export default function CatchOperations() {
                   ({targetBirds} birds × {(parseFloat(targetWeight) / parseFloat(targetBirds)).toFixed(3)} kg = {targetWeight} kg total)
                 </p>
               </div>
+            )}
+
+            {/* Catch Plan Guidance */}
+            {catchPlan && planDay && (
+              <>
+                <Separator />
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays className="h-4 w-4 text-primary" />
+                      <span className="font-semibold text-sm">Multi-Day Catch Plan</span>
+                    </div>
+                    <Badge variant="outline" className="text-xs">
+                      Catch Day {currentCatchDay} of {catchPlan.totalCatchDays}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-md bg-primary/10 border border-primary/20 p-3 text-center">
+                      <p className="text-xs text-muted-foreground mb-1">Target Catching Weight Today</p>
+                      <p className="text-xl font-bold text-primary">{planDay.targetCatchingWeight.toFixed(3)} kg</p>
+                      <p className="text-xs text-muted-foreground">per bird</p>
+                    </div>
+                    <div className="rounded-md bg-muted p-3 text-center">
+                      <p className="text-xs text-muted-foreground mb-1">Target Delivered Weight</p>
+                      <p className="text-xl font-bold">{planDay.targetDeliveredWeight.toFixed(3)} kg</p>
+                      <p className="text-xs text-muted-foreground">per bird at processor</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="text-center">
+                      <p className="text-muted-foreground">Target Birds Today</p>
+                      <p className="font-semibold">{planDay.targetBirds.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-muted-foreground">% of House</p>
+                      <p className="font-semibold">{planDay.percentOfFlock.toFixed(1)}%</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-muted-foreground">House Avg Target</p>
+                      <p className="font-semibold">{catchPlan.overallTargetCatchingWeight.toFixed(3)} kg</p>
+                    </div>
+                  </div>
+
+                  {currentCatchDay > catchPlan.totalCatchDays && (
+                    <Alert variant="destructive">
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertDescription>
+                        This flock has already completed {completedForFlock} catch sessions — beyond the planned {catchPlan.totalCatchDays} days. Consider updating the catch plan.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+                <Separator />
+              </>
+            )}
+
+            {selectedFlockId && !catchPlan && (
+              <Alert>
+                <CalendarDays className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  No catch plan found for this flock. Open the flock detail page and click <strong>Plan Catch</strong> to set up a multi-day weight plan.
+                </AlertDescription>
+              </Alert>
             )}
 
             {/* Density Calculator */}

@@ -1196,7 +1196,7 @@ export const appRouter = router({
           ]),
           title: z.string(),
           description: z.string().optional(),
-          dueDate: z.date(),
+          dueDate: z.string(),
           priority: z.enum(["urgent", "high", "medium", "low"]).default("medium"),
         })
       )
@@ -1401,7 +1401,7 @@ export const appRouter = router({
           endDay: z.number(),
           dosageStrength: z.enum(["single", "double", "triple"]).default("single"),
         })).optional(),
-        isDefault: z.boolean().optional(),
+        isDefault: z.number().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;

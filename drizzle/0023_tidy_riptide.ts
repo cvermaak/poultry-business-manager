@@ -1,0 +1,1 @@
+ALTER TABLE `flocks` ADD `catchPlan` json;

@@ -510,6 +510,108 @@ export async function deleteFlockReminders(flockId: number) {
   return true;
 }
 
+// ── Catch Plan ──────────────────────────────────────────────────────────────
+
+export interface CatchPlanDay {
+  day: number;           // 1-based catch day number
+  targetBirds: number;  // birds to catch on this day
+  targetCatchingWeight: number; // kg per bird on this day
+  targetDeliveredWeight: number; // kg per bird delivered (after shrinkage)
+  percentOfFlock: number; // % of total flock
+  // Populated after the session is completed (rolling reforecast)
+  actualBirds?: number;
+  actualAvgCatchingWeight?: number;
+  actualAvgDeliveredWeight?: number;
+  completedAt?: string;
+}
+
+export interface CatchPlan {
+  totalCatchDays: number;
+  dailyGainKg: number;    // kg/day live weight gain
+  shrinkagePct: number;   // e.g. 5.5
+  overallTargetCatchingWeight: number;
+  overallTargetDeliveredWeight: number;
+  processorMaxCatchingWeight: number | null; // optional upper limit warning
+  days: CatchPlanDay[];
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export async function saveCatchPlan(flockId: number, plan: CatchPlan) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(flocks)
+    .set({ catchPlan: plan as any })
+    .where(eq(flocks.id, flockId));
+  return plan;
+}
+
+export async function getCatchPlanForFlock(flockId: number): Promise<CatchPlan | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select({ catchPlan: flocks.catchPlan }).from(flocks).where(eq(flocks.id, flockId)).limit(1);
+  if (!result.length || !result[0].catchPlan) return null;
+  return result[0].catchPlan as unknown as CatchPlan;
+}
+
+/**
+ * Rolling reforecast: after a catch session completes, record actual results
+ * and recalculate remaining days' targets so the house average stays on track.
+ */
+export async function reforecastCatchPlan(
+  flockId: number,
+  dayIndex: number,       // 0-based index of the completed day
+  actualBirds: number,
+  actualAvgCatchingWeight: number,
+  completedAt: string
+): Promise<CatchPlan | null> {
+  const plan = await getCatchPlanForFlock(flockId);
+  if (!plan) return null;
+
+  // Record actual results for the completed day
+  plan.days[dayIndex] = {
+    ...plan.days[dayIndex],
+    actualBirds,
+    actualAvgCatchingWeight,
+    actualAvgDeliveredWeight: actualAvgCatchingWeight * (1 - plan.shrinkagePct / 100),
+    completedAt,
+  };
+
+  // Recalculate remaining days' targets
+  const completedDays = plan.days.filter(d => d.actualBirds !== undefined);
+  const remainingDays = plan.days.filter(d => d.actualBirds === undefined);
+
+  if (remainingDays.length > 0) {
+    // Calculate how much weight budget has been used by completed days
+    const usedWeightBudget = completedDays.reduce(
+      (sum, d) => sum + (d.actualBirds! * d.actualAvgCatchingWeight!), 0
+    );
+    const usedBirds = completedDays.reduce((sum, d) => sum + d.actualBirds!, 0);
+    const totalBirds = plan.days.reduce((sum, d) => sum + d.targetBirds, 0);
+    const totalWeightBudget = plan.overallTargetCatchingWeight * totalBirds;
+    const remainingBudget = totalWeightBudget - usedWeightBudget;
+    const remainingBirds = totalBirds - usedBirds;
+    const remainingAvgTarget = remainingBirds > 0 ? remainingBudget / remainingBirds : plan.overallTargetCatchingWeight;
+
+    // Distribute remaining budget across remaining days using daily gain stagger
+    const midRemainingIdx = (remainingDays.length - 1) / 2;
+    remainingDays.forEach((day, i) => {
+      const offset = (i - midRemainingIdx) * plan.dailyGainKg;
+      const newTarget = Math.round((remainingAvgTarget + offset) * 1000) / 1000;
+      const dayIdx = plan.days.findIndex(d => d.day === day.day);
+      plan.days[dayIdx] = {
+        ...plan.days[dayIdx],
+        targetCatchingWeight: newTarget,
+        targetDeliveredWeight: Math.round(newTarget * (1 - plan.shrinkagePct / 100) * 1000) / 1000,
+      };
+    });
+  }
+
+  plan.lastUpdatedAt = new Date().toISOString();
+  await saveCatchPlan(flockId, plan);
+  return plan;
+}
+
 export async function updateFlockReminderDates(flockId: number, daysDiff: number) {
   const dbConn = await getDb();
   if (!dbConn) throw new Error("Database not available");
