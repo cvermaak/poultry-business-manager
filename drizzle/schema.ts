@@ -328,6 +328,7 @@ export const flocks = mysqlTable("flocks", {
 	isManualStatusChange: tinyint().default(0),
 	targetDeliveredWeight: decimal({ precision: 10, scale: 3 }),
 	targetCatchingWeight: decimal({ precision: 10, scale: 3 }),
+	catchPlan: json(),
 },
 (table) => [
 	index("flocks_flockNumber_unique").on(table.flockNumber),
@@ -420,6 +421,7 @@ export const healthRecords = mysqlTable("health_records", {
 	cost: int(),
 	followUpRequired: tinyint().default(0),
 	followUpDate: timestamp({ mode: 'string' }),
+	notes: text(),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	recordedBy: int().references(() => users.id),

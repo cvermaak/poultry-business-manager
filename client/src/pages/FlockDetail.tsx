@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { formatWeight, getWeightValue, getUnitLabel } from "@/lib/weightUtils";
 import { formatRand } from "@/lib/format";
+import { PlanCatchDialog } from "@/components/PlanCatchDialog";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
@@ -32,6 +33,8 @@ export default function FlockDetail() {
   
   // Collapsible state for reminder templates
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  // Plan Catch dialog
+  const [planCatchOpen, setPlanCatchOpen] = useState(false);
   
   const { user } = useAuth();
   const utils = trpc.useUtils();
@@ -57,6 +60,7 @@ export default function FlockDetail() {
   const { data: statusHistory } = trpc.flocks.getStatusHistory.useQuery({ flockId });
   const { data: activityLogs } = trpc.flocks.getActivityLogs.useQuery({ flockId });
   const { data: harvests } = trpc.harvest.getByFlock.useQuery({ flockId });
+  const { data: catchPlan, refetch: refetchCatchPlan } = trpc.catch.getCatchPlan.useQuery({ flockId });
   const addTemplate = trpc.reminderTemplates.addToFlock.useMutation();
   const removeTemplate = trpc.reminderTemplates.removeFromFlock.useMutation();
   const syncFromTemplate = trpc.reminders.syncFromTemplate.useMutation();
@@ -560,8 +564,37 @@ export default function FlockDetail() {
             )}
           </div>
           <StatusChangeDialog flockId={flockId} currentStatus={flock.status} />
+          {(flock.status === "active" || flock.status === "harvesting") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPlanCatchOpen(true)}
+              className="gap-1.5"
+            >
+              <Calendar className="h-4 w-4" />
+              Plan Catch
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* Plan Catch Dialog */}
+      {planCatchOpen && (
+        <PlanCatchDialog
+          open={planCatchOpen}
+          onOpenChange={setPlanCatchOpen}
+          flockId={flockId}
+          flockNumber={flock.flockNumber}
+          currentCount={flock.currentCount}
+          targetCatchingWeight={parseFloat(flock.targetCatchingWeight ?? "1.905")}
+          targetDeliveredWeight={parseFloat(flock.targetDeliveredWeight ?? "1.800")}
+          shrinkagePct={5.5}
+          onPlanSaved={() => {
+            toast.success("Catch plan saved successfully");
+            utils.catch.getCatchPlan.invalidate({ flockId });
+          }}
+        />
+      )}
 
       {/* Performance Summary Cards */}
       <div className="mb-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -801,6 +834,7 @@ export default function FlockDetail() {
           <TabsTrigger value="harvests">Harvest Records</TabsTrigger>
           <TabsTrigger value="reminders">Reminders</TabsTrigger>
           <TabsTrigger value="status-history">Activity Log</TabsTrigger>
+          <TabsTrigger value="catch-plan">Catch Plan</TabsTrigger>
         </TabsList>
 
         {/* Daily Records Tab */}
@@ -2645,6 +2679,156 @@ export default function FlockDetail() {
               })()}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Catch Plan Tab */}
+        <TabsContent value="catch-plan" className="space-y-4">
+          {catchPlan ? (
+            <>
+              {/* Summary Cards */}
+              <div className="grid gap-4 md:grid-cols-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Catch Days</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{catchPlan.totalCatchDays}</div>
+                    <p className="text-xs text-muted-foreground">
+                      {catchPlan.days.filter((d: any) => d.completedAt).length} completed
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Overall Target</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{catchPlan.overallTargetCatchingWeight.toFixed(3)} kg</div>
+                    <p className="text-xs text-muted-foreground">Catching weight</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Target Delivered</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{catchPlan.overallTargetDeliveredWeight.toFixed(3)} kg</div>
+                    <p className="text-xs text-muted-foreground">After {catchPlan.shrinkagePct}% shrinkage</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">Daily Gain</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{(catchPlan.dailyGainKg * 1000).toFixed(0)} g</div>
+                    <p className="text-xs text-muted-foreground">Per bird per day</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Per-Day Plan Table */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Daily Catch Schedule</CardTitle>
+                    <CardDescription>
+                      Per-day targets — weighted average equals contract target.
+                      {catchPlan.processorMaxCatchingWeight && (
+                        <span className="ml-1">Processor max: {catchPlan.processorMaxCatchingWeight.toFixed(3)} kg.</span>
+                      )}
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPlanCatchOpen(true)}
+                    className="gap-1.5"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit Plan
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Day</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Target Birds</TableHead>
+                        <TableHead className="text-right">Target Catching Wt</TableHead>
+                        <TableHead className="text-right">Target Delivered Wt</TableHead>
+                        <TableHead className="text-right">Actual Catching Wt</TableHead>
+                        <TableHead className="text-right">Variance</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {catchPlan.days.map((day: any) => {
+                        const isCompleted = !!day.completedAt;
+                        const exceedsMax = catchPlan.processorMaxCatchingWeight &&
+                          day.targetCatchingWeight > catchPlan.processorMaxCatchingWeight;
+                        const variance = isCompleted && day.actualAvgCatchingWeight != null
+                          ? day.actualAvgCatchingWeight - day.targetCatchingWeight
+                          : null;
+                        return (
+                          <TableRow key={day.day} className={isCompleted ? "opacity-70" : ""}>
+                            <TableCell className="font-medium">Day {day.day}</TableCell>
+                            <TableCell>
+                              {isCompleted ? (
+                                <Badge variant="default" className="bg-green-600">Completed</Badge>
+                              ) : (
+                                <Badge variant="outline">Pending</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">{day.targetBirds.toLocaleString()}</TableCell>
+                            <TableCell className={`text-right ${exceedsMax ? "text-destructive font-semibold" : ""}`}>
+                              {day.targetCatchingWeight.toFixed(3)} kg
+                              {exceedsMax && <span className="ml-1 text-xs">⚠</span>}
+                            </TableCell>
+                            <TableCell className="text-right">{day.targetDeliveredWeight.toFixed(3)} kg</TableCell>
+                            <TableCell className="text-right">
+                              {isCompleted && day.actualAvgCatchingWeight != null
+                                ? `${day.actualAvgCatchingWeight.toFixed(3)} kg`
+                                : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {variance !== null ? (
+                                <span className={variance >= 0 ? "text-green-600" : "text-destructive"}>
+                                  {variance >= 0 ? "+" : ""}{(variance * 1000).toFixed(0)} g
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+
+              {/* Last Updated */}
+              <p className="text-xs text-muted-foreground text-right">
+                Plan last updated: {new Date(catchPlan.lastUpdatedAt).toLocaleString()}
+              </p>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-16 text-center">
+                <Calendar className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Catch Plan Yet</h3>
+                <p className="text-muted-foreground mb-6">
+                  Create a multi-day catch plan to stagger catching weights and keep the
+                  weighted house average on the contract target.
+                </p>
+                <Button onClick={() => setPlanCatchOpen(true)} className="gap-1.5">
+                  <Plus className="h-4 w-4" />
+                  Create Catch Plan
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
 
