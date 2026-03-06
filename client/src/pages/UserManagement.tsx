@@ -7,8 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Users, Shield, UserCog, AlertTriangle, Check, X } from "lucide-react";
+import { Users, Shield, UserCog, AlertTriangle, Check, X, Key, UserX, UserCheck, Trash2, UserPlus } from "lucide-react";
 
 const ROLES = [
   { value: "admin", label: "Admin", description: "Full system access", color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" },
@@ -25,6 +27,16 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState<{ id: number; name: string; currentRole: string } | null>(null);
   const [newRole, setNewRole] = useState<RoleValue | "">("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<{ id: number; name: string } | null>(null);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [newUserData, setNewUserData] = useState({
+    name: "",
+    email: "",
+    username: "",
+    password: "",
+    role: "" as RoleValue | "",
+  });
 
   const { data: users, isLoading, refetch } = trpc.users.list.useQuery();
   const updateRoleMutation = trpc.users.updateRole.useMutation({
@@ -37,6 +49,60 @@ export default function UserManagement() {
     },
     onError: (error) => {
       toast.error(`Failed to update role: ${error.message}`);
+    },
+  });
+
+  const resetPasswordMutation = trpc.users.resetPassword.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Password reset! Temporary password: ${data.temporaryPassword}`);
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(`Failed to reset password: ${error.message}`);
+    },
+  });
+
+  const deactivateMutation = trpc.users.deactivate.useMutation({
+    onSuccess: () => {
+      toast.success("User deactivated successfully");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(`Failed to deactivate user: ${error.message}`);
+    },
+  });
+
+  const activateMutation = trpc.users.activate.useMutation({
+    onSuccess: () => {
+      toast.success("User activated successfully");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(`Failed to activate user: ${error.message}`);
+    },
+  });
+
+  const deleteMutation = trpc.users.delete.useMutation({
+    onSuccess: () => {
+      toast.success("User deleted permanently");
+      refetch();
+      setIsDeleteDialogOpen(false);
+      setUserToDelete(null);
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete user: ${error.message}`);
+    },
+  });
+
+  const createUserMutation = trpc.users.create.useMutation({
+    onSuccess: (data) => {
+      toast.success(`User created! Temporary password: ${data.temporaryPassword}`);
+      refetch();
+      setIsCreateDialogOpen(false);
+      setNewUserData({ name: "", email: "", username: "", password: "", role: "" });
+    },
+    onError: (error) => {
+      toast.error(`Failed to create user: ${error.message}`);
     },
   });
 
@@ -80,9 +146,15 @@ export default function UserManagement() {
           <h1 className="text-3xl font-bold tracking-tight">User Management</h1>
           <p className="text-muted-foreground">Manage user accounts and assign roles</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Admin Only</span>
+        <div className="flex items-center gap-3">
+          <Button onClick={() => setIsCreateDialogOpen(true)}>
+            <UserPlus className="h-4 w-4 mr-2" />
+            Create New User
+          </Button>
+          <div className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">Admin Only</span>
+          </div>
         </div>
       </div>
 
@@ -171,14 +243,58 @@ export default function UserManagement() {
                         : "Never"}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRoleChange(user.id, user.name || "", user.role)}
-                        disabled={user.id === currentUser?.id}
-                      >
-                        Change Role
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRoleChange(user.id, user.name || "", user.role)}
+                          disabled={user.id === currentUser?.id}
+                          title="Change user role"
+                        >
+                          <UserCog className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => resetPasswordMutation.mutate({ userId: user.id })}
+                          disabled={user.id === currentUser?.id || !user.passwordHash}
+                          title="Reset password"
+                        >
+                          <Key className="h-4 w-4" />
+                        </Button>
+                        {user.isActive ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deactivateMutation.mutate({ userId: user.id })}
+                            disabled={user.id === currentUser?.id}
+                            title="Deactivate user"
+                          >
+                            <UserX className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => activateMutation.mutate({ userId: user.id })}
+                            title="Reactivate user"
+                          >
+                            <UserCheck className="h-4 w-4" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => {
+                            setUserToDelete({ id: user.id, name: user.name || "Unknown" });
+                            setIsDeleteDialogOpen(true);
+                          }}
+                          disabled={user.id === currentUser?.id}
+                          title="Delete user permanently"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -240,6 +356,131 @@ export default function UserManagement() {
               disabled={!newRole || updateRoleMutation.isPending}
             >
               {updateRoleMutation.isPending ? "Updating..." : "Confirm Change"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Delete User Permanently?
+            </DialogTitle>
+            <DialogDescription>
+              This action cannot be undone. This will permanently delete the user account for <strong>{userToDelete?.name}</strong> and remove all associated data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-destructive/10 border border-destructive/20 rounded-md p-4 space-y-2">
+            <p className="text-sm font-medium text-destructive">Warning:</p>
+            <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+              <li>User will be permanently removed from the database</li>
+              <li>All user activity logs will be preserved</li>
+              <li>User cannot be recovered after deletion</li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => userToDelete && deleteMutation.mutate({ userId: userToDelete.id })}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete Permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create User Dialog */}
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5" />
+              Create New User
+            </DialogTitle>
+            <DialogDescription>
+              Create a new user account. A temporary password will be generated automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Full Name *</Label>
+              <Input
+                id="name"
+                placeholder="John Doe"
+                value={newUserData.name}
+                onChange={(e) => setNewUserData({ ...newUserData, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email Address *</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="john@example.com"
+                value={newUserData.email}
+                onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="username">Username *</Label>
+              <Input
+                id="username"
+                placeholder="johndoe"
+                value={newUserData.username}
+                onChange={(e) => setNewUserData({ ...newUserData, username: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role">Role *</Label>
+              <Select value={newUserData.role} onValueChange={(value) => setNewUserData({ ...newUserData, role: value as RoleValue })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a role" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLES.map((role) => (
+                    <SelectItem key={role.value} value={role.value}>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{role.label}</span>
+                        <span className="text-xs text-muted-foreground">{role.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-3">
+              <p className="text-xs text-blue-800 dark:text-blue-200">
+                <strong>Note:</strong> A temporary password will be generated and displayed after creation. The user must change it on first login.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!newUserData.name || !newUserData.email || !newUserData.username || !newUserData.role) {
+                  toast.error("Please fill in all required fields");
+                  return;
+                }
+                createUserMutation.mutate({
+                  name: newUserData.name,
+                  email: newUserData.email,
+                  username: newUserData.username,
+                  role: newUserData.role,
+                });
+              }}
+              disabled={createUserMutation.isPending}
+            >
+              {createUserMutation.isPending ? "Creating..." : "Create User"}
             </Button>
           </DialogFooter>
         </DialogContent>
