@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText, CalendarDays, AlertTriangle, TrendingDown, Minus } from "lucide-react";
+import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText, CalendarDays, AlertTriangle, TrendingDown, Minus, Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
@@ -55,6 +56,7 @@ export default function CatchOperations() {
   const [palletWeight, setPalletWeight] = useState("");
   const [targetBirds, setTargetBirds] = useState("");
   const [targetWeight, setTargetWeight] = useState("");
+  const [overrideTargetCatchingWeight, setOverrideTargetCatchingWeight] = useState("");
   
   // Planned distribution from density calculator
   const [plannedDistribution, setPlannedDistribution] = useState<{
@@ -108,14 +110,22 @@ export default function CatchOperations() {
     { refetchInterval: 30000 } // Refetch every 30 seconds
   );
 
-  // Auto-fill target birds and weight from catch plan when flock/day changes
+  // Auto-fill target birds, weight and override catching weight from catch plan or flock defaults
   useEffect(() => {
     if (planDay) {
       setTargetBirds(planDay.targetBirds.toString());
       const totalWeight = (planDay.targetBirds * planDay.targetCatchingWeight).toFixed(1);
       setTargetWeight(totalWeight);
+      setOverrideTargetCatchingWeight(planDay.targetCatchingWeight.toFixed(3));
+    } else if (selectedFlockId && flocks) {
+      const flock = flocks.find(f => f.id === parseInt(selectedFlockId));
+      if (flock?.targetCatchingWeight) {
+        setOverrideTargetCatchingWeight(parseFloat(flock.targetCatchingWeight).toFixed(3));
+      } else if (flock?.targetSlaughterWeight) {
+        setOverrideTargetCatchingWeight(parseFloat(flock.targetSlaughterWeight).toFixed(3));
+      }
     }
-  }, [planDay]);
+  }, [planDay, selectedFlockId, flocks]);
 
   // Auto-populate crate weight when crate type is selected
   useEffect(() => {
@@ -156,6 +166,7 @@ export default function CatchOperations() {
       setCatchTeam("");
       setTargetBirds("");
       setTargetWeight("");
+      setOverrideTargetCatchingWeight("");
     },
     onError: (error) => {
       toast.error(`Failed to start session: ${error.message}`);
@@ -179,11 +190,9 @@ export default function CatchOperations() {
     onSuccess: (data) => {
       toast.success(`Batch #${data.batchNumber} recorded: ${data.cratesInBatch} crates, ${data.totalBirds} birds, ${data.totalNetWeight.toFixed(1)} kg net weight`);
       refetchSession();
-      // Reset batch form but keep crate weight (it's usually the same for all batches)
-      setNumberOfCrates("");
-      setBirdsPerCrate("");
+      // Keep numberOfCrates, birdsPerCrate and crateWeight — operator only needs to change
+      // gross weight for each batch; all other values typically stay the same.
       setTotalGrossWeight("");
-      // Don't reset crateWeight - keep it for next batch
       setBatchPalletWeight("");
     },
     onError: (error) => {
@@ -263,11 +272,19 @@ export default function CatchOperations() {
     },
   });
 
+  // ── Excel Export ──────────────────────────────────────────────────────────
+  // (see ExcelExportButton component below the main component)
+
   const handleStartSession = () => {
     if (!selectedFlockId) {
       toast.error("Please select a flock");
       return;
     }
+
+    // If operator specified a per-bird override, compute total target weight from it
+    const effectiveTargetWeight = overrideTargetCatchingWeight && targetBirds
+      ? parseFloat(overrideTargetCatchingWeight) * parseInt(targetBirds)
+      : targetWeight ? parseFloat(targetWeight) : undefined;
 
     startSession.mutate({
       flockId: parseInt(selectedFlockId),
@@ -276,7 +293,7 @@ export default function CatchOperations() {
       weighingMethod,
       palletWeight: palletWeight ? parseFloat(palletWeight) : undefined,
       targetBirds: targetBirds ? parseInt(targetBirds) : undefined,
-      targetWeight: targetWeight ? parseFloat(targetWeight) : undefined,
+      targetWeight: effectiveTargetWeight,
       // Include planned distribution if calculated
       ...( plannedDistribution ? {
         crateTypeId: plannedDistribution.crateTypeId,
@@ -786,15 +803,26 @@ export default function CatchOperations() {
           {/* Batches/Crates Table */}
           <Card>
             <CardHeader>
-              <CardTitle>
-                {sessionDetails.session.weighingMethod === "individual" ? "Recorded Crates" : "Recorded Batches"}
-              </CardTitle>
-              <CardDescription>
-                {sessionDetails.session.weighingMethod === "individual" 
-                  ? `${sessionDetails.crates.length} crate(s) recorded in this session`
-                  : `${sessionDetails.batches?.length || 0} batch(es) recorded in this session`
-                }
-              </CardDescription>
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle>
+                    {sessionDetails.session.weighingMethod === "individual" ? "Recorded Crates" : "Recorded Batches"}
+                  </CardTitle>
+                  <CardDescription>
+                    {sessionDetails.session.weighingMethod === "individual" 
+                      ? `${sessionDetails.crates.length} crate(s) recorded in this session`
+                      : `${sessionDetails.batches?.length || 0} batch(es) recorded in this session`
+                    }
+                  </CardDescription>
+                </div>
+                {(sessionDetails.crates.length > 0 || (sessionDetails.batches && sessionDetails.batches.length > 0)) && (
+                  <ExcelExportButton
+                    sessionId={activeSessionId!}
+                    flockNumber={sessionDetails.session.flockId?.toString() ?? ""}
+                    catchDate={sessionDetails.session.catchDate}
+                  />
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               {sessionDetails.session.weighingMethod === "individual" ? (
@@ -1019,24 +1047,23 @@ export default function CatchOperations() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="targetWeight">Total Target Weight (kg)</Label>
+                <Label htmlFor="overrideTargetCatchingWeight">Target Catching Weight (kg/bird)</Label>
                 <Input
-                  id="targetWeight"
+                  id="overrideTargetCatchingWeight"
                   type="number"
-                  step="0.1"
-                  value={targetWeight}
-                  onChange={(e) => setTargetWeight(e.target.value)}
-                  placeholder="e.g., 200"
+                  step="0.001"
+                  value={overrideTargetCatchingWeight}
+                  onChange={(e) => setOverrideTargetCatchingWeight(e.target.value)}
+                  placeholder="e.g., 1.800"
                 />
-                <p className="text-xs text-muted-foreground">Total expected weight for all birds combined</p>
+                <p className="text-xs text-muted-foreground">Override for this catch only — flock default unchanged</p>
               </div>
             </div>
-            {targetBirds && targetWeight && parseFloat(targetBirds) > 0 && parseFloat(targetWeight) > 0 && (
+            {targetBirds && overrideTargetCatchingWeight && parseFloat(targetBirds) > 0 && parseFloat(overrideTargetCatchingWeight) > 0 && (
               <div className="rounded-md bg-muted p-3 text-sm">
                 <p className="font-medium">Target Preview:</p>
                 <p className="text-muted-foreground">
-                  {(parseFloat(targetWeight) / parseFloat(targetBirds)).toFixed(3)} kg per bird
-                  ({targetBirds} birds × {(parseFloat(targetWeight) / parseFloat(targetBirds)).toFixed(3)} kg = {targetWeight} kg total)
+                  {parseFloat(overrideTargetCatchingWeight).toFixed(3)} kg/bird × {targetBirds} birds = <span className="font-semibold">{(parseFloat(overrideTargetCatchingWeight) * parseInt(targetBirds)).toFixed(1)} kg total</span>
                 </p>
               </div>
             )}
@@ -1304,21 +1331,28 @@ export default function CatchOperations() {
                       kg
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setReportSessionId(session.id);
-                          setReportFarmName("");
-                          setReportProcessingDate(new Date(session.catchDate).toISOString().split("T")[0]);
-                          setReportLotNumber("");
-                          setReportTransporter("");
-                          setShowReportDialog(true);
-                        }}
-                      >
-                        <FileText className="mr-2 h-4 w-4" />
-                        Generate Report
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setReportSessionId(session.id);
+                            setReportFarmName("");
+                            setReportProcessingDate(new Date(session.catchDate).toISOString().split("T")[0]);
+                            setReportLotNumber("");
+                            setReportTransporter("");
+                            setShowReportDialog(true);
+                          }}
+                        >
+                          <FileText className="mr-2 h-4 w-4" />
+                          Report
+                        </Button>
+                        <ExcelExportButton
+                          sessionId={session.id}
+                          flockNumber={session.flockNumber ?? ""}
+                          catchDate={session.catchDate}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -1328,5 +1362,98 @@ export default function CatchOperations() {
         </Card>
       )}
     </div>
+  );
+}
+
+// ── ExcelExportButton ─────────────────────────────────────────────────────────
+// Self-contained component that fetches session details on demand and exports
+// to Excel using SheetJS. Works for both active and completed sessions.
+function ExcelExportButton({ sessionId, flockNumber, catchDate }: { sessionId: number; flockNumber: string; catchDate: string }) {
+  const [enabled, setEnabled] = useState(false);
+  const { data: details, isFetching } = trpc.catch.getCatchSessionDetails.useQuery(
+    { sessionId },
+    {
+      enabled,
+      staleTime: 0,
+    }
+  );
+
+  useEffect(() => {
+    if (!details || !enabled) return;
+    setEnabled(false); // reset so next click re-fetches if needed
+
+    const wb = XLSX.utils.book_new();
+    const dateStr = new Date(catchDate).toLocaleDateString("en-ZA");
+
+    // Summary sheet
+    const summaryData = [
+      ["Catch Weight-In Report"],
+      ["Flock", flockNumber],
+      ["Catch Date", dateStr],
+      ["Weighing Method", details.session.weighingMethod],
+      ["Total Birds", details.session.totalBirdsCaught ?? 0],
+      ["Total Net Weight (kg)", details.session.totalNetWeight ? parseFloat(details.session.totalNetWeight).toFixed(3) : "0.000"],
+      ["Average Bird Weight (kg)", details.session.averageBirdWeight ? parseFloat(details.session.averageBirdWeight).toFixed(3) : "0.000"],
+      ["Target Catching Wt (kg/bird)", details.session.targetWeight && details.session.targetBirds
+        ? (parseFloat(details.session.targetWeight) / details.session.targetBirds).toFixed(3)
+        : "N/A"],
+      ["Target Birds", details.session.targetBirds ?? "N/A"],
+      ["Catch Team", details.session.catchTeam ?? "N/A"],
+    ];
+    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
+    summaryWs["!cols"] = [{ wch: 30 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, summaryWs, "Summary");
+
+    // Detail sheet
+    if (details.session.weighingMethod === "individual" && details.crates.length > 0) {
+      const headers = ["Crate #", "Crate Type", "Birds", "Gross Wt (kg)", "Crate Tare (kg)", "Net Wt (kg)", "Avg Bird Wt (kg)", "Recorded At"];
+      const rows = details.crates.map((c) => [
+        c.crateNumber,
+        c.crateTypeName ?? "",
+        c.birdCount,
+        parseFloat(c.grossWeight).toFixed(3),
+        parseFloat(c.crateTypeTareWeight ?? "0").toFixed(3),
+        parseFloat(c.netWeight).toFixed(3),
+        parseFloat(c.averageBirdWeight).toFixed(3),
+        new Date(c.recordedAt).toLocaleTimeString("en-ZA"),
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Crate Weight-Ins");
+    } else if (details.batches && details.batches.length > 0) {
+      const headers = ["Batch #", "Crate Type", "Crates", "Birds/Crate", "Total Birds", "Gross Wt (kg)", "Crate Tare (kg)", "Net Wt (kg)", "Avg Bird Wt (kg)", "Recorded At"];
+      const rows = details.batches.map((b) => [
+        b.batchNumber,
+        b.crateTypeName ?? "",
+        b.numberOfCrates,
+        b.birdsPerCrate,
+        b.totalBirds,
+        parseFloat(b.totalGrossWeight).toFixed(3),
+        parseFloat(b.crateWeight).toFixed(3),
+        parseFloat(b.totalNetWeight).toFixed(3),
+        parseFloat(b.averageBirdWeight).toFixed(3),
+        new Date(b.recordedAt).toLocaleTimeString("en-ZA"),
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Batch Weight-Ins");
+    }
+
+    const filename = `Catch-WeightIn-${flockNumber.replace(/[^a-zA-Z0-9]/g, "-")}-${dateStr.replace(/\//g, "-")}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    toast.success(`Excel report downloaded: ${filename}`);
+  }, [details, enabled]);
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => setEnabled(true)}
+      disabled={isFetching}
+      title="Download Excel weight-in report"
+    >
+      {isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+      Excel
+    </Button>
   );
 }
