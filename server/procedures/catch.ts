@@ -371,6 +371,41 @@ export const completeCatchSession = protectedProcedure
     };
   });
 
+export const abandonCatchSession = protectedProcedure
+  .input(z.object({
+    sessionId: z.number(),
+    reason: z.string().optional(),
+  }))
+  .mutation(async ({ input, ctx }: { input: any; ctx: any }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+
+    const session = await db
+      .select()
+      .from(catchSessions)
+      .where(eq(catchSessions.id, input.sessionId))
+      .limit(1);
+
+    if (!session.length) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Catch session not found" });
+    }
+
+    if (session[0].status !== "active") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Only active sessions can be abandoned" });
+    }
+
+    await db
+      .update(catchSessions)
+      .set({
+        status: "cancelled",
+        endTime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        notes: input.reason ? `ABANDONED: ${input.reason}` : "ABANDONED by operator",
+      })
+      .where(eq(catchSessions.id, input.sessionId));
+
+    return { success: true };
+  });
+
 export const listCatchSessions = protectedProcedure
   .input(z.object({
     flockId: z.number().optional(),
@@ -579,6 +614,7 @@ export const catchRouter = router({
   deleteCatchBatch, // Delete batch
   getCatchSessionDetails,
   completeCatchSession,
+  abandonCatchSession,
   listCatchSessions,
   
   // Utilities
