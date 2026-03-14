@@ -21,7 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText, CalendarDays, AlertTriangle, TrendingDown, Minus, Download } from "lucide-react";
+import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText, CalendarDays, AlertTriangle, TrendingDown, Minus, Download, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
@@ -42,6 +42,8 @@ export default function CatchOperations() {
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
   const [completionNotes, setCompletionNotes] = useState("");
   const [showReportDialog, setShowReportDialog] = useState(false);
+  const [showAbandonDialog, setShowAbandonDialog] = useState(false);
+  const [abandonReason, setAbandonReason] = useState("");
   const [reportSessionId, setReportSessionId] = useState<number | null>(null);
   const [reportFarmName, setReportFarmName] = useState("");
   const [reportProcessingDate, setReportProcessingDate] = useState(new Date().toISOString().split("T")[0]);
@@ -109,6 +111,19 @@ export default function CatchOperations() {
     { status: "completed" },
     { refetchInterval: 30000 } // Refetch every 30 seconds
   );
+
+  // Query for any active sessions — used to auto-resume after connection loss
+  const { data: activeSessions, isLoading: isLoadingActiveSessions } = trpc.catch.listCatchSessions.useQuery(
+    { status: "active" },
+    { refetchOnMount: true, staleTime: 0 }
+  );
+
+  // Auto-resume: if there is an active session in the DB and none loaded in state, resume it
+  useEffect(() => {
+    if (!activeSessionId && activeSessions && activeSessions.length > 0) {
+      setActiveSessionId(activeSessions[0].id);
+    }
+  }, [activeSessions, activeSessionId]);
 
   // Auto-fill target birds, weight and override catching weight from catch plan or flock defaults
   useEffect(() => {
@@ -211,6 +226,19 @@ export default function CatchOperations() {
   });
 
   const reforecastPlan = trpc.catch.reforecastCatchPlan.useMutation();
+
+  const abandonSession = trpc.catch.abandonCatchSession.useMutation({
+    onSuccess: () => {
+      toast.success("Session abandoned and marked as cancelled");
+      setActiveSessionId(null);
+      setShowAbandonDialog(false);
+      setAbandonReason("");
+      utils.catch.listCatchSessions.invalidate();
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to abandon session");
+    },
+  });
 
   const completeSession = trpc.catch.completeCatchSession.useMutation({
     onSuccess: (data) => {
@@ -408,6 +436,15 @@ export default function CatchOperations() {
             >
               <FileText className="mr-2 h-4 w-4" />
               Generate Transport Report
+            </Button>
+            <Button
+              onClick={() => setShowAbandonDialog(true)}
+              size="lg"
+              variant="outline"
+              className="border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+            >
+              <XCircle className="mr-2 h-4 w-4" />
+              Abandon Session
             </Button>
           </div>
         )}
@@ -938,15 +975,27 @@ export default function CatchOperations() {
       {!activeSessionId && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <Package className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Active Catch Session</h3>
-            <p className="text-muted-foreground text-center mb-4">
-              Start a new catch session to begin recording crates in real-time
-            </p>
-            <Button onClick={() => setShowStartDialog(true)}>
-              <Play className="mr-2 h-4 w-4" />
-              Start New Session
-            </Button>
+            {isLoadingActiveSessions ? (
+              <>
+                <Loader2 className="h-12 w-12 animate-spin text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">Checking for active sessions...</h3>
+                <p className="text-muted-foreground text-center">
+                  Reconnecting to any in-progress catch session
+                </p>
+              </>
+            ) : (
+              <>
+                <Package className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Active Catch Session</h3>
+                <p className="text-muted-foreground text-center mb-4">
+                  Start a new catch session to begin recording crates in real-time
+                </p>
+                <Button onClick={() => setShowStartDialog(true)}>
+                  <Play className="mr-2 h-4 w-4" />
+                  Start New Session
+                </Button>
+              </>
+            )}
           </CardContent>
         </Card>
       )}
@@ -1204,6 +1253,49 @@ export default function CatchOperations() {
             <Button onClick={handleCompleteSession} disabled={completeSession.isPending}>
               {completeSession.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Complete Session
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Abandon Session Dialog */}
+      <Dialog open={showAbandonDialog} onOpenChange={setShowAbandonDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5" />
+              Abandon Catch Session
+            </DialogTitle>
+            <DialogDescription>
+              This will mark the session as cancelled. All recorded batches will be preserved in the database but the session will no longer be active. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="abandonReason">Reason for abandoning (optional)</Label>
+              <Textarea
+                id="abandonReason"
+                value={abandonReason}
+                onChange={(e) => setAbandonReason(e.target.value)}
+                placeholder="e.g., Equipment failure, power outage, operator error..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAbandonDialog(false)}>
+              Keep Session Active
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!activeSessionId) return;
+                abandonSession.mutate({ sessionId: activeSessionId, reason: abandonReason || undefined });
+              }}
+              disabled={abandonSession.isPending}
+            >
+              {abandonSession.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Yes, Abandon Session
             </Button>
           </DialogFooter>
         </DialogContent>
