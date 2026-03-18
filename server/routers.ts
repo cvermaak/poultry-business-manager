@@ -1,6 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { serialize } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { inventoryRouter } from "./inventory-router";
@@ -18,6 +19,11 @@ import { catchRouter } from "./procedures/catch";
 import { densityRouter } from "./procedures/density";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+// Helper to serialize cookie for Set-Cookie header
+function serializeCookie(name: string, value: string, options: any) {
+  return serialize(name, value, options);
+}
 
 // Role-enforcement middleware helpers
 type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
@@ -93,7 +99,9 @@ export const appRouter = router({
         const sessionToken = await sdk.createSessionToken(user.id);
         
         const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        // Build Set-Cookie header manually to ensure it's sent by tRPC
+        const cookieString = serializeCookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        ctx.res.setHeader('Set-Cookie', cookieString);
         
         return {
           success: true,
@@ -142,7 +150,8 @@ export const appRouter = router({
     
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      const cookieString = serializeCookie(COOKIE_NAME, '', { ...cookieOptions, maxAge: -1 });
+      ctx.res.setHeader('Set-Cookie', cookieString);
       return {
         success: true,
       } as const;
@@ -468,7 +477,7 @@ export const appRouter = router({
       return await db.getFlockById(input.id);
     }),
 
-    create: farmProcedure
+    create: protectedProcedure
       .input(
         z.object({
           flockNumber: z.string().min(1),
@@ -559,7 +568,7 @@ export const appRouter = router({
         return { success: true, flockId };
       }),
 
-    update: farmProcedure
+    update: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -682,7 +691,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: farmProcedure
+    delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.deleteFlock(input.id);
@@ -694,7 +703,7 @@ export const appRouter = router({
       return await db.getFlockDailyRecords(input.flockId);
     }),
 
-    createDailyRecord: productionProcedure
+    createDailyRecord: protectedProcedure
       .input(
         z.object({
           flockId: z.number(),
@@ -731,7 +740,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    updateDailyRecord: productionProcedure
+    updateDailyRecord: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -767,7 +776,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    deleteDailyRecord: farmProcedure
+    deleteDailyRecord: protectedProcedure
       .input(z.object({ id: z.number(), flockId: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.deleteFlockDailyRecord(input.id);
@@ -789,7 +798,7 @@ export const appRouter = router({
       return await db.getFlockHealthRecords(input.flockId);
     }),
 
-    createHealthRecord: productionProcedure
+    createHealthRecord: protectedProcedure
       .input(
         z.object({
           flockId: z.number(),
@@ -821,7 +830,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    updateHealthRecord: productionProcedure
+    updateHealthRecord: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -853,7 +862,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    createVaccinationSchedule: farmProcedure
+    createVaccinationSchedule: protectedProcedure
       .input(
         z.object({
           flockId: z.number(),
@@ -880,7 +889,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    updateVaccinationSchedule: farmProcedure
+    updateVaccinationSchedule: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -964,7 +973,7 @@ export const appRouter = router({
         return await getFlockStressPackSchedules(input.flockId);
       }),
 
-    updateStressPackSchedule: productionProcedure
+    updateStressPackSchedule: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -1000,7 +1009,7 @@ export const appRouter = router({
       }),
 
     // Automatic activation
-    autoActivateFlocks: farmProcedure
+    autoActivateFlocks: protectedProcedure
       .mutation(async ({ ctx }) => {
         const count = await db.autoActivateFlocks();
         await db.logUserActivity(
@@ -1014,7 +1023,7 @@ export const appRouter = router({
       }),
 
     // Manual status change
-    changeStatus: farmProcedure
+    changeStatus: protectedProcedure
       .input(
         z.object({
           flockId: z.number(),
@@ -1075,7 +1084,7 @@ export const appRouter = router({
       return await db.getCustomerById(input.id);
     }),
 
-    create: salesProcedure
+    create: protectedProcedure
       .input(
         z.object({
           customerNumber: z.string().min(1),
@@ -1197,7 +1206,7 @@ export const appRouter = router({
         return await db.listReminders(filters);
       }),
 
-    create: productionProcedure
+    create: protectedProcedure
       .input(
         z.object({
           flockId: z.number().optional(),
@@ -1222,7 +1231,7 @@ export const appRouter = router({
         return await db.createReminder(input);
       }),
 
-    updateStatus: productionProcedure
+    updateStatus: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -1235,17 +1244,17 @@ export const appRouter = router({
         return await db.updateReminderStatus(input.id, input.status, ctx.user?.id, input.actionNotes);
       }),
 
-    delete: farmProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    delete: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
       return await db.deleteReminder(input.id);
     }),
 
-    generateForFlock: farmProcedure
+    generateForFlock: protectedProcedure
       .input(z.object({ flockId: z.number() }))
       .mutation(async ({ input }) => {
         return await db.generateFlockReminders(input.flockId);
       }),
 
-    syncFromTemplate: farmProcedure
+    syncFromTemplate: protectedProcedure
       .input(z.object({ flockId: z.number(), templateId: z.number() }))
       .mutation(async ({ input, ctx }) => {
         const result = await db.syncFlockRemindersFromTemplate(input.flockId, input.templateId);
@@ -1253,7 +1262,7 @@ export const appRouter = router({
         return result;
       }),
 
-    getFlocksUsingTemplate: farmProcedure
+    getFlocksUsingTemplate: protectedProcedure
       .input(z.object({ templateId: z.number() }))
       .query(async ({ input }) => {
         return await db.getFlocksUsingTemplate(input.templateId);
@@ -1375,7 +1384,7 @@ export const appRouter = router({
         return await db.getHealthProtocolTemplateById(input.id);
       }),
 
-    createProtocolTemplate: farmProcedure
+    createProtocolTemplate: protectedProcedure
       .input(z.object({
         name: z.string().min(1),
         description: z.string().optional(),
@@ -1404,7 +1413,7 @@ export const appRouter = router({
         return { success: true, id: (result as any)[0]?.insertId };
       }),
 
-    updateProtocolTemplate: farmProcedure
+    updateProtocolTemplate: protectedProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().min(1).optional(),
@@ -1428,7 +1437,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    deleteProtocolTemplate: farmProcedure
+    deleteProtocolTemplate: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.deleteHealthProtocolTemplate(input.id);
@@ -1445,7 +1454,7 @@ export const appRouter = router({
       return await db.listReminderTemplates();
     }),
 
-    create: farmProcedure
+    create: protectedProcedure
       .input(z.object({
         name: z.string(),
         description: z.string().optional(),
@@ -1457,7 +1466,7 @@ export const appRouter = router({
         return await db.createReminderTemplate(input);
       }),
 
-    createBundle: farmProcedure
+    createBundle: protectedProcedure
       .input(z.object({
         name: z.string(),
         description: z.string().optional(),
@@ -1469,7 +1478,7 @@ export const appRouter = router({
         return result;
       }),
 
-    update: farmProcedure
+    update: protectedProcedure
       .input(z.object({
         id: z.number(),
         name: z.string(),
@@ -1482,13 +1491,13 @@ export const appRouter = router({
         return await db.updateReminderTemplate(input);
       }),
 
-    delete: farmProcedure
+    delete: protectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await db.deleteReminderTemplate(input.id);
       }),
 
-    updateBundle: farmProcedure
+    updateBundle: protectedProcedure
       .input(z.object({
         id: z.number(),
         name: z.string(),
@@ -1501,7 +1510,7 @@ export const appRouter = router({
         return result;
       }),
 
-    addToFlock: farmProcedure
+    addToFlock: protectedProcedure
       .input(z.object({ flockId: z.number(), templateId: z.number() }))
       .mutation(async ({ input, ctx }) => {
         const flock = await db.getFlockById(input.flockId);
@@ -1514,7 +1523,7 @@ export const appRouter = router({
         return { success: true, reminderCount };
       }),
 
-    removeFromFlock: farmProcedure
+    removeFromFlock: protectedProcedure
       .input(z.object({ flockId: z.number(), templateId: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.deleteRemindersByTemplate(input.flockId, input.templateId);
@@ -1528,7 +1537,7 @@ export const appRouter = router({
         return await db.getAppliedTemplatesForFlock(input.flockId);
       }),
 
-    copyAndCustomize: farmProcedure
+    copyAndCustomize: protectedProcedure
       .input(z.object({
         sourceTemplateId: z.number(),
         newName: z.string(),
