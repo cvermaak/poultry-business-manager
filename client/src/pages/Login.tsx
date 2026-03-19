@@ -12,9 +12,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const utils = trpc.useUtils();
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: (data) => {
+      // Invalidate auth cache to force refetch with new session
+      utils.auth.me.invalidate();
+      
       if (data.mustChangePassword) {
         window.location.href = "/change-password";
         return;
