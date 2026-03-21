@@ -23,6 +23,8 @@ export default function Customers() {
     physicalAddress: "",
     paymentTerms: "cash",
   });
+  
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const { user } = useAuth();
   const { data: customers, isLoading, refetch, error } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
@@ -51,10 +53,21 @@ export default function Customers() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.name.trim()) {
-      alert("Contact Name is required");
+    // Validate required fields
+    const newErrors: Record<string, string> = {};
+    if (!formData.name.trim()) newErrors.name = "Contact Name is required";
+    if (!formData.companyName.trim()) newErrors.companyName = "Company Name is required";
+    if (!formData.vatNumber.trim()) newErrors.vatNumber = "VAT Number is required";
+    if (!formData.registrationNumber.trim()) newErrors.registrationNumber = "Registration Number is required";
+    if (!formData.postalAddress.trim()) newErrors.postalAddress = "Postal Address is required";
+    if (!formData.physicalAddress.trim()) newErrors.physicalAddress = "Physical Address is required";
+    
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
       return;
     }
+    
+    setErrors({});
     
     try {
       // Generate customer number if not provided
@@ -70,7 +83,12 @@ export default function Customers() {
         segment: "retail",
         creditLimit: 0,
         paymentTerms: formData.paymentTerms,
-        taxNumber: formData.vatNumber || undefined,
+        taxNumber: formData.vatNumber,
+        companyName: formData.companyName,
+        vatNumber: formData.vatNumber,
+        registrationNumber: formData.registrationNumber,
+        postalAddress: formData.postalAddress,
+        physicalAddress: formData.physicalAddress,
         notes: undefined,
       });
 
