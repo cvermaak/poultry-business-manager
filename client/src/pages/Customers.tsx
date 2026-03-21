@@ -25,26 +25,9 @@ export default function Customers() {
   });
 
   const { user } = useAuth();
-  const { data: customers, isLoading, refetch } = trpc.customers.list.useQuery({ isActive: true });
-  const createMutation = trpc.customers.create.useMutation();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    try {
-      await createMutation.mutateAsync({
-        name: formData.name,
-        companyName: formData.companyName || undefined,
-        vatNumber: formData.vatNumber || undefined,
-        registrationNumber: formData.registrationNumber || undefined,
-        email: formData.email || undefined,
-        phone: formData.phone || undefined,
-        postalAddress: formData.postalAddress || undefined,
-        physicalAddress: formData.physicalAddress || undefined,
-        paymentTerms: formData.paymentTerms,
-      });
-
-      // Reset form
+  const { data: customers, isLoading, refetch, error } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
+  const createMutation = trpc.customers.create.useMutation({
+    onSuccess: () => {
       setFormData({
         name: "",
         companyName: "",
@@ -59,6 +42,30 @@ export default function Customers() {
       setEditingId(null);
       setIsOpen(false);
       refetch();
+    },
+    onError: (err) => {
+      console.error("Error creating customer:", err);
+    },
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      // Generate customer number if not provided
+      const customerNumber = `CUST-${Date.now()}`;
+      
+      await createMutation.mutateAsync({
+        customerNumber,
+        name: formData.name,
+        contactPerson: formData.name,
+        email: formData.email || undefined,
+        phone: formData.phone || undefined,
+        segment: "retail",
+        paymentTerms: formData.paymentTerms,
+        taxNumber: formData.vatNumber || undefined,
+      });
+
     } catch (error) {
       console.error("Error creating customer:", error);
     }
@@ -241,6 +248,8 @@ export default function Customers() {
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">Loading customers...</div>
+          ) : error ? (
+            <div className="text-center py-8 text-red-600">Error loading customers: {error.message}</div>
           ) : customers && customers.length > 0 ? (
             <div className="overflow-x-auto">
               <Table>

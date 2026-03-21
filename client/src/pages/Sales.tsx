@@ -18,8 +18,8 @@ export default function Sales() {
     pricePerKgExcl: "",
   });
 
-  const { data: invoices, isLoading, refetch } = trpc.invoices.list.useQuery({});
-  const { data: customers } = trpc.customers.list.useQuery({ isActive: true });
+  const { data: invoices, isLoading, refetch, error: invoicesError } = trpc.invoices.list.useQuery({}, { retry: 1 });
+  const { data: customers, error: customersError } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
   const createMutation = trpc.invoices.create.useMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -172,6 +172,8 @@ export default function Sales() {
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">Loading invoices...</div>
+          ) : invoicesError ? (
+            <div className="text-center py-8 text-red-600">Error loading invoices: {invoicesError.message}</div>
           ) : invoices && invoices.length > 0 ? (
             <div className="overflow-x-auto">
               <Table>
