@@ -571,7 +571,6 @@ export const invoiceItems = mysqlTable("invoice_items", {
 ]);
 
 export const invoices = mysqlTable("invoices", {
-{
 	id: int().autoincrement().notNull(),
 	invoiceNumber: varchar({ length: 50 }).notNull(),
 	customerId: int().notNull().references(() => customers.id),

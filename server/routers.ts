@@ -12,11 +12,11 @@ import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, 
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
 import { sendPasswordResetEmail } from "./_core/email";
-import { catchRouter } from "./routers/catch";
-import { densityRouter } from "./routers/density";
-import { harvestRouter } from "./routers/harvest";
-import { processorRouter } from "./routers/processor";
-import { harvestAnalyticsRouter } from "./routers/harvestAnalytics";
+import { catchRouter } from "./procedures/catch";
+import { densityRouter } from "./procedures/density";
+import { harvestRouter } from "./procedures/harvest";
+import { processorRouter } from "./procedures/processor";
+import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
