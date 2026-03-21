@@ -12,13 +12,11 @@ import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, 
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
 import { sendPasswordResetEmail } from "./_core/email";
-import { sdk } from "./_core/sdk";
-// import { slaughterRouter } from "./procedures/slaughter";
-import { harvestRouter } from "./procedures/harvest";
-import { processorRouter } from "./procedures/processor";
-import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
-import { catchRouter } from "./procedures/catch";
-import { densityRouter } from "./procedures/density";
+import { catchRouter } from "./routers/catch";
+import { densityRouter } from "./routers/density";
+import { harvestRouter } from "./routers/harvest";
+import { processorRouter } from "./routers/processor";
+import { harvestAnalyticsRouter } from "./routers/harvestAnalytics";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -1589,6 +1587,63 @@ export const appRouter = router({
   harvestAnalytics: harvestAnalyticsRouter,
 
   // ============================================================================
+  // SALES & INVOICING
+  // ============================================================================
+  invoices: router({
+    create: protectedProcedure
+      .input(
+        z.object({
+          customerId: z.number(),
+          catchSessionId: z.number(),
+          processorId: z.number(),
+          pricePerKgExcl: z.number().positive(),
+          dueDate: z.date().optional(),
+          vatPercentage: z.number().default(15),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const invoiceNumber = await db.getNextInvoiceNumber();
+        const dueDate = input.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        const result = await db.createInvoice({
+          invoiceNumber,
+          customerId: input.customerId,
+          catchSessionId: input.catchSessionId,
+          processorId: input.processorId,
+          invoiceDate: new Date(),
+          dueDate,
+          pricePerKgExcl: input.pricePerKgExcl,
+          totalBirds: 0,
+          totalWeight: 0,
+          vatPercentage: input.vatPercentage,
+          createdBy: ctx.user?.id,
+        });
+        await db.logUserActivity(ctx.user.id, "create_invoice", "invoice", undefined, `Created invoice: ${invoiceNumber}`);
+        return { success: true, invoiceId: result.insertId, invoiceNumber };
+      }),
+
+    list: protectedProcedure
+      .input(
+        z.object({
+          customerId: z.number().optional(),
+          status: z.string().optional(),
+          limit: z.number().default(50),
+          offset: z.number().default(0),
+        })
+      )
+      .query(async ({ input }) => {
+        const invoices = await db.listInvoices(input.customerId, input.status);
+        return invoices.slice(input.offset, input.offset + input.limit);
+      }),
+
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const invoice = await db.getInvoiceById(input.id);
+        if (!invoice) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+        return invoice;
+      }),
+  }),
+  // ============================================================================
   // ANALYTICS & DASHBOARD
   // ============================================================================
   analytics: router({
@@ -1597,7 +1652,6 @@ export const appRouter = router({
       const totalCustomers = await db.getTotalCustomerCount();
       const now = new Date();
       const monthlyRevenue = await db.getMonthlyRevenue(now.getFullYear(), now.getMonth() + 1);
-
       return {
         activeFlocks,
         totalCustomers,
@@ -1606,6 +1660,6 @@ export const appRouter = router({
       };
     }),
   }),
-});
+});;
 
 export type AppRouter = typeof appRouter;
