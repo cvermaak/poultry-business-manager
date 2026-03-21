@@ -169,6 +169,13 @@
       "when": 1772374216359,
       "tag": "0023_tidy_riptide",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1774098481278,
+      "tag": "0024_lively_guardian",
+      "breakpoints": true
     }
   ]
 }
