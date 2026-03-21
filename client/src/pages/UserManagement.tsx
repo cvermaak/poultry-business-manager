@@ -18,6 +18,7 @@ const ROLES = [
   { value: "accountant", label: "Accountant", description: "Financial management and reporting", color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
   { value: "sales_staff", label: "Sales Staff", description: "Customer and sales management", color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200" },
   { value: "production_worker", label: "Production Worker", description: "Daily data entry and records", color: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200" },
+  { value: "chicken_house_operator", label: "Chicken House Operator", description: "View-only access to flocks and dashboard", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" },
 ] as const;
 
 type RoleValue = typeof ROLES[number]["value"];
