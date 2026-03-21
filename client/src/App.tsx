@@ -27,6 +27,8 @@ import HealthManagement from "./pages/HealthManagement";
 import ReminderTemplates from "./pages/ReminderTemplates";
 import ChangePassword from "./pages/ChangePassword";
 import LoginPage from "./pages/Login";
+import Sales from "./pages/Sales";
+import Finance from "./pages/Finance";
 
 function Router() {
   return (
@@ -137,6 +139,18 @@ function Router() {
       <Route path="/inventory">
         <DashboardLayout>
           <Inventory />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/sales">
+        <DashboardLayout>
+          <Sales />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/finance">
+        <DashboardLayout>
+          <Finance />
         </DashboardLayout>
       </Route>
 
