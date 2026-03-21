@@ -6,24 +6,26 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, EyeOff, LogIn, AlertCircle } from "lucide-react";
+import { setJWTToken } from "@/lib/jwt";
 
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const utils = trpc.useUtils();
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: (data) => {
-      // Invalidate auth cache to force refetch with new session
-      utils.auth.me.invalidate();
+      if (data.token) {
+        // Store JWT token in localStorage
+        setJWTToken(data.token);
+      }
       
       if (data.mustChangePassword) {
         window.location.href = "/change-password";
         return;
       }
-      // Re-sync auth state so UI unlocks instantly
+      // Redirect to dashboard
       window.location.href = "/";
     },
     onError: (err) => {
