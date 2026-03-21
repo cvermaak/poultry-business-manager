@@ -213,7 +213,7 @@ export async function createEmailUser(data: {
   email: string;
   name: string;
   passwordHash: string;
-  role: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
+  role: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
   createdBy: number;
 }) {
   const db = await getDb();
@@ -282,7 +282,7 @@ export async function updateUser(userId: number, data: {
   name?: string;
   email?: string;
   username?: string;
-  role?: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
+  role?: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
 }) {
   const db = await getDb();
   if (!db) return false;

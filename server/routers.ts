@@ -149,7 +149,7 @@ export const appRouter = router({
         username: z.string().min(3, "Username must be at least 3 characters").max(50),
         email: z.string().email("Invalid email address"),
         name: z.string().min(1, "Name is required"),
-        role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker", "chicken_house_operator"]),
+        role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker"]),
         temporaryPassword: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -191,7 +191,7 @@ export const appRouter = router({
       .input(
         z.object({
           userId: z.number(),
-          role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker", "chicken_house_operator"]),
+          role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker"]),
         })
       )
       .mutation(async ({ input, ctx }) => {
