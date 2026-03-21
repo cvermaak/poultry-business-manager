@@ -22,7 +22,7 @@ export async function sendEmail(payload: EmailPayload): Promise<boolean> {
 
   try {
     const { error } = await resend.emails.send({
-      from: "AFGRO Poultry Manager <noreply@afgro.app>",
+      from: "AFGRO Poultry Manager <onboarding@resend.dev>",
       to: payload.to,
       subject: payload.subject,
       html: payload.htmlContent,
