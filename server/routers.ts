@@ -1,9 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { serialize } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
-import { generateJWT } from "./_core/jwt";
 import { systemRouter } from "./_core/systemRouter";
 import { inventoryRouter } from "./inventory-router";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -11,7 +9,6 @@ import * as db from "./db";
 import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, createFlockVaccinationSchedule } from "./db-health-helpers";
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
-import { sendPasswordResetEmail } from "./_core/email";
 import { sdk } from "./_core/sdk";
 // import { slaughterRouter } from "./procedures/slaughter";
 import { harvestRouter } from "./procedures/harvest";
@@ -22,39 +19,13 @@ import { densityRouter } from "./procedures/density";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
-// Helper to serialize cookie for Set-Cookie header
-function serializeCookie(name: string, value: string, options: any) {
-  return serialize(name, value, options);
-}
-
-// Role-enforcement middleware helpers
-type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
-
-const requireRoles = (roles: UserRole[]) =>
-  protectedProcedure.use(({ ctx, next }) => {
-    if (!roles.includes(ctx.user.role as UserRole)) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Access denied: insufficient role" });
-    }
-    return next({ ctx });
-  });
-
 // Admin-only procedure
-const adminProcedure = requireRoles(["admin"]);
-
-// Farm operations: admin + farm_manager
-const farmProcedure = requireRoles(["admin", "farm_manager"]);
-
-// Finance: admin + accountant
-const financeProcedure = requireRoles(["admin", "accountant"]);
-
-// Sales: admin + sales_staff
-const salesProcedure = requireRoles(["admin", "sales_staff"]);
-
-// Production floor: admin + farm_manager + production_worker
-const productionProcedure = requireRoles(["admin", "farm_manager", "production_worker"]);
-
-// Supplier/procurement: admin + farm_manager + accountant
-const procurementProcedure = requireRoles(["admin", "farm_manager", "accountant"]);
+const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin") {
+    throw new Error("Forbidden: Admin access required");
+  }
+  return next({ ctx });
+});
 
 export const appRouter = router({
   system: systemRouter,
@@ -97,16 +68,17 @@ export const appRouter = router({
         // Update last sign in
         await db.updateUserLastSignIn(user.id);
         
-        // Generate JWT token
-        const token = generateJWT({
-          userId: user.id,
-          email: user.email,
-          role: user.role,
+        // Create session token using a unique identifier for email users
+        const sessionToken = await sdk.createSessionToken(`email:${user.id}`, {
+          name: user.name || "",
+          expiresInMs: ONE_YEAR_MS,
         });
+        
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
         
         return {
           success: true,
-          token,
           mustChangePassword: user.mustChangePassword,
           user: {
             id: user.id,
@@ -150,9 +122,9 @@ export const appRouter = router({
         return { success: true };
       }),
     
-    logout: publicProcedure.mutation(() => {
-      // JWT tokens are stateless, so logout just returns success
-      // The frontend will clear the token from localStorage
+    logout: publicProcedure.mutation(({ ctx }) => {
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return {
         success: true,
       } as const;
@@ -270,26 +242,12 @@ export const appRouter = router({
         const tempPassword = input.newPassword || generateTemporaryPassword();
         const passwordHash = await hashPassword(tempPassword);
         
-        // Get user details for email notification
-        const user = await db.getUserById(input.userId);
-        if (!user) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
-        }
-        
         await db.updateUserPassword(input.userId, passwordHash, true);
         await db.logUserActivity(ctx.user.id, "reset_password", "user", input.userId, `Password reset`);
-        
-        // Send password reset email
-        const emailSent = await sendPasswordResetEmail(
-          user.email,
-          user.name || user.username || "User",
-          tempPassword
-        );
         
         return {
           success: true,
           temporaryPassword: tempPassword,
-          emailSent,
         };
       }),
     
@@ -339,7 +297,7 @@ export const appRouter = router({
       return await db.getHouseById(input.id);
     }),
 
-    create: farmProcedure
+    create: protectedProcedure
       .input(
         z.object({
           name: z.string().min(1),
@@ -416,7 +374,7 @@ export const appRouter = router({
         };
       }),
 
-    update: farmProcedure
+    update: protectedProcedure
       .input(
         z.object({
           id: z.number(),
@@ -455,7 +413,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: farmProcedure
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         const result = await db.deleteHouse(input.id);
@@ -709,9 +667,9 @@ export const appRouter = router({
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
-        await db.deleteFlock(input.id);
+        const result = await db.deleteFlock(input.id);
         await db.logUserActivity(ctx.user.id, "delete_flock", "flock", input.id, `Deleted flock: ${input.id}`);
-        return { success: true };
+        return result;
       }),
 
     getDailyRecords: protectedProcedure.input(z.object({ flockId: z.number() })).query(async ({ input }) => {
@@ -791,7 +749,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    deleteDailyRecord: protectedProcedure
+    deleteDailyRecord: adminProcedure
       .input(z.object({ id: z.number(), flockId: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.deleteFlockDailyRecord(input.id);
@@ -1082,7 +1040,7 @@ export const appRouter = router({
   // CUSTOMER MANAGEMENT
   // ============================================================================
   customers: router({
-    list: salesProcedure
+    list: protectedProcedure
       .input(
         z
           .object({
@@ -1130,7 +1088,7 @@ export const appRouter = router({
   // SUPPLIER MANAGEMENT
   // ============================================================================
   suppliers: router({
-    list: procurementProcedure
+    list: protectedProcedure
       .input(
         z
           .object({
@@ -1288,11 +1246,11 @@ export const appRouter = router({
   // HEALTH MANAGEMENT
   // ============================================================================
   health: router({
-    listVaccines: farmProcedure.query(async () => {
+    listVaccines: protectedProcedure.query(async () => {
       return await db.listVaccines();
     }),
 
-    listStressPacks: farmProcedure.query(async () => {
+    listStressPacks: protectedProcedure.query(async () => {
       return await db.listStressPacks();
     }),
 
@@ -1308,7 +1266,7 @@ export const appRouter = router({
         return await db.getStressPackById(input.id);
       }),
 
-    createVaccine: farmProcedure
+    createVaccine: protectedProcedure
       .input(z.object({
         name: z.string(),
         brand: z.string(),
@@ -1327,7 +1285,7 @@ export const appRouter = router({
         return await db.createVaccine(input);
       }),
 
-    updateVaccine: farmProcedure
+    updateVaccine: protectedProcedure
       .input(z.object({
         id: z.number(),
         name: z.string(),
@@ -1347,13 +1305,13 @@ export const appRouter = router({
         return await db.updateVaccine(input);
       }),
 
-    deleteVaccine: farmProcedure
+    deleteVaccine: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await db.deleteVaccine(input.id);
       }),
 
-    createStressPack: farmProcedure
+    createStressPack: protectedProcedure
       .input(z.object({
         name: z.string(),
         brand: z.string(),
@@ -1367,7 +1325,7 @@ export const appRouter = router({
         return await db.createStressPack(input);
       }),
 
-    updateStressPack: farmProcedure
+    updateStressPack: protectedProcedure
       .input(z.object({
         id: z.number(),
         name: z.string(),
@@ -1382,7 +1340,7 @@ export const appRouter = router({
         return await db.updateStressPack(input);
       }),
 
-    deleteStressPack: farmProcedure
+    deleteStressPack: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await db.deleteStressPack(input.id);
@@ -1452,7 +1410,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    deleteProtocolTemplate: protectedProcedure
+    deleteProtocolTemplate: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.deleteHealthProtocolTemplate(input.id);

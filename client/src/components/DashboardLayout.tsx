@@ -40,8 +40,8 @@ interface MenuItem {
 
 const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
-  { icon: HomeIcon, label: "Houses", path: "/houses", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Activity, label: "Flocks", path: "/flocks", roles: ["admin", "farm_manager", "production_worker", "chicken_house_operator"] },
+  { icon: HomeIcon, label: "Houses", path: "/houses", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: TrendingUp, label: "Harvests", path: "/harvests", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Building2, label: "Processors", path: "/processors", roles: ["admin", "farm_manager"] },
   { icon: Package, label: "Crate Types", path: "/crate-types", roles: ["admin", "farm_manager", "production_worker"] },

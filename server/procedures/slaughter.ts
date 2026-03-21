@@ -116,7 +116,12 @@ export const slaughterRouter = router({
     }),
 
   // Delete a catch record
-  deleteCatchRecord: protectedProcedure
+  deleteCatchRecord: protectedProcedure.use(({ ctx, next }) => {
+    if (ctx.user.role !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can delete catch records" });
+    }
+    return next({ ctx });
+  })
     .input(z.object({ catchRecordId: z.number() }))
     .mutation(async ({ input, ctx }) => {
       await deleteSlaughterCatchRecord(input.catchRecordId);

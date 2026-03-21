@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { processors } from "../../drizzle/schema";
 import { getDb } from "../db";
@@ -120,7 +121,12 @@ export const processorRouter = router({
   /**
    * Delete processor (soft delete by setting isActive = false)
    */
-  delete: protectedProcedure
+  delete: protectedProcedure.use(({ ctx, next }) => {
+    if (ctx.user.role !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can delete processors" });
+    }
+    return next({ ctx });
+  })
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
