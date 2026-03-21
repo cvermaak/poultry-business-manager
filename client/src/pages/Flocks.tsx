@@ -30,9 +30,16 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { formatWeight, convertToKg } from "@/lib/weightUtils";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { useState } from "react";
 
 export default function Flocks() {
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
+  
+  // chicken_house_operator can only view flocks and manage reminders
+  const isChickenHouseOperator = user?.role === 'chicken_house_operator';
+  const canCreateEdit = !isChickenHouseOperator;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editingFlockId, setEditingFlockId] = useState<number | null>(null);
@@ -307,12 +314,14 @@ export default function Flocks() {
           <p className="text-muted-foreground">Manage your broiler chicken flocks</p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Flock
-            </Button>
-          </DialogTrigger>
+          {canCreateEdit && (
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Flock
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <form onSubmit={handleSubmit}>
               <DialogHeader>
@@ -982,14 +991,15 @@ export default function Flocks() {
                           <Eye className="h-4 w-4 mr-1" />
                           View
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              setEditMode(true);
-                              setEditingFlockId(flock.id);
-                              setCopyMode(false);
+                        {canCreateEdit && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                setEditMode(true);
+                                setEditingFlockId(flock.id);
+                                setCopyMode(false);
                               
                               // Load existing health schedules with error handling
                               let vacSchedules: any[] = [];
@@ -1064,13 +1074,15 @@ export default function Flocks() {
                           <Edit className="h-4 w-4 mr-1" />
                           Edit
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setCopyMode(true);
-                            setEditMode(false);
-                            setEditingFlockId(null);
+                        )}
+                        {canCreateEdit && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setCopyMode(true);
+                              setEditMode(false);
+                              setEditingFlockId(null);
                             // Load flock data with new number
                             setFormData({
                               flockNumber: `${flock.flockNumber}-COPY`,
@@ -1101,6 +1113,7 @@ export default function Flocks() {
                           <Copy className="h-4 w-4 mr-1" />
                           Copy
                         </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
