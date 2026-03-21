@@ -213,7 +213,7 @@ export async function createEmailUser(data: {
   email: string;
   name: string;
   passwordHash: string;
-  role: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
+  role: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
   createdBy: number;
 }) {
   const db = await getDb();
@@ -227,7 +227,7 @@ export async function createEmailUser(data: {
     loginMethod: "email",
     role: data.role,
     isActive: true,
-    mustChangePassword: true,
+    mustChangePassword: false,
     createdBy: data.createdBy,
   });
 
@@ -282,7 +282,7 @@ export async function updateUser(userId: number, data: {
   name?: string;
   email?: string;
   username?: string;
-  role?: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
+  role?: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
 }) {
   const db = await getDb();
   if (!db) return false;
@@ -1777,7 +1777,7 @@ export async function updateReminderStatus(
   const updateData: any = { status };
   if (completedBy) {
     updateData.completedBy = completedBy;
-    updateData.completedAt = new Date();
+    updateData.completedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
   }
   if (actionNotes) {
     updateData.actionNotes = actionNotes;
