@@ -3,6 +3,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { serialize } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { generateJWT } from "./_core/jwt";
 import { systemRouter } from "./_core/systemRouter";
 import { inventoryRouter } from "./inventory-router";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -95,16 +96,16 @@ export const appRouter = router({
         // Update last sign in
         await db.updateUserLastSignIn(user.id);
         
-        // Create session token
-        const sessionToken = await sdk.createSessionToken(user.id);
-        
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        // Build Set-Cookie header manually to ensure it's sent by tRPC
-        const cookieString = serializeCookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
-        ctx.res.setHeader('Set-Cookie', cookieString);
+        // Generate JWT token
+        const token = generateJWT({
+          userId: user.id,
+          email: user.email,
+          role: user.role,
+        });
         
         return {
           success: true,
+          token,
           mustChangePassword: user.mustChangePassword,
           user: {
             id: user.id,
@@ -148,10 +149,9 @@ export const appRouter = router({
         return { success: true };
       }),
     
-    logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      const cookieString = serializeCookie(COOKIE_NAME, '', { ...cookieOptions, maxAge: -1 });
-      ctx.res.setHeader('Set-Cookie', cookieString);
+    logout: publicProcedure.mutation(() => {
+      // JWT tokens are stateless, so logout just returns success
+      // The frontend will clear the token from localStorage
       return {
         success: true,
       } as const;
