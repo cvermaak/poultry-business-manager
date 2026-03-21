@@ -1110,11 +1110,20 @@ export const appRouter = router({
           creditLimit: z.number().int().default(0),
           paymentTerms: z.string().default("cash"),
           taxNumber: z.string().optional(),
+          companyName: z.string().optional(),
+          vatNumber: z.string().optional(),
+          registrationNumber: z.string().optional(),
+          postalAddress: z.string().optional(),
+          physicalAddress: z.string().optional(),
           notes: z.string().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
-        await db.createCustomer({ ...input, createdBy: ctx.user.id });
+        await db.createCustomer({ 
+          ...input, 
+          createdBy: ctx.user.id,
+          isActive: 1,
+        });
         await db.logUserActivity(ctx.user.id, "create_customer", "customer", undefined, `Created customer: ${input.name}`);
         return { success: true };
       }),
