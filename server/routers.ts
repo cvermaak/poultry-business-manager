@@ -11,6 +11,7 @@ import * as db from "./db";
 import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, createFlockVaccinationSchedule } from "./db-health-helpers";
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
+import { sendPasswordResetEmail } from "./_core/email";
 import { sdk } from "./_core/sdk";
 // import { slaughterRouter } from "./procedures/slaughter";
 import { harvestRouter } from "./procedures/harvest";
@@ -269,12 +270,26 @@ export const appRouter = router({
         const tempPassword = input.newPassword || generateTemporaryPassword();
         const passwordHash = await hashPassword(tempPassword);
         
+        // Get user details for email notification
+        const user = await db.getUserById(input.userId);
+        if (!user) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+        }
+        
         await db.updateUserPassword(input.userId, passwordHash, true);
         await db.logUserActivity(ctx.user.id, "reset_password", "user", input.userId, `Password reset`);
+        
+        // Send password reset email
+        const emailSent = await sendPasswordResetEmail(
+          user.email,
+          user.name || user.username || "User",
+          tempPassword
+        );
         
         return {
           success: true,
           temporaryPassword: tempPassword,
+          emailSent,
         };
       }),
     
