@@ -1,5 +1,5 @@
+import { Resend } from "resend";
 import { ENV } from "./env";
-import { TRPCError } from "@trpc/server";
 
 export interface EmailPayload {
   to: string;
@@ -9,43 +9,29 @@ export interface EmailPayload {
 }
 
 /**
- * Send email using Manus Forge API
+ * Send email using Resend
  * Supports HTML and plain text content
  */
 export async function sendEmail(payload: EmailPayload): Promise<boolean> {
-  if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
-    console.error("[Email] Forge API configuration missing");
+  if (!ENV.resendApiKey) {
+    console.error("[Email] Resend API key missing (RESEND_API_KEY)");
     return false;
   }
 
-  try {
-    const endpoint = new URL(
-      "webdevtoken.v1.EmailService/SendEmail",
-      ENV.forgeApiUrl.endsWith("/") ? ENV.forgeApiUrl : `${ENV.forgeApiUrl}/`
-    ).toString();
+  const resend = new Resend(ENV.resendApiKey);
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${ENV.forgeApiKey}`,
-        "content-type": "application/json",
-        "connect-protocol-version": "1",
-      },
-      body: JSON.stringify({
-        to: payload.to,
-        subject: payload.subject,
-        htmlContent: payload.htmlContent,
-        textContent: payload.textContent || stripHtml(payload.htmlContent),
-      }),
+  try {
+    const { error } = await resend.emails.send({
+      from: "AFGRO Poultry Manager <noreply@afgro.app>",
+      to: payload.to,
+      subject: payload.subject,
+      html: payload.htmlContent,
+      text: payload.textContent || stripHtml(payload.htmlContent),
     });
 
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
+    if (error) {
       console.warn(
-        `[Email] Failed to send email to ${payload.to} (${response.status} ${response.statusText})${
-          detail ? `: ${detail}` : ""
-        }`
+        `[Email] Failed to send email to ${payload.to}: ${error.message}`
       );
       return false;
     }
