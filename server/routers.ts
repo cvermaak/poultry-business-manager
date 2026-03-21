@@ -1110,11 +1110,11 @@ export const appRouter = router({
           creditLimit: z.number().int().default(0),
           paymentTerms: z.string().default("cash"),
           taxNumber: z.string().optional(),
-          companyName: z.string().optional(),
-          vatNumber: z.string().optional(),
-          registrationNumber: z.string().optional(),
-          postalAddress: z.string().optional(),
-          physicalAddress: z.string().optional(),
+          companyName: z.string().min(1),
+          vatNumber: z.string().min(1),
+          registrationNumber: z.string().min(1),
+          postalAddress: z.string().min(1),
+          physicalAddress: z.string().min(1),
           notes: z.string().optional(),
         })
       )
