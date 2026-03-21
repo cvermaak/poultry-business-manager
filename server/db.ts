@@ -2736,3 +2736,94 @@ export async function getAllActivityLogs() {
 
   return logs;
 }
+
+// Invoice helper functions
+export async function createInvoice(data: {
+  invoiceNumber: string;
+  customerId: number;
+  catchSessionId: number;
+  processorId: number;
+  invoiceDate: Date;
+  dueDate: Date;
+  pricePerKgExcl: number;
+  totalBirds: number;
+  totalWeight: number;
+  vatPercentage?: number;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  // Calculate totals
+  const vatPercentage = data.vatPercentage || 15;
+  const exclusiveTotal = Math.round(data.totalBirds * data.totalWeight * data.pricePerKgExcl * 100) / 100;
+  const vatAmount = Math.round(exclusiveTotal * (vatPercentage / 100) * 100) / 100;
+  const inclusiveTotal = exclusiveTotal + vatAmount;
+
+  const result = await db.insert(invoices).values({
+    invoiceNumber: data.invoiceNumber,
+    customerId: data.customerId,
+    catchSessionId: data.catchSessionId,
+    processorId: data.processorId,
+    invoiceDate: data.invoiceDate.toISOString().slice(0, 19).replace('T', ' '),
+    dueDate: data.dueDate.toISOString().slice(0, 19).replace('T', ' '),
+    pricePerKgExcl: data.pricePerKgExcl,
+    totalBirds: data.totalBirds,
+    totalWeight: data.totalWeight,
+    vatPercentage: vatPercentage,
+    exclusiveTotal: Math.round(exclusiveTotal * 100),
+    vatAmount: Math.round(vatAmount * 100),
+    inclusiveTotal: Math.round(inclusiveTotal * 100),
+    subtotal: Math.round(exclusiveTotal * 100),
+    taxAmount: Math.round(vatAmount * 100),
+    totalAmount: Math.round(inclusiveTotal * 100),
+    balanceDue: Math.round(inclusiveTotal * 100),
+    status: 'draft',
+    createdBy: data.createdBy,
+  });
+
+  return { insertId: (result as any)[0]?.insertId || (result as any).insertId };
+}
+
+export async function getInvoiceById(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const invoice = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
+  return invoice[0] || null;
+}
+
+export async function listInvoices(customerId?: number, status?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  let query = db.select().from(invoices);
+  
+  if (customerId) {
+    query = query.where(eq(invoices.customerId, customerId));
+  }
+  
+  if (status) {
+    query = query.where(eq(invoices.status, status as any));
+  }
+
+  return query.orderBy(desc(invoices.invoiceDate));
+}
+
+export async function getNextInvoiceNumber() {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const lastInvoice = await db
+    .select({ invoiceNumber: invoices.invoiceNumber })
+    .from(invoices)
+    .orderBy(desc(invoices.invoiceNumber))
+    .limit(1);
+
+  if (!lastInvoice.length) {
+    return 'INV0001';
+  }
+
+  const lastNumber = parseInt(lastInvoice[0].invoiceNumber.replace('INV', ''));
+  return `INV${String(lastNumber + 1).padStart(4, '0')}`;
+}

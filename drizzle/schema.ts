@@ -161,6 +161,12 @@ export const customers = mysqlTable("customers", {
 	creditLimit: int().default(0),
 	paymentTerms: varchar({ length: 100 }).default('cash'),
 	taxNumber: varchar({ length: 100 }),
+	// Company details for invoicing
+	companyName: varchar({ length: 255 }),
+	vatNumber: varchar({ length: 50 }),
+	registrationNumber: varchar({ length: 100 }),
+	postalAddress: text(),
+	physicalAddress: text(),
 	isActive: tinyint().default(1).notNull(),
 	notes: text(),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
@@ -169,6 +175,7 @@ export const customers = mysqlTable("customers", {
 },
 (table) => [
 	index("customers_customerNumber_unique").on(table.customerNumber),
+	index("idx_customers_vat_number").on(table.vatNumber),
 ]);
 
 export const documents = mysqlTable("documents", {
@@ -564,6 +571,7 @@ export const invoiceItems = mysqlTable("invoice_items", {
 ]);
 
 export const invoices = mysqlTable("invoices", {
+{
 	id: int().autoincrement().notNull(),
 	invoiceNumber: varchar({ length: 50 }).notNull(),
 	customerId: int().notNull().references(() => customers.id),
@@ -571,23 +579,35 @@ export const invoices = mysqlTable("invoices", {
 	invoiceDate: timestamp({ mode: 'string' }).notNull(),
 	dueDate: timestamp({ mode: 'string' }).notNull(),
 	subtotal: int().notNull(),
-	taxAmount: int().notNull(),
-	totalAmount: int().notNull(),
-	paidAmount: int().default(0).notNull(),
-	balanceDue: int().notNull(),
-	status: mysqlEnum(['draft','sent','paid','partial','overdue','cancelled']).default('draft').notNull(),
-	notes: text(),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-	createdBy: int().references(() => users.id),
-},
-(table) => [
-	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
-	index("idx_invoices_customer_id").on(table.customerId),
-	index("idx_invoices_invoice_date").on(table.invoiceDate),
-	index("idx_invoices_status").on(table.status),
-	index("idx_invoices_due_date").on(table.dueDate),
-]);
+		taxAmount: int().notNull(),
+		totalAmount: int().notNull(),
+		paidAmount: int().default(0).notNull(),
+		balanceDue: int().notNull(),
+		status: mysqlEnum(['draft','sent','paid','partial','overdue','cancelled']).default('draft').notNull(),
+		// Catch session invoice fields
+		catchSessionId: int().references(() => catchSessions.id),
+		processorId: int().references(() => processors.id),
+		pricePerKgExcl: decimal({ precision: 10, scale: 2 }),
+		totalBirds: int(),
+		totalWeight: decimal({ precision: 10, scale: 3 }),
+		vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
+		exclusiveTotal: int(),
+		vatAmount: int(),
+		inclusiveTotal: int(),
+		notes: text(),
+		createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+		updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+		createdBy: int().references(() => users.id),
+	},
+	(table) => [
+		index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
+		index("idx_invoices_customer_id").on(table.customerId),
+		index("idx_invoices_invoice_date").on(table.invoiceDate),
+		index("idx_invoices_status").on(table.status),
+		index("idx_invoices_due_date").on(table.dueDate),
+		index("idx_invoices_catch_session_id").on(table.catchSessionId),
+		index("idx_invoices_processor_id").on(table.processorId),
+	]);
 
 export const itemTemplates = mysqlTable("item_templates", {
 	id: int().autoincrement().notNull(),
