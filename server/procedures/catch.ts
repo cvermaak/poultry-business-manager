@@ -73,7 +73,12 @@ export const updateCrateType = protectedProcedure
     return { success: true };
   });
 
-export const deleteCrateType = protectedProcedure
+export const deleteCrateType = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can delete crate types" });
+  }
+  return next({ ctx });
+})
   .input(z.object({ id: z.number() }))
   .mutation(async ({ input }: { input: any }) => {
     const db = await getDb();

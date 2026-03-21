@@ -232,7 +232,12 @@ export const updateCatchBatch = protectedProcedure
 /**
  * Delete batch record
  */
-export const deleteCatchBatch = protectedProcedure
+export const deleteCatchBatch = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can delete catch batches" });
+  }
+  return next({ ctx });
+})
   .input(z.object({
     batchId: z.number(),
   }))

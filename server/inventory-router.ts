@@ -86,7 +86,12 @@ export const inventoryRouter = router({
       return await inventoryDb.updateInventoryItem(id, data);
     }),
 
-  deleteItem: protectedProcedure
+  deleteItem: protectedProcedure.use(({ ctx, next }) => {
+    if (ctx.user.role !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can delete inventory items" });
+    }
+    return next({ ctx });
+  })
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       return await inventoryDb.deleteInventoryItem(input.id);

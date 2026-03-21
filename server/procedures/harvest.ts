@@ -226,7 +226,12 @@ export const harvestRouter = router({
   /**
    * Delete a harvest record
    */
-  delete: protectedProcedure
+  delete: protectedProcedure.use(({ ctx, next }) => {
+    if (ctx.user.role !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can delete harvest records" });
+    }
+    return next({ ctx });
+  })
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = await getDb();

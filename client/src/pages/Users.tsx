@@ -19,6 +19,7 @@ const ROLES = [
   { value: "accountant", label: "Accountant", description: "Access to finance and reports" },
   { value: "sales_staff", label: "Sales Staff", description: "Manage customers and sales orders" },
   { value: "production_worker", label: "Production Worker", description: "View and update daily records" },
+  { value: "chicken_house_operator", label: "Chicken House Operator", description: "View-only access to flocks and dashboard" },
 ] as const;
 
 type Role = typeof ROLES[number]["value"];
@@ -29,6 +30,8 @@ const getRoleBadgeVariant = (role: string) => {
     case "farm_manager": return "default";
     case "accountant": return "secondary";
     case "sales_staff": return "outline";
+    case "production_worker": return "outline";
+    case "chicken_house_operator": return "outline";
     default: return "outline";
   }
 };
