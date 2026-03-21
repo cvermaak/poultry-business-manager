@@ -28,7 +28,7 @@ function serializeCookie(name: string, value: string, options: any) {
 }
 
 // Role-enforcement middleware helpers
-type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
+type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
 
 const requireRoles = (roles: UserRole[]) =>
   protectedProcedure.use(({ ctx, next }) => {
@@ -706,7 +706,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: protectedProcedure
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {
         await db.deleteFlock(input.id);
@@ -1259,7 +1259,7 @@ export const appRouter = router({
         return await db.updateReminderStatus(input.id, input.status, ctx.user?.id, input.actionNotes);
       }),
 
-    delete: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+    delete: adminProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
       return await db.deleteReminder(input.id);
     }),
 
@@ -1506,7 +1506,7 @@ export const appRouter = router({
         return await db.updateReminderTemplate(input);
       }),
 
-    delete: protectedProcedure
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await db.deleteReminderTemplate(input.id);
