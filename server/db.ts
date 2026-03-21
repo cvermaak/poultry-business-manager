@@ -1783,8 +1783,13 @@ export async function updateReminderStatus(
     updateData.actionNotes = actionNotes;
   }
 
-  await db.update(reminders).set(updateData).where(eq(reminders.id, id));
-  return { success: true };
+  try {
+    await db.update(reminders).set(updateData).where(eq(reminders.id, id));
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating reminder:', error);
+    throw new Error(`Failed to update reminder: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 export async function deleteReminder(id: number) {
