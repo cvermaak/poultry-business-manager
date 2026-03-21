@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,16 +31,10 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { formatWeight, convertToKg } from "@/lib/weightUtils";
-import { useAuth } from "@/_core/hooks/useAuth";
-import { useState } from "react";
 
 export default function Flocks() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
-  
-  // chicken_house_operator can only view flocks and manage reminders
-  const isChickenHouseOperator = user?.role === 'chicken_house_operator';
-  const canCreateEdit = !isChickenHouseOperator;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editingFlockId, setEditingFlockId] = useState<number | null>(null);
@@ -313,15 +308,14 @@ export default function Flocks() {
           <h1 className="text-3xl font-bold tracking-tight">Flocks</h1>
           <p className="text-muted-foreground">Manage your broiler chicken flocks</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          {canCreateEdit && (
+        {user?.role !== "chicken_house_operator" && (
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Flock
               </Button>
             </DialogTrigger>
-          )}
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <form onSubmit={handleSubmit}>
               <DialogHeader>
@@ -936,9 +930,10 @@ export default function Flocks() {
                 </Button>
               </DialogFooter>
             </form>
-          </DialogContent>
-        </Dialog>
-      </div>
+            </DialogContent>
+          </Dialog>
+        )}
+        </div>
 
       {flocks && flocks.length === 0 ? (
         <Card>
@@ -991,7 +986,7 @@ export default function Flocks() {
                           <Eye className="h-4 w-4 mr-1" />
                           View
                         </Button>
-                        {canCreateEdit && (
+                        {user?.role !== "chicken_house_operator" && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1073,9 +1068,9 @@ export default function Flocks() {
                         >
                           <Edit className="h-4 w-4 mr-1" />
                           Edit
-                        </Button>
+                          </Button>
                         )}
-                        {canCreateEdit && (
+                        {user?.role !== "chicken_house_operator" && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1083,48 +1078,50 @@ export default function Flocks() {
                               setCopyMode(true);
                               setEditMode(false);
                               setEditingFlockId(null);
-                            // Load flock data with new number
-                            setFormData({
-                              flockNumber: `${flock.flockNumber}-COPY`,
-                              houseId: flock.houseId.toString(),
-                              placementDate: "",
-                              initialCount: flock.initialCount.toString(),
-                              targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
-                              targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
-                              targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
-                              growingPeriod: flock.growingPeriod?.toString() || "42",
-                              weightUnit: flock.weightUnit || "kg",
-                              starterFeedType: flock.starterFeedType || "premium",
-                              starterToDay: flock.starterToDay?.toString() || "10",
-                              growerFeedType: flock.growerFeedType || "premium",
-                              growerFromDay: flock.growerFromDay?.toString() || "11",
-                              growerToDay: flock.growerToDay?.toString() || "24",
-                              finisherFeedType: flock.finisherFeedType || "premium",
-                              finisherFromDay: flock.finisherFromDay?.toString() || "25",
-                              notes: flock.notes || "",
-                              vaccinationProtocol: "standard",
-                              vaccinationSchedules: [],
-                              stressPackSchedules: [],
-                              selectedTemplateIds: [],
-                            });
-                            setDialogOpen(true);
-                          }}
-                        >
-                          <Copy className="h-4 w-4 mr-1" />
-                          Copy
-                        </Button>
+                              // Load flock data with new number
+                              setFormData({
+                                flockNumber: `${flock.flockNumber}-COPY`,
+                                houseId: flock.houseId.toString(),
+                                placementDate: "",
+                                initialCount: flock.initialCount.toString(),
+                                targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
+                                targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
+                                targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
+                                growingPeriod: flock.growingPeriod?.toString() || "42",
+                                weightUnit: flock.weightUnit || "kg",
+                                starterFeedType: flock.starterFeedType || "premium",
+                                starterToDay: flock.starterToDay?.toString() || "10",
+                                growerFeedType: flock.growerFeedType || "premium",
+                                growerFromDay: flock.growerFromDay?.toString() || "11",
+                                growerToDay: flock.growerToDay?.toString() || "24",
+                                finisherFeedType: flock.finisherFeedType || "premium",
+                                finisherFromDay: flock.finisherFromDay?.toString() || "25",
+                                notes: flock.notes || "",
+                                vaccinationProtocol: "standard",
+                                vaccinationSchedules: [],
+                                stressPackSchedules: [],
+                                selectedTemplateIds: [],
+                              });
+                              setDialogOpen(true);
+                            }}
+                          >
+                            <Copy className="h-4 w-4 mr-1" />
+                            Copy
+                          </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setDeletingFlockId(flock.id);
-                            setDeleteDialogOpen(true);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 mr-1 text-destructive" />
-                          Delete
-                        </Button>
+                        {user?.role === "admin" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setDeletingFlockId(flock.id);
+                              setDeleteDialogOpen(true);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1 text-destructive" />
+                            Delete
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
