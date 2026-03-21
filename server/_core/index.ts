@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import spdy from "spdy";
+import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { authMiddleware } from './auth'
@@ -34,7 +34,7 @@ async function startServer() {
   const app = express();
   app.enable("trust proxy");
   app.set("trust proxy", 1);   // 👈 CRITICAL
-  const server = spdy.createServer(app);
+  const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
