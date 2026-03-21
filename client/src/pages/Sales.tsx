@@ -20,6 +20,8 @@ export default function Sales() {
 
   const { data: invoices, isLoading, refetch, error: invoicesError } = trpc.invoices.list.useQuery({}, { retry: 1 });
   const { data: customers, error: customersError } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
+  const { data: catchSessions } = trpc.catchSessions.list.useQuery({}, { retry: 1 });
+  const { data: processors } = trpc.processors.list.useQuery({}, { retry: 1 });
   const createMutation = trpc.invoices.create.useMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -99,7 +101,7 @@ export default function Sales() {
                     className="w-full px-3 py-2 border border-input rounded-md bg-background"
                   >
                     <option value="">Select a customer</option>
-                    {customers?.map((customer) => (
+                    {customers?.map((customer: any) => (
                       <option key={customer.id} value={customer.id}>
                         {customer.name} {customer.companyName ? `(${customer.companyName})` : ""}
                       </option>
@@ -107,28 +109,40 @@ export default function Sales() {
                   </select>
                 </div>
                 <div>
-                  <Label htmlFor="catchSessionId">Catch Session ID *</Label>
-                  <Input
+                  <Label htmlFor="catchSessionId">Catch Session *</Label>
+                  <select
                     id="catchSessionId"
                     name="catchSessionId"
-                    type="number"
                     value={formData.catchSessionId}
                     onChange={handleInputChange}
-                    placeholder="e.g., 1001"
                     required
-                  />
+                    className="w-full px-3 py-2 border border-input rounded-md bg-background"
+                  >
+                    <option value="">Select a catch session</option>
+                    {catchSessions?.map((session: any) => (
+                      <option key={session.id} value={session.id}>
+                        Session #{session.id} - {session.totalBirdsCaught || 0} birds
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <Label htmlFor="processorId">Processor ID *</Label>
-                  <Input
+                  <Label htmlFor="processorId">Processor *</Label>
+                  <select
                     id="processorId"
                     name="processorId"
-                    type="number"
                     value={formData.processorId}
                     onChange={handleInputChange}
-                    placeholder="e.g., 5001"
                     required
-                  />
+                    className="w-full px-3 py-2 border border-input rounded-md bg-background"
+                  >
+                    <option value="">Select a processor</option>
+                    {processors?.map((processor: any) => (
+                      <option key={processor.id} value={processor.id}>
+                        {processor.name || `Processor #${processor.id}`}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <Label htmlFor="pricePerKgExcl">Price per KG (Excl. VAT) *</Label>
@@ -164,62 +178,59 @@ export default function Sales() {
         </Dialog>
       </div>
 
-      {/* Invoices Table */}
+      {invoicesError && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <p className="text-sm text-red-800">Error loading invoices: {invoicesError.message}</p>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Recent Invoices</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="text-center py-8 text-muted-foreground">Loading invoices...</div>
-          ) : invoicesError ? (
-            <div className="text-center py-8 text-red-600">Error loading invoices: {invoicesError.message}</div>
+            <p className="text-muted-foreground">Loading invoices...</p>
           ) : invoices && invoices.length > 0 ? (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Invoice #</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Invoice Date</TableHead>
-                    <TableHead>Amount (Incl. VAT)</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Invoice #</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Amount (Incl. VAT)</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Due Date</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invoices.map((invoice: any) => (
+                  <TableRow key={invoice.id}>
+                    <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
+                    <TableCell>{customers?.find((c: any) => c.id === invoice.customerId)?.name || "Unknown"}</TableCell>
+                    <TableCell>R {invoice.inclusiveTotal?.toFixed(2) || "0.00"}</TableCell>
+                    <TableCell>
+                      <Badge className={getStatusColor(invoice.status)}>
+                        {invoice.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{new Date(invoice.dueDate).toLocaleDateString()}</TableCell>
+                    <TableCell className="flex gap-2">
+                      <Button variant="ghost" size="sm" className="gap-1">
+                        <Eye className="w-4 h-4" />
+                        View
+                      </Button>
+                      <Button variant="ghost" size="sm" className="gap-1">
+                        <Download className="w-4 h-4" />
+                        PDF
+                      </Button>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invoices.map((invoice: any) => (
-                    <TableRow key={invoice.id}>
-                      <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
-                      <TableCell>{invoice.customerName || "-"}</TableCell>
-                      <TableCell>{new Date(invoice.invoiceDate).toLocaleDateString()}</TableCell>
-                      <TableCell>R {(invoice.inclusiveTotal / 100).toFixed(2)}</TableCell>
-                      <TableCell>
-                        <Badge className={getStatusColor(invoice.status)}>
-                          {invoice.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex gap-2 justify-end">
-                          <Button variant="ghost" size="sm" className="gap-1">
-                            <Eye className="w-4 h-4" />
-                            View
-                          </Button>
-                          <Button variant="ghost" size="sm" className="gap-1">
-                            <Download className="w-4 h-4" />
-                            PDF
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                ))}
+              </TableBody>
+            </Table>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              No invoices found. Create your first invoice to get started.
-            </div>
+            <p className="text-muted-foreground">No invoices found. Create one to get started.</p>
           )}
         </CardContent>
       </Card>
