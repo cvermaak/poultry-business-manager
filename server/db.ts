@@ -2737,3 +2737,69 @@ export async function getAllActivityLogs() {
   return logs;
 }
 
+
+// Invoice functions
+export async function getNextInvoiceNumber(): Promise<string> {
+  const db = getDb();
+  const result = await db.query.invoices
+    .findFirst({
+      orderBy: desc(invoices.id),
+      columns: { invoiceNumber: true },
+    });
+
+  if (!result || !result.invoiceNumber) {
+    return "INV0001";
+  }
+
+  // Extract number from invoiceNumber (e.g., "INV0001" -> 1)
+  const match = result.invoiceNumber.match(/\d+/);
+  if (!match) {
+    return "INV0001";
+  }
+
+  const nextNum = parseInt(match[0], 10) + 1;
+  return `INV${String(nextNum).padStart(4, "0")}`;
+}
+
+export async function createInvoice(data: {
+  invoiceNumber: string;
+  customerId: number;
+  catchSessionId: number;
+  processorId: number;
+  invoiceDate: Date;
+  dueDate: Date;
+  pricePerKgExcl: number;
+  totalBirds: number;
+  totalWeight: number;
+  vatPercentage: number;
+  createdBy?: number;
+}): Promise<{ insertId: number }> {
+  const db = getDb();
+
+  // Calculate totals
+  const exclusiveTotal = data.totalBirds * data.totalWeight * data.pricePerKgExcl;
+  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
+  const inclusiveTotal = exclusiveTotal + vatAmount;
+
+  const result = await db.insert(invoices).values({
+    invoiceNumber: data.invoiceNumber,
+    customerId: data.customerId,
+    catchSessionId: data.catchSessionId,
+    processorId: data.processorId,
+    invoiceDate: data.invoiceDate,
+    dueDate: data.dueDate,
+    pricePerKgExcl: data.pricePerKgExcl,
+    totalBirds: data.totalBirds,
+    totalWeight: data.totalWeight,
+    exclusiveTotal,
+    vatAmount,
+    inclusiveTotal,
+    vatPercentage: data.vatPercentage,
+    status: "draft",
+    createdBy: data.createdBy,
+  });
+
+  return { insertId: result.insertId };
+}
+
+
