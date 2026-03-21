@@ -29,7 +29,7 @@ import { Button } from "./ui/button";
 import LoginPage from "@/pages/Login";
 import { ReminderNotifications } from "@/components/ReminderNotifications";
 
-type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
+type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
 
 interface MenuItem {
   icon: React.ComponentType<{ className?: string }>;
@@ -41,7 +41,7 @@ interface MenuItem {
 const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: HomeIcon, label: "Houses", path: "/houses", roles: ["admin", "farm_manager", "production_worker"] },
-  { icon: Activity, label: "Flocks", path: "/flocks", roles: ["admin", "farm_manager", "production_worker"] },
+  { icon: Activity, label: "Flocks", path: "/flocks", roles: ["admin", "farm_manager", "production_worker", "chicken_house_operator"] },
   { icon: TrendingUp, label: "Harvests", path: "/harvests", roles: ["admin", "farm_manager", "production_worker"] },
   { icon: Building2, label: "Processors", path: "/processors", roles: ["admin", "farm_manager"] },
   { icon: Package, label: "Crate Types", path: "/crate-types", roles: ["admin", "farm_manager", "production_worker"] },
