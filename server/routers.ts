@@ -1253,10 +1253,11 @@ export const appRouter = router({
           status: z.enum(["pending", "completed", "dismissed"]),
           completedBy: z.number().optional(),
           actionNotes: z.string().optional(),
+          completedAt: z.date().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
-        return await db.updateReminderStatus(input.id, input.status, ctx.user?.id, input.actionNotes);
+        return await db.updateReminderStatus(input.id, input.status, ctx.user?.id, input.actionNotes, input.completedAt);
       }),
 
     delete: adminProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {

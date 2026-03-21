@@ -1769,7 +1769,8 @@ export async function updateReminderStatus(
   id: number,
   status: "pending" | "completed" | "dismissed",
   completedBy?: number,
-  actionNotes?: string
+  actionNotes?: string,
+  completedAt?: Date
 ) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1777,20 +1778,68 @@ export async function updateReminderStatus(
   const updateData: any = { status };
   if (completedBy) {
     updateData.completedBy = completedBy;
-    updateData.completedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    // Use provided completedAt timestamp or generate current time
+    const timestamp = completedAt || new Date();
+    updateData.completedAt = timestamp.toISOString().slice(0, 19).replace('T', ' ');
   }
   if (actionNotes) {
     updateData.actionNotes = actionNotes;
   }
 
   try {
+    console.log('Updating reminder with data:', { id, updateData, completedBy, completedAt });
+    
+    // Verify user exists if completedBy is provided
+    if (completedBy && db.query) {
+      try {
+        const user = await db.query.users.findFirst({
+          where: eq(users.id, completedBy),
+        });
+        if (!user) {
+          console.error('User not found for completedBy:', { completedBy });
+          throw new Error(`User with ID ${completedBy} not found`);
+        }
+        console.log('User verified for completedBy:', { userId: completedBy, userName: user.name });
+      } catch (queryError) {
+        console.warn('Could not verify user existence:', queryError);
+      }
+    }
+    
+    // Verify reminder exists if db.query is available
+    if (db.query) {
+      try {
+        const reminder = await db.query.reminders.findFirst({
+          where: eq(reminders.id, id),
+        });
+        if (!reminder) {
+          throw new Error(`Reminder with ID ${id} not found`);
+        }
+        console.log('Reminder found:', { id, currentStatus: reminder.status });
+      } catch (queryError) {
+        console.warn('Could not verify reminder existence:', queryError);
+      }
+    }
+    
     await db.update(reminders).set(updateData).where(eq(reminders.id, id));
+    console.log('Reminder updated successfully:', { id, newStatus: updateData.status });
     return { success: true };
   } catch (error) {
-    console.error('Error updating reminder:', error);
-    throw new Error(`Failed to update reminder: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorCode = (error as any)?.code || 'UNKNOWN';
+    const errorSql = (error as any)?.sql || 'N/A';
+    console.error('Error updating reminder:', { 
+      id, 
+      updateData, 
+      error: errorMsg, 
+      errorCode,
+      errorSql,
+      fullError: error 
+    });
+    throw new Error(`Failed to update reminder: ${errorMsg}`);
   }
 }
+
+
 
 export async function deleteReminder(id: number) {
   const db = await getDb();
