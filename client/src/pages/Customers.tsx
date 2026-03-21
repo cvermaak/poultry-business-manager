@@ -51,6 +51,11 @@ export default function Customers() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!formData.name.trim()) {
+      alert("Contact Name is required");
+      return;
+    }
+    
     try {
       // Generate customer number if not provided
       const customerNumber = `CUST-${Date.now()}`;
@@ -58,12 +63,15 @@ export default function Customers() {
       await createMutation.mutateAsync({
         customerNumber,
         name: formData.name,
-        contactPerson: formData.name,
+        contactPerson: formData.name || undefined,
         email: formData.email || undefined,
         phone: formData.phone || undefined,
+        whatsapp: undefined,
         segment: "retail",
+        creditLimit: 0,
         paymentTerms: formData.paymentTerms,
         taxNumber: formData.vatNumber || undefined,
+        notes: undefined,
       });
 
     } catch (error) {
