@@ -20,7 +20,7 @@ export default function Sales() {
 
   const { data: invoices, isLoading, refetch, error: invoicesError } = trpc.invoices.list.useQuery({}, { retry: 1 });
   const { data: customers, error: customersError } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
-  const { data: catchSessions } = trpc.catch.list.useQuery({}, { retry: 1 });
+  const { data: catchSessions } = trpc.catch.listCatchSessions.useQuery({ status: "completed" }, { retry: 1 });
   const { data: processors } = trpc.processor.list.useQuery({}, { retry: 1 });
   const createMutation = trpc.invoices.create.useMutation();
 
@@ -68,6 +68,12 @@ export default function Sales() {
       default:
         return "bg-gray-100 text-gray-800";
     }
+  };
+
+  const formatCatchSessionDisplay = (session: any) => {
+    const catchDate = new Date(session.catchDate).toISOString().split('T')[0];
+    const displayId = `FL-${session.flockId}-${catchDate}-${session.catchTeam || 'Unknown'}`;
+    return `${displayId} - ${session.totalBirdsCaught || 0} birds, ${session.totalNetWeight || 0}kg`;
   };
 
   return (
@@ -121,7 +127,7 @@ export default function Sales() {
                     <option value="">Select a catch session</option>
                     {catchSessions?.map((session: any) => (
                       <option key={session.id} value={session.id}>
-                        Session #{session.id} - {session.totalBirdsCaught || 0} birds
+                        {formatCatchSessionDisplay(session)}
                       </option>
                     ))}
                   </select>
