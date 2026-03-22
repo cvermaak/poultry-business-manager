@@ -444,7 +444,20 @@ export const listCatchSessions = protectedProcedure
     }
 
     const sessions = await query.orderBy(desc(catchSessions.catchDate));
-    return sessions;
+    
+    // Calculate sequence number for each catch session on the same day/house/flock
+    const sessionsWithSequence = sessions.map((session: any) => {
+      const sameDayHouseFlock = sessions.filter((s: any) => 
+        s.flockId === session.flockId && 
+        s.catchTeam === session.catchTeam &&
+        new Date(s.catchDate).toDateString() === new Date(session.catchDate).toDateString()
+      );
+      
+      const sequence = sameDayHouseFlock.findIndex((s: any) => s.id === session.id) + 1;
+      return { ...session, sequence };
+    });
+    
+    return sessionsWithSequence;
   });
 
 // ============================================================================
