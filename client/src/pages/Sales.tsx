@@ -72,7 +72,8 @@ export default function Sales() {
 
   const formatCatchSessionDisplay = (session: any) => {
     const catchDate = new Date(session.catchDate).toISOString().split('T')[0];
-    const displayId = `FL-${session.flockId}-${catchDate}-${session.catchTeam || 'Unknown'}`;
+    const sequence = session.sequence || 1;
+    const displayId = `FL-${session.flockId}-${catchDate}-${session.catchTeam || 'Unknown'}-CATCH#${sequence}`;
     return `${displayId} - ${session.totalBirdsCaught || 0} birds, ${session.totalNetWeight || 0}kg`;
   };
 
