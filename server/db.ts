@@ -2777,7 +2777,8 @@ export async function createInvoice(data: {
   const db = getDb();
 
   // Calculate totals
-  const exclusiveTotal = data.totalBirds * data.totalWeight * data.pricePerKgExcl;
+  // Price is per kg, so multiply weight by price (not birds)
+  const exclusiveTotal = data.totalWeight * data.pricePerKgExcl;
   const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
   const inclusiveTotal = exclusiveTotal + vatAmount;
 
