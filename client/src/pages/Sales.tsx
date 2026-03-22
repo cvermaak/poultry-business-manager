@@ -20,8 +20,8 @@ export default function Sales() {
 
   const { data: invoices, isLoading, refetch, error: invoicesError } = trpc.invoices.list.useQuery({}, { retry: 1 });
   const { data: customers, error: customersError } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
-  const { data: catchSessions } = trpc.catchSessions.list.useQuery({}, { retry: 1 });
-  const { data: processors } = trpc.processors.list.useQuery({}, { retry: 1 });
+  const { data: catchSessions } = trpc.catch.list.useQuery({}, { retry: 1 });
+  const { data: processors } = trpc.processor.list.useQuery({}, { retry: 1 });
   const createMutation = trpc.invoices.create.useMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
