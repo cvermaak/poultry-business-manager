@@ -24,8 +24,8 @@ export default function Sales() {
 
   const { data: invoices, isLoading, refetch, error: invoicesError } = trpc.invoices.list.useQuery({}, { retry: 1 });
   const { data: customers, error: customersError } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
-  const { data: catchSessions } = trpc.catch.listCatchSessions.useQuery({ status: "completed" }, { retry: 1 });
-  const { data: processors } = trpc.processor.list.useQuery({}, { retry: 1 });
+  const { data: catchSessions } = trpc.catch.listCatchSessions.useQuery({ status: "completed" as const }, { retry: 1 });
+  const { data: processors } = trpc.processor.list.useQuery(undefined, { retry: 1 });
   const createMutation = trpc.invoices.create.useMutation();
   const createMultipleMutation = trpc.invoices.createMultiple.useMutation();
 
@@ -144,11 +144,11 @@ export default function Sales() {
               Create Invoice
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Create New Invoice</DialogTitle>
             </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4 p-2">
               {/* Toggle between single and multi-select */}
               <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-md">
                 <Checkbox
@@ -299,7 +299,7 @@ export default function Sales() {
                   type="submit" 
                   disabled={createMutation.isPending || createMultipleMutation.isPending}
                 >
-                  {createMutation.isPending || createMultipleMutation.isPending ? "Creating..." : "Create Invoice"}
+                  {createMutation.isPending || createMultipleMutation.isPending ? "Generating..." : "Generate Invoice"}
                 </Button>
               </div>
             </form>
