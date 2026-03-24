@@ -2737,33 +2737,6 @@ export async function getAllActivityLogs() {
   return logs;
 }
 
-<<<<<<< HEAD
-=======
-
-// Invoice functions
-export async function getNextInvoiceNumber(): Promise<string> {
-  const db = getDb();
-  const result = await db.query.invoices
-    .findFirst({
-      orderBy: desc(invoices.id),
-      columns: { invoiceNumber: true },
-    });
-
-  if (!result || !result.invoiceNumber) {
-    return "INV0001";
-  }
-
-  // Extract number from invoiceNumber (e.g., "INV0001" -> 1)
-  const match = result.invoiceNumber.match(/\d+/);
-  if (!match) {
-    return "INV0001";
-  }
-
-  const nextNum = parseInt(match[0], 10) + 1;
-  return `INV${String(nextNum).padStart(4, "0")}`;
-}
-
->>>>>>> f8549df0a47c0636b7c568056d186084c0e8c77e
 export async function createInvoice(data: {
   invoiceNumber: string;
   customerId: number;
@@ -2777,11 +2750,7 @@ export async function createInvoice(data: {
   vatPercentage: number;
   createdBy?: number;
 }): Promise<{ insertId: number }> {
-<<<<<<< HEAD
   const db = await getDb();
-=======
-  const db = getDb();
->>>>>>> f8549df0a47c0636b7c568056d186084c0e8c77e
 
   // Calculate totals
   // Price is per kg, so multiply weight by price (not birds)
@@ -2792,7 +2761,6 @@ export async function createInvoice(data: {
   const result = await db.insert(invoices).values({
     invoiceNumber: data.invoiceNumber,
     customerId: data.customerId,
-<<<<<<< HEAD
     invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString() : data.invoiceDate,
     dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
     subtotal: Math.round(exclusiveTotal * 100),
@@ -2804,12 +2772,6 @@ export async function createInvoice(data: {
     createdBy: data.createdBy,
     catchSessionId: data.catchSessionId,
     processorId: data.processorId,
-=======
-    catchSessionId: data.catchSessionId,
-    processorId: data.processorId,
-    invoiceDate: data.invoiceDate,
-    dueDate: data.dueDate,
->>>>>>> f8549df0a47c0636b7c568056d186084c0e8c77e
     pricePerKgExcl: data.pricePerKgExcl,
     totalBirds: data.totalBirds,
     totalWeight: data.totalWeight,
@@ -2817,142 +2779,18 @@ export async function createInvoice(data: {
     vatAmount,
     inclusiveTotal,
     vatPercentage: data.vatPercentage,
-<<<<<<< HEAD
-=======
-    status: "draft",
-    createdBy: data.createdBy,
->>>>>>> f8549df0a47c0636b7c568056d186084c0e8c77e
   });
 
   return { insertId: result.insertId };
 }
 
 
-<<<<<<< HEAD
 export async function getCatchSessionById(catchSessionId: number) {
   const db = await getDb();
   const result = await db
     .select()
     .from(catchSessions)
     .where(eq(catchSessions.id, catchSessionId))
-=======
-
-// ============================================================================
-// MULTI-SELECT CATCH SESSIONS FOR INVOICES
-// ============================================================================
-
-export async function createInvoiceWithMultipleCatchSessions(data: {
-  invoiceNumber: string;
-  customerId: number;
-  catchSessionIds: number[];
-  processorId: number;
-  invoiceDate: Date;
-  dueDate: Date;
-  catchSessionPrices: { [catchSessionId: number]: number };
-  catchSessionData: { [catchSessionId: number]: { totalBirds: number; totalWeight: number } };
-  vatPercentage: number;
-  createdBy?: number;
-}): Promise<{ invoiceId: number; lineItemIds: number[] }> {
-  const db = getDb();
-
-  let totalBirds = 0;
-  let totalWeight = 0;
-  let exclusiveTotal = 0;
-
-  const firstCatchSessionId = data.catchSessionIds[0];
-
-  // Build notes with all catch session details
-  const sessionDetails = data.catchSessionIds.map(id => {
-    const price = data.catchSessionPrices[id] || 0;
-    const sessionData = data.catchSessionData[id];
-    return `Session ${id}: ${sessionData?.totalBirds || 0} birds, ${sessionData?.totalWeight || 0}kg @ R${price}/kg`;
-  }).join('; ');
-
-  const invoiceResult = await db.insert(invoices).values({
-    invoiceNumber: data.invoiceNumber,
-    customerId: data.customerId,
-    catchSessionId: firstCatchSessionId,
-    processorId: data.processorId,
-    invoiceDate: data.invoiceDate,
-    dueDate: data.dueDate,
-    totalBirds: 0,
-    totalWeight: 0,
-    exclusiveTotal: 0,
-    vatAmount: 0,
-    inclusiveTotal: 0,
-    vatPercentage: data.vatPercentage,
-    status: "draft",
-    notes: sessionDetails,
-    createdBy: data.createdBy,
-  });
-
-  const invoiceId = invoiceResult.insertId;
-  const lineItemIds: number[] = [];
-
-  // Create line items for each catch session
-  for (const catchSessionId of data.catchSessionIds) {
-    const pricePerKg = data.catchSessionPrices[catchSessionId] || 0;
-    const sessionData = data.catchSessionData[catchSessionId];
-    
-    if (!sessionData) continue;
-
-    const birds = sessionData.totalBirds;
-    const weight = sessionData.totalWeight;
-    const sessionSubtotal = weight * pricePerKg;
-    const sessionVat = sessionSubtotal * (data.vatPercentage / 100);
-    const sessionTotal = sessionSubtotal + sessionVat;
-
-    totalBirds += birds;
-    totalWeight += weight;
-    exclusiveTotal += sessionSubtotal;
-
-    try {
-      const lineItemResult = await db.insert(invoiceItems).values({
-        invoiceId,
-        description: `Catch Session FL-${catchSessionId}: ${birds} birds, ${weight}kg @ R${pricePerKg}/kg`,
-        quantity: weight,
-        unit: "kg",
-        unitPrice: Math.round(pricePerKg * 100),
-        subtotal: Math.round(sessionSubtotal * 100),
-        taxRate: data.vatPercentage,
-        taxAmount: Math.round(sessionVat * 100),
-        totalAmount: Math.round(sessionTotal * 100),
-      });
-
-      lineItemIds.push(lineItemResult.insertId);
-    } catch (error) {
-      console.error(`Error creating line item for catch session ${catchSessionId}:`, error);
-    }
-  }
-
-  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
-  const inclusiveTotal = exclusiveTotal + vatAmount;
-
-  try {
-    await db
-      .update(invoices)
-      .set({
-        totalBirds,
-        totalWeight,
-        exclusiveTotal: Math.round(exclusiveTotal * 100),
-        vatAmount: Math.round(vatAmount * 100),
-        inclusiveTotal: Math.round(inclusiveTotal * 100),
-      })
-      .where(eq(invoices.id, invoiceId));
-  } catch (error) {
-    console.error('Error updating invoice totals:', error);
-  }
-
-  return { invoiceId, lineItemIds };
-}
-
-export async function getCatchSessionById(id: number) {
-  const db = getDb();
-  const result = await db
-    .select()
-    .from(catchSessions)
-    .where(eq(catchSessions.id, id))
->>>>>>> f8549df0a47c0636b7c568056d186084c0e8c77e
     .limit(1);
   
   return result[0] || null;
