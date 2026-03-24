@@ -1660,6 +1660,56 @@ export const appRouter = router({
           throw new Error(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }),
+
+    createMultiple: protectedProcedure
+      .input(
+        z.object({
+          customerId: z.number(),
+          catchSessionIds: z.array(z.number()).min(1, "At least one catch session required"),
+          processorId: z.number(),
+          catchSessionPrices: z.record(z.string(), z.number().positive()),
+          dueDate: z.date().optional(),
+          vatPercentage: z.number().default(15),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const invoiceNumber = await db.getNextInvoiceNumber();
+        const dueDate = input.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        
+        // Fetch catch session data
+        const catchSessionData: { [key: number]: { totalBirds: number; totalWeight: number } } = {};
+        for (const sessionId of input.catchSessionIds) {
+          const session = await db.getCatchSessionById(sessionId);
+          if (session) {
+            catchSessionData[sessionId] = {
+              totalBirds: session.totalBirdsCaught || 0,
+              totalWeight: parseFloat(session.totalNetWeight?.toString() || '0'),
+            };
+          }
+        }
+        
+        // Convert catchSessionPrices keys from strings to numbers
+        const pricesMap: { [key: number]: number } = {};
+        for (const [key, value] of Object.entries(input.catchSessionPrices)) {
+          pricesMap[parseInt(key)] = value;
+        }
+        
+        const result = await db.createInvoiceWithMultipleCatchSessions({
+          invoiceNumber,
+          customerId: input.customerId,
+          catchSessionIds: input.catchSessionIds,
+          processorId: input.processorId,
+          invoiceDate: new Date(),
+          dueDate,
+          catchSessionPrices: pricesMap,
+          catchSessionData,
+          vatPercentage: input.vatPercentage,
+          createdBy: ctx.user?.id,
+        });
+        
+        await db.logUserActivity(ctx.user.id, "create_invoice_multiple", "invoice", undefined, `Created invoice with ${input.catchSessionIds.length} catch sessions: ${invoiceNumber}`);
+        return { success: true, invoiceId: result.invoiceId, invoiceNumber, lineItemIds: result.lineItemIds };
+      }),
   }),
 
   // ============================================================================
