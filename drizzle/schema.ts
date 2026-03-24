@@ -549,6 +549,7 @@ export const inventoryTransactions = mysqlTable("inventory_transactions", {
 export const invoiceItems = mysqlTable("invoice_items", {
 	id: int().autoincrement().notNull(),
 	invoiceId: int().notNull().references(() => invoices.id),
+	catchSessionId: int().references(() => catchSessions.id),
 	description: varchar({ length: 500 }).notNull(),
 	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
 	unit: varchar({ length: 50 }).notNull(),
@@ -557,10 +558,12 @@ export const invoiceItems = mysqlTable("invoice_items", {
 	taxRate: decimal({ precision: 5, scale: 2 }).default('15.00'),
 	taxAmount: int().notNull(),
 	totalAmount: int().notNull(),
+	pricePerKgExcl: decimal({ precision: 10, scale: 2 }),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 },
 (table) => [
 	index("idx_invoice_items_invoice_id").on(table.invoiceId),
+	index("idx_invoice_items_catch_session_id").on(table.catchSessionId),
 ]);
 
 export const invoices = mysqlTable("invoices", {
