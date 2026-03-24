@@ -14,7 +14,7 @@ export const catchBatches = mysqlTable("catch_batches", {
 	palletWeight: decimal({ precision: 8, scale: 3 }),
 	totalNetWeight: decimal({ precision: 10, scale: 3 }).notNull(),
 	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
-	recordedAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	recordedAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
 	notes: text(),
 },
 (table) => [
@@ -54,7 +54,7 @@ export const catchCrates = mysqlTable("catch_crates", {
 	grossWeight: decimal({ precision: 8, scale: 3 }).notNull(),
 	netWeight: decimal({ precision: 8, scale: 3 }).notNull(),
 	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
-	recordedAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	recordedAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
 	notes: text(),
 },
 (table) => [
@@ -580,6 +580,15 @@ export const invoices = mysqlTable("invoices", {
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	createdBy: int().references(() => users.id),
+	catchSessionId: int().references(() => catchSessions.id),
+	processorId: int().references(() => processors.id),
+	pricePerKgExcl: decimal({ precision: 10, scale: 2 }),
+	totalBirds: int(),
+	totalWeight: decimal({ precision: 10, scale: 3 }),
+	exclusiveTotal: decimal({ precision: 15, scale: 2 }),
+	vatAmount: decimal({ precision: 15, scale: 2 }),
+	inclusiveTotal: decimal({ precision: 15, scale: 2 }),
+	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),

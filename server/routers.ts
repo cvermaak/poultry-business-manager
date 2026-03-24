@@ -1,7 +1,9 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { serialize } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { generateJWT } from "./_core/jwt";
 import { systemRouter } from "./_core/systemRouter";
 import { inventoryRouter } from "./inventory-router";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -9,6 +11,7 @@ import * as db from "./db";
 import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, createFlockVaccinationSchedule } from "./db-health-helpers";
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
+import { sendPasswordResetEmail } from "./_core/email";
 import { sdk } from "./_core/sdk";
 // import { slaughterRouter } from "./procedures/slaughter";
 import { harvestRouter } from "./procedures/harvest";
@@ -18,6 +21,11 @@ import { catchRouter } from "./procedures/catch";
 import { densityRouter } from "./procedures/density";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
+// Helper to serialize cookie for Set-Cookie header
+function serializeCookie(name: string, value: string, options: any) {
+  return serialize(name, value, options);
+}
 
 // Admin-only procedure
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -124,7 +132,7 @@ export const appRouter = router({
     
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(COOKIE_NAME, cookieOptions);
       return {
         success: true,
       } as const;
@@ -149,7 +157,7 @@ export const appRouter = router({
         username: z.string().min(3, "Username must be at least 3 characters").max(50),
         email: z.string().email("Invalid email address"),
         name: z.string().min(1, "Name is required"),
-        role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker"]),
+        role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker", "chicken_house_operator"]),
         temporaryPassword: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -191,7 +199,7 @@ export const appRouter = router({
       .input(
         z.object({
           userId: z.number(),
-          role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker"]),
+          role: z.enum(["admin", "farm_manager", "accountant", "sales_staff", "production_worker", "chicken_house_operator"]),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -1211,10 +1219,11 @@ export const appRouter = router({
           status: z.enum(["pending", "completed", "dismissed"]),
           completedBy: z.number().optional(),
           actionNotes: z.string().optional(),
+          completedAt: z.date().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
-        return await db.updateReminderStatus(input.id, input.status, ctx.user?.id, input.actionNotes);
+        return await db.updateReminderStatus(input.id, input.status, ctx.user?.id, input.actionNotes, input.completedAt);
       }),
 
     delete: adminProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
@@ -1544,6 +1553,114 @@ export const appRouter = router({
   harvest: harvestRouter,
   processor: processorRouter,
   harvestAnalytics: harvestAnalyticsRouter,
+
+  // ============================================================================
+  // INVOICES
+  // ============================================================================
+  invoices: router({
+    create: protectedProcedure
+      .input(z.object({
+        customerId: z.number(),
+        catchSessionId: z.number(),
+        processorId: z.number(),
+        pricePerKgExcl: z.number().positive(),
+        invoiceDate: z.date().optional(),
+        dueDate: z.date().optional(),
+        totalBirds: z.number().positive().optional(),
+        totalWeight: z.number().positive().optional(),
+        vatPercentage: z.number().default(15),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        // Get catch session details to fill in missing fields
+        const catchSession = await db.getCatchSessionById(input.catchSessionId);
+        if (!catchSession) {
+          throw new Error('Catch session not found');
+        }
+
+        const invoiceNumber = `INV-${Date.now()}`;
+        const invoiceDate = input.invoiceDate || new Date();
+        const dueDate = input.dueDate || new Date(invoiceDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+        const totalBirds = input.totalBirds || (catchSession as any).totalBirdsCaught || 0;
+        const totalWeight = input.totalWeight || (catchSession as any).totalNetWeight || 0;
+
+        const result = await db.createInvoice({
+          invoiceNumber,
+          customerId: input.customerId,
+          catchSessionId: input.catchSessionId,
+          processorId: input.processorId,
+          invoiceDate,
+          dueDate,
+          pricePerKgExcl: input.pricePerKgExcl,
+          totalBirds,
+          totalWeight,
+          vatPercentage: input.vatPercentage,
+          createdBy: ctx.user.id,
+        });
+        return result;
+      }),
+
+    list: protectedProcedure
+      .input(z.object({
+        customerId: z.number().optional(),
+        status: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return await db.listInvoices(input);
+      }),
+
+    getById: protectedProcedure
+      .input(z.number())
+      .query(async ({ input }) => {
+        return await db.getInvoiceById(input);
+      }),
+
+    getItems: protectedProcedure
+      .input(z.number())
+      .query(async ({ input }) => {
+        return await db.getInvoiceItems(input);
+      }),
+
+    generatePDF: protectedProcedure
+      .input(z.number())
+      .mutation(async ({ input: invoiceId }) => {
+        try {
+          const { generateInvoicePDF } = await import('./pdf-generator');
+          const invoice = await db.getInvoiceById(invoiceId);
+          
+          if (!invoice) {
+            throw new Error('Invoice not found');
+          }
+
+          const customer = await db.getCustomerById(invoice.customerId);
+          
+          const pdfBuffer = await generateInvoicePDF({
+            invoiceNumber: invoice.invoiceNumber,
+            invoiceDate: new Date(invoice.invoiceDate),
+            dueDate: new Date(invoice.dueDate),
+            customerName: customer?.name || 'Unknown Customer',
+            customerVATNo: customer?.vatNumber,
+            customerRegNo: customer?.registrationNumber,
+            customerAddress: customer?.address,
+            totalBirds: invoice.totalBirds || 0,
+            totalWeight: parseFloat(invoice.totalWeight?.toString() || '0'),
+            pricePerKgExcl: parseFloat(invoice.pricePerKgExcl?.toString() || '0'),
+            exclusiveTotal: parseFloat(invoice.exclusiveTotal?.toString() || '0'),
+            vatAmount: parseFloat(invoice.vatAmount?.toString() || '0'),
+            inclusiveTotal: parseFloat(invoice.inclusiveTotal?.toString() || '0'),
+            vatPercentage: invoice.vatPercentage || 15,
+          });
+
+          return {
+            success: true,
+            pdfBuffer: pdfBuffer.toString('base64'),
+            filename: `invoice-${invoice.invoiceNumber}.pdf`,
+          };
+        } catch (error) {
+          console.error('Error generating PDF:', error);
+          throw new Error(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }),
+  }),
 
   // ============================================================================
   // ANALYTICS & DASHBOARD

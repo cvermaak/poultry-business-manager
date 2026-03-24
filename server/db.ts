@@ -213,7 +213,7 @@ export async function createEmailUser(data: {
   email: string;
   name: string;
   passwordHash: string;
-  role: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
+  role: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
   createdBy: number;
 }) {
   const db = await getDb();
@@ -227,7 +227,7 @@ export async function createEmailUser(data: {
     loginMethod: "email",
     role: data.role,
     isActive: true,
-    mustChangePassword: true,
+    mustChangePassword: false,
     createdBy: data.createdBy,
   });
 
@@ -282,7 +282,7 @@ export async function updateUser(userId: number, data: {
   name?: string;
   email?: string;
   username?: string;
-  role?: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker";
+  role?: "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
 }) {
   const db = await getDb();
   if (!db) return false;
@@ -1769,7 +1769,8 @@ export async function updateReminderStatus(
   id: number,
   status: "pending" | "completed" | "dismissed",
   completedBy?: number,
-  actionNotes?: string
+  actionNotes?: string,
+  completedAt?: Date
 ) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -1777,14 +1778,67 @@ export async function updateReminderStatus(
   const updateData: any = { status };
   if (completedBy) {
     updateData.completedBy = completedBy;
-    updateData.completedAt = new Date();
+    // Use provided completedAt timestamp or generate current time
+    const timestamp = completedAt || new Date();
+    updateData.completedAt = timestamp.toISOString().slice(0, 19).replace('T', ' ');
   }
   if (actionNotes) {
     updateData.actionNotes = actionNotes;
   }
 
-  await db.update(reminders).set(updateData).where(eq(reminders.id, id));
-  return { success: true };
+  try {
+    console.log('Updating reminder with data:', { id, updateData, completedBy, completedAt });
+    
+    // Verify user exists if completedBy is provided
+    if (completedBy && db.query) {
+      try {
+        const user = await db.query.users.findFirst({
+          where: eq(users.id, completedBy),
+        });
+        if (!user) {
+          console.error('User not found for completedBy:', { completedBy });
+          throw new Error(`User with ID ${completedBy} not found`);
+        }
+        console.log('User verified for completedBy:', { userId: completedBy, userName: user.name });
+      } catch (queryError) {
+        console.warn('Could not verify user existence:', queryError);
+        // Continue anyway - the foreign key constraint will catch it if user doesn't exist
+      }
+    }
+    
+    // Verify reminder exists if db.query is available
+    if (db.query) {
+      try {
+        const reminder = await db.query.reminders.findFirst({
+          where: eq(reminders.id, id),
+        });
+        if (!reminder) {
+          throw new Error(`Reminder with ID ${id} not found`);
+        }
+        console.log('Reminder found:', { id, currentStatus: reminder.status });
+      } catch (queryError) {
+        console.warn('Could not verify reminder existence:', queryError);
+        // Continue anyway - the update will fail if reminder doesn't exist
+      }
+    }
+    
+    await db.update(reminders).set(updateData).where(eq(reminders.id, id));
+    console.log('Reminder updated successfully:', { id, newStatus: updateData.status });
+    return { success: true };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorCode = (error as any)?.code || 'UNKNOWN';
+    const errorSql = (error as any)?.sql || 'N/A';
+    console.error('Error updating reminder:', { 
+      id, 
+      updateData, 
+      error: errorMsg, 
+      errorCode,
+      errorSql,
+      fullError: error 
+    });
+    throw new Error(`Failed to update reminder: ${errorMsg}`);
+  }
 }
 
 export async function deleteReminder(id: number) {
@@ -2681,4 +2735,63 @@ export async function getAllActivityLogs() {
     .limit(1000); // Limit to last 1000 logs for performance
 
   return logs;
+}
+
+export async function createInvoice(data: {
+  invoiceNumber: string;
+  customerId: number;
+  catchSessionId: number;
+  processorId: number;
+  invoiceDate: Date;
+  dueDate: Date;
+  pricePerKgExcl: number;
+  totalBirds: number;
+  totalWeight: number;
+  vatPercentage: number;
+  createdBy?: number;
+}): Promise<{ insertId: number }> {
+  const db = await getDb();
+
+  // Calculate totals
+  // Price is per kg, so multiply weight by price (not birds)
+  const exclusiveTotal = data.totalWeight * data.pricePerKgExcl;
+  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
+  const inclusiveTotal = exclusiveTotal + vatAmount;
+
+  const result = await db.insert(invoices).values({
+    invoiceNumber: data.invoiceNumber,
+    customerId: data.customerId,
+    invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString() : data.invoiceDate,
+    dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
+    subtotal: Math.round(exclusiveTotal * 100),
+    taxAmount: Math.round(vatAmount * 100),
+    totalAmount: Math.round(inclusiveTotal * 100),
+    paidAmount: 0,
+    balanceDue: Math.round(inclusiveTotal * 100),
+    status: "draft",
+    createdBy: data.createdBy,
+    catchSessionId: data.catchSessionId,
+    processorId: data.processorId,
+    pricePerKgExcl: data.pricePerKgExcl,
+    totalBirds: data.totalBirds,
+    totalWeight: data.totalWeight,
+    exclusiveTotal,
+    vatAmount,
+    inclusiveTotal,
+    vatPercentage: data.vatPercentage,
+  });
+
+  return { insertId: result.insertId };
+}
+
+
+export async function getCatchSessionById(catchSessionId: number) {
+  const db = await getDb();
+  const result = await db
+    .select()
+    .from(catchSessions)
+    .where(eq(catchSessions.id, catchSessionId))
+    .limit(1);
+  
+  return result[0] || null;
 }
