@@ -44,16 +44,65 @@ import {
   harvestRecords,
   processors,
   catchSessions,
+  companySettings,
 } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
+
+// Create schema object for Drizzle query helpers
+const schema = {
+  users,
+  houses,
+  flocks,
+  flockDailyRecords,
+  vaccinationSchedules,
+  healthRecords,
+  mortalityRecords,
+  feedFormulations,
+  feedBatches,
+  rawMaterials,
+  rawMaterialTransactions,
+  qualityControlRecords,
+  customers,
+  customerAddresses,
+  salesOrders,
+  salesOrderItems,
+  invoices,
+  invoiceItems,
+  payments,
+  paymentAllocations,
+  suppliers,
+  itemTemplates,
+  procurementSchedules,
+  procurementOrders,
+  procurementOrderItems,
+  chartOfAccounts,
+  generalLedgerEntries,
+  inventoryItems,
+  inventoryLocations,
+  inventoryTransactions,
+  documents,
+  userActivityLogs,
+  reminders,
+  vaccines,
+  stressPacks,
+  flockVaccinationSchedules,
+  flockStressPackSchedules,
+  reminderTemplates,
+  healthProtocolTemplates,
+  harvestRecords,
+  processors,
+  catchSessions,
+  companySettings,
+};
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _db = drizzle(process.env.DATABASE_URL, { schema, mode: 'default' });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -866,7 +915,10 @@ export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  console.log(`[DEBUG] getInvoiceItems called with invoiceId: ${invoiceId} (type: ${typeof invoiceId})`);
+  const result = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  console.log(`[DEBUG] getInvoiceItems result:`, result);
+  return result;
 }
 
 export async function listPayments(customerId?: number) {
@@ -2781,7 +2833,34 @@ export async function createInvoice(data: {
     vatPercentage: data.vatPercentage,
   });
 
-  return { insertId: result.insertId };
+  // Create a line item for the invoice
+  const subtotal = Math.round(exclusiveTotal * 100);
+  const taxAmount = Math.round(vatAmount * 100);
+  const totalAmount = Math.round(inclusiveTotal * 100);
+  
+  // Extract the invoice ID from the insert result
+  const invoiceId = (result as any)[0]?.insertId ?? (result as any).insertId;
+  console.log(`[DEBUG] Invoice created with ID: ${invoiceId}`);
+  
+  try {
+    console.log(`[DEBUG] Creating line item for invoice ${invoiceId}`);
+    const lineItemResult = await db.insert(invoiceItems).values({
+      invoiceId: invoiceId,
+      description: `${data.totalBirds} Broiler Chickens @ R${data.pricePerKgExcl} per kg`,
+      quantity: data.totalWeight,
+      unit: 'kg',
+      unitPrice: Math.round(data.pricePerKgExcl * 100),
+      subtotal: subtotal,
+      taxRate: data.vatPercentage,
+      taxAmount: taxAmount,
+      totalAmount: totalAmount,
+    });
+    console.log(`[DEBUG] Line item created successfully`);
+  } catch (error) {
+    console.error('[DEBUG] Error creating line item:', error);
+  }
+
+  return { insertId: invoiceId };
 }
 
 
@@ -2794,4 +2873,39 @@ export async function getCatchSessionById(catchSessionId: number) {
     .limit(1);
   
   return result[0] || null;
+}
+
+
+// ============================================================================
+// COMPANY SETTINGS
+// ============================================================================
+
+export async function getCompanySettings() {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.query.companySettings.findFirst();
+  return result || null;
+}
+
+export async function updateCompanySettings(data: any, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const existing = await db.query.companySettings.findFirst();
+  
+  if (existing) {
+    return await db
+      .update(companySettings)
+      .set({
+        ...data,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(companySettings.id, existing.id));
+  } else {
+    return await db.insert(companySettings).values({
+      ...data,
+      createdBy: userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }
 }

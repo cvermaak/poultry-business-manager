@@ -52,10 +52,12 @@ const menuItems: MenuItem[] = [
   { icon: Users, label: "Customers", path: "/customers", roles: ["admin", "sales_staff"] },
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
+  { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"] },
   { icon: DollarSign, label: "Finance", path: "/finance", roles: ["admin", "accountant"] },
   { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"] },
   { icon: Settings, label: "User Management", path: "/user-management", roles: ["admin"] },
+  { icon: Settings, label: "Settings", path: "/settings/company", roles: ["admin"] },
 ];
 
 const canAccessMenuItem = (item: MenuItem, userRole: string | undefined): boolean => {
