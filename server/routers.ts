@@ -1070,6 +1070,7 @@ export const appRouter = router({
         z.object({
           customerNumber: z.string().min(1),
           name: z.string().min(1),
+          companyName: z.string().optional(),
           contactPerson: z.string().optional(),
           email: z.string().email().optional(),
           phone: z.string().optional(),
@@ -1078,6 +1079,7 @@ export const appRouter = router({
           creditLimit: z.number().int().default(0),
           paymentTerms: z.string().default("cash"),
           taxNumber: z.string().optional(),
+          vatNumber: z.string().optional(),
           notes: z.string().optional(),
         })
       )
@@ -1557,6 +1559,35 @@ export const appRouter = router({
   // ============================================================================
   // INVOICES
   // ============================================================================
+  // ============================================================================
+  // COMPANY SETTINGS
+  // ============================================================================
+  companySettings: router({
+    get: protectedProcedure.query(async () => {
+      return await db.getCompanySettings();
+    }),
+
+    update: adminProcedure
+      .input(z.object({
+        companyName: z.string().optional(),
+        vatNumber: z.string().optional(),
+        registrationNumber: z.string().optional(),
+        address: z.string().optional(),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        website: z.string().optional(),
+        bankName: z.string().optional(),
+        branchCode: z.string().optional(),
+        accountName: z.string().optional(),
+        accountNumber: z.string().optional(),
+        accountReference: z.string().optional(),
+        logoUrl: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        return await db.updateCompanySettings(input, ctx.user.id);
+      }),
+  }),
+
   invoices: router({
     create: protectedProcedure
       .input(z.object({
@@ -1571,32 +1602,39 @@ export const appRouter = router({
         vatPercentage: z.number().default(15),
       }))
       .mutation(async ({ input, ctx }) => {
-        // Get catch session details to fill in missing fields
-        const catchSession = await db.getCatchSessionById(input.catchSessionId);
-        if (!catchSession) {
-          throw new Error('Catch session not found');
+        try {
+          // Get catch session details to fill in missing fields
+          const catchSession = await db.getCatchSessionById(input.catchSessionId);
+          if (!catchSession) {
+            throw new Error('Catch session not found');
+          }
+
+          const invoiceNumber = `INV-${Date.now()}`;
+          const invoiceDate = input.invoiceDate || new Date();
+          const dueDate = input.dueDate || new Date(invoiceDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+          const totalBirds = input.totalBirds || (catchSession as any).totalBirdsCaught || 0;
+          const totalWeight = input.totalWeight || (catchSession as any).totalNetWeight || 0;
+
+          console.log('[INVOICE CREATE] Creating invoice with:', { customerId: input.customerId, totalBirds, totalWeight });
+          const result = await db.createInvoice({
+            invoiceNumber,
+            customerId: input.customerId,
+            catchSessionId: input.catchSessionId,
+            processorId: input.processorId,
+            invoiceDate,
+            dueDate,
+            pricePerKgExcl: input.pricePerKgExcl,
+            totalBirds,
+            totalWeight,
+            vatPercentage: input.vatPercentage,
+            createdBy: ctx.user.id,
+          });
+          console.log('[INVOICE CREATE] Invoice created successfully:', result);
+          return result;
+        } catch (error) {
+          console.error('[INVOICE CREATE] Error creating invoice:', error);
+          throw error;
         }
-
-        const invoiceNumber = `INV-${Date.now()}`;
-        const invoiceDate = input.invoiceDate || new Date();
-        const dueDate = input.dueDate || new Date(invoiceDate.getTime() + 30 * 24 * 60 * 60 * 1000);
-        const totalBirds = input.totalBirds || (catchSession as any).totalBirdsCaught || 0;
-        const totalWeight = input.totalWeight || (catchSession as any).totalNetWeight || 0;
-
-        const result = await db.createInvoice({
-          invoiceNumber,
-          customerId: input.customerId,
-          catchSessionId: input.catchSessionId,
-          processorId: input.processorId,
-          invoiceDate,
-          dueDate,
-          pricePerKgExcl: input.pricePerKgExcl,
-          totalBirds,
-          totalWeight,
-          vatPercentage: input.vatPercentage,
-          createdBy: ctx.user.id,
-        });
-        return result;
       }),
 
     list: protectedProcedure
@@ -1624,7 +1662,7 @@ export const appRouter = router({
       .input(z.number())
       .mutation(async ({ input: invoiceId }) => {
         try {
-          const { generateInvoicePDF } = await import('./pdf-generator');
+          const { generatePremiumInvoicePDF } = await import('./pdf-generator-premium');
           const invoice = await db.getInvoiceById(invoiceId);
           
           if (!invoice) {
@@ -1632,22 +1670,52 @@ export const appRouter = router({
           }
 
           const customer = await db.getCustomerById(invoice.customerId);
+          const invoiceLineItems = await db.getInvoiceItems(invoiceId);
+          const companySettings = await db.getCompanySettings();
+          console.log('Invoice line items from DB:', invoiceLineItems);
           
-          const pdfBuffer = await generateInvoicePDF({
+          // Transform line items to match PDF generator format
+          const lineItems = invoiceLineItems.map(item => {
+            // unitPrice is stored in cents, convert to decimal by dividing by 100
+            const unitPriceDecimal = parseFloat(item.unitPrice?.toString() || '0') / 100;
+            return {
+              description: item.description || 'Product',
+              quantity: parseFloat(item.quantity?.toString() || '0'),
+              pricePerUnit: unitPriceDecimal,
+              discount: undefined,
+              vatPercentage: item.taxRate ? parseFloat(item.taxRate.toString()) : 15,
+            };
+          });
+          console.log('Transformed line items:', lineItems);
+          
+          // Prepare bank details from company settings
+          const bankDetails = companySettings ? {
+            bank: companySettings.bankName || '',
+            branchCode: companySettings.branchCode || '',
+            accountName: companySettings.accountName || '',
+            accountNumber: companySettings.accountNumber || '',
+          } : undefined;
+          
+          const pdfBuffer = await generatePremiumInvoicePDF({
             invoiceNumber: invoice.invoiceNumber,
             invoiceDate: new Date(invoice.invoiceDate),
             dueDate: new Date(invoice.dueDate),
             customerName: customer?.name || 'Unknown Customer',
-            customerVATNo: customer?.vatNumber,
-            customerRegNo: customer?.registrationNumber,
-            customerAddress: customer?.address,
-            totalBirds: invoice.totalBirds || 0,
-            totalWeight: parseFloat(invoice.totalWeight?.toString() || '0'),
-            pricePerKgExcl: parseFloat(invoice.pricePerKgExcl?.toString() || '0'),
-            exclusiveTotal: parseFloat(invoice.exclusiveTotal?.toString() || '0'),
-            vatAmount: parseFloat(invoice.vatAmount?.toString() || '0'),
-            inclusiveTotal: parseFloat(invoice.inclusiveTotal?.toString() || '0'),
-            vatPercentage: invoice.vatPercentage || 15,
+            customerVATNo: customer?.vatNumber || undefined,
+            customerRegNo: customer?.taxNumber || undefined,
+            customerAddress: customer?.companyName || undefined,
+            lineItems: lineItems,
+            totalExclusive: parseFloat(invoice.exclusiveTotal?.toString() || '0'),
+            totalVAT: parseFloat(invoice.vatAmount?.toString() || '0'),
+            totalInclusive: parseFloat(invoice.inclusiveTotal?.toString() || '0'),
+            bankDetails: bankDetails,
+            companyName: companySettings?.companyName,
+            companyVATNo: companySettings?.vatNumber,
+            companyRegNo: companySettings?.registrationNumber,
+            companyAddress: companySettings?.address,
+            companyPhone: companySettings?.phone,
+            companyEmail: companySettings?.email,
+            companyWebsite: companySettings?.website,
           });
 
           return {
@@ -1659,56 +1727,6 @@ export const appRouter = router({
           console.error('Error generating PDF:', error);
           throw new Error(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
-      }),
-
-    createMultiple: protectedProcedure
-      .input(
-        z.object({
-          customerId: z.number(),
-          catchSessionIds: z.array(z.number()).min(1, "At least one catch session required"),
-          processorId: z.number(),
-          catchSessionPrices: z.record(z.string(), z.number().positive()),
-          dueDate: z.date().optional(),
-          vatPercentage: z.number().default(15),
-        })
-      )
-      .mutation(async ({ input, ctx }) => {
-        const invoiceNumber = await db.getNextInvoiceNumber();
-        const dueDate = input.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        
-        // Fetch catch session data
-        const catchSessionData: { [key: number]: { totalBirds: number; totalWeight: number } } = {};
-        for (const sessionId of input.catchSessionIds) {
-          const session = await db.getCatchSessionById(sessionId);
-          if (session) {
-            catchSessionData[sessionId] = {
-              totalBirds: session.totalBirdsCaught || 0,
-              totalWeight: parseFloat(session.totalNetWeight?.toString() || '0'),
-            };
-          }
-        }
-        
-        // Convert catchSessionPrices keys from strings to numbers
-        const pricesMap: { [key: number]: number } = {};
-        for (const [key, value] of Object.entries(input.catchSessionPrices)) {
-          pricesMap[parseInt(key)] = value;
-        }
-        
-        const result = await db.createInvoiceWithMultipleCatchSessions({
-          invoiceNumber,
-          customerId: input.customerId,
-          catchSessionIds: input.catchSessionIds,
-          processorId: input.processorId,
-          invoiceDate: new Date(),
-          dueDate,
-          catchSessionPrices: pricesMap,
-          catchSessionData,
-          vatPercentage: input.vatPercentage,
-          createdBy: ctx.user?.id,
-        });
-        
-        await db.logUserActivity(ctx.user.id, "create_invoice_multiple", "invoice", undefined, `Created invoice with ${input.catchSessionIds.length} catch sessions: ${invoiceNumber}`);
-        return { success: true, invoiceId: result.invoiceId, invoiceNumber, lineItemIds: result.lineItemIds };
       }),
   }),
 
