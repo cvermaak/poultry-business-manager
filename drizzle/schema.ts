@@ -14,7 +14,7 @@ export const catchBatches = mysqlTable("catch_batches", {
 	palletWeight: decimal({ precision: 8, scale: 3 }),
 	totalNetWeight: decimal({ precision: 10, scale: 3 }).notNull(),
 	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
-	recordedAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
+		recordedAt: timestamp({ mode: 'string' }).notNull(),
 	notes: text(),
 },
 (table) => [
@@ -54,7 +54,7 @@ export const catchCrates = mysqlTable("catch_crates", {
 	grossWeight: decimal({ precision: 8, scale: 3 }).notNull(),
 	netWeight: decimal({ precision: 8, scale: 3 }).notNull(),
 	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
-	recordedAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
+	recordedAt: timestamp({ mode: 'string' }).notNull(),
 	notes: text(),
 },
 (table) => [
@@ -149,24 +149,26 @@ export const customerAddresses = mysqlTable("customer_addresses", {
 	index("idx_customer_addresses_customer_id").on(table.customerId),
 ]);
 
-export const customers = mysqlTable("customers", {
-	id: int().autoincrement().notNull(),
-	customerNumber: varchar({ length: 50 }).notNull(),
-	name: varchar({ length: 200 }).notNull(),
-	contactPerson: varchar({ length: 200 }),
-	email: varchar({ length: 320 }),
-	phone: varchar({ length: 50 }),
-	whatsapp: varchar({ length: 50 }),
-	segment: mysqlEnum(['wholesale','retail','contract']).default('retail').notNull(),
-	creditLimit: int().default(0),
-	paymentTerms: varchar({ length: 100 }).default('cash'),
-	taxNumber: varchar({ length: 100 }),
-	isActive: tinyint().default(1).notNull(),
-	notes: text(),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-	createdBy: int().references(() => users.id),
-},
+	export const customers = mysqlTable("customers", {
+		id: int().autoincrement().notNull(),
+		customerNumber: varchar({ length: 50 }).notNull(),
+		name: varchar({ length: 200 }).notNull(),
+		companyName: varchar({ length: 200 }),
+		contactPerson: varchar({ length: 200 }),
+		email: varchar({ length: 320 }),
+		phone: varchar({ length: 50 }),
+		whatsapp: varchar({ length: 50 }),
+		segment: mysqlEnum(['wholesale','retail','contract']).default('retail').notNull(),
+		creditLimit: int().default(0),
+		paymentTerms: varchar({ length: 100 }).default('cash'),
+		taxNumber: varchar({ length: 100 }),
+		vatNumber: varchar({ length: 100 }),
+		isActive: tinyint().default(1).notNull(),
+		notes: text(),
+		createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+		updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+		createdBy: int().references(() => users.id),
+	},
 (table) => [
 	index("customers_customerNumber_unique").on(table.customerNumber),
 ]);
@@ -549,7 +551,6 @@ export const inventoryTransactions = mysqlTable("inventory_transactions", {
 export const invoiceItems = mysqlTable("invoice_items", {
 	id: int().autoincrement().notNull(),
 	invoiceId: int().notNull().references(() => invoices.id),
-	catchSessionId: int().references(() => catchSessions.id),
 	description: varchar({ length: 500 }).notNull(),
 	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
 	unit: varchar({ length: 50 }).notNull(),
@@ -558,12 +559,10 @@ export const invoiceItems = mysqlTable("invoice_items", {
 	taxRate: decimal({ precision: 5, scale: 2 }).default('15.00'),
 	taxAmount: int().notNull(),
 	totalAmount: int().notNull(),
-	pricePerKgExcl: decimal({ precision: 10, scale: 2 }),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 },
 (table) => [
 	index("idx_invoice_items_invoice_id").on(table.invoiceId),
-	index("idx_invoice_items_catch_session_id").on(table.catchSessionId),
 ]);
 
 export const invoices = mysqlTable("invoices", {
@@ -587,11 +586,11 @@ export const invoices = mysqlTable("invoices", {
 	processorId: int().references(() => processors.id),
 	pricePerKgExcl: decimal({ precision: 10, scale: 2 }),
 	totalBirds: int(),
-	totalWeight: decimal({ precision: 10, scale: 3 }),
-	exclusiveTotal: decimal({ precision: 15, scale: 2 }),
-	vatAmount: decimal({ precision: 15, scale: 2 }),
-	inclusiveTotal: decimal({ precision: 15, scale: 2 }),
-	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
+		totalWeight: decimal({ precision: 10, scale: 2 }),
+		vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
+		exclusiveTotal: decimal({ precision: 15, scale: 2 }),
+		vatAmount: decimal({ precision: 15, scale: 2 }),
+		inclusiveTotal: decimal({ precision: 15, scale: 2 }),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
@@ -1005,3 +1004,44 @@ export const vaccines = mysqlTable("vaccines", {
 	storageTemperature: varchar("storage_temperature", { length: 100 }),
 	shelfLifeDays: int("shelf_life_days"),
 });
+
+
+export const companySettings = mysqlTable("company_settings", {
+	id: int().autoincrement().notNull(),
+	companyName: varchar({ length: 255 }).notNull(),
+	vatNumber: varchar({ length: 50 }).notNull(),
+	registrationNumber: varchar({ length: 50 }),
+	address: text().notNull(),
+	phone: varchar({ length: 20 }),
+	email: varchar({ length: 100 }),
+	website: varchar({ length: 255 }),
+	bankName: varchar({ length: 100 }),
+	branchCode: varchar({ length: 20 }),
+	accountName: varchar({ length: 100 }),
+	accountNumber: varchar({ length: 50 }),
+	accountReference: varchar({ length: 100 }),
+	logoUrl: varchar({ length: 500 }),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_company_settings_id").on(table.id),
+]);
+
+export const invoiceLineItems = mysqlTable("invoice_line_items", {
+	id: int().autoincrement().notNull(),
+	invoiceId: int().notNull().references(() => invoices.id),
+	description: varchar({ length: 500 }).notNull(),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	pricePerUnit: decimal({ precision: 10, scale: 2 }).notNull(),
+	discount: decimal({ precision: 5, scale: 2 }).default('0.00').notNull(),
+	discountAmount: decimal({ precision: 10, scale: 2 }).default('0.00').notNull(),
+	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00').notNull(),
+	amount: decimal({ precision: 15, scale: 2 }).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_invoice_line_items_invoice_id").on(table.invoiceId),
+]);
