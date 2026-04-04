@@ -2897,7 +2897,7 @@ export async function updateCompanySettings(data: any, userId: number) {
       .update(companySettings)
       .set({
         ...data,
-        updatedAt: new Date().toISOString(),
+        
       })
       .where(eq(companySettings.id, existing.id));
   } else {
