@@ -20,6 +20,7 @@ import CrateTypes from "./pages/CrateTypes";
 import CatchOperations from "./pages/CatchOperations";
 import SlaughterManagement from "./pages/SlaughterManagement";
 import Customers from "./pages/Customers";
+import Sales from "./pages/Sales";
 import Suppliers from "./pages/Suppliers";
 import Users from "./pages/Users";
 import UserManagement from "./pages/UserManagement";
@@ -27,8 +28,9 @@ import HealthManagement from "./pages/HealthManagement";
 import ReminderTemplates from "./pages/ReminderTemplates";
 import ChangePassword from "./pages/ChangePassword";
 import LoginPage from "./pages/Login";
-import Sales from "./pages/Sales";
-import Finance from "./pages/Finance";
+import { Invoices } from "./pages/Invoices";
+import { CreateInvoice } from "./pages/CreateInvoice";
+import { CompanySettings } from "./pages/CompanySettings";
 
 function Router() {
   return (
@@ -100,6 +102,24 @@ function Router() {
         </DashboardLayout>
       </Route>
 
+      <Route path="/sales">
+        <DashboardLayout>
+          <Sales />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/sales/invoices">
+        <DashboardLayout>
+          <Invoices />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/sales/invoices/create">
+        <DashboardLayout>
+          <CreateInvoice />
+        </DashboardLayout>
+      </Route>
+
       <Route path="/suppliers">
         <DashboardLayout>
           <Suppliers />
@@ -142,15 +162,9 @@ function Router() {
         </DashboardLayout>
       </Route>
 
-      <Route path="/sales">
+      <Route path="/settings/company">
         <DashboardLayout>
-          <Sales />
-        </DashboardLayout>
-      </Route>
-
-      <Route path="/finance">
-        <DashboardLayout>
-          <Finance />
+          <CompanySettings />
         </DashboardLayout>
       </Route>
 
