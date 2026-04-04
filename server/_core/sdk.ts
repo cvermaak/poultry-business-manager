@@ -27,11 +27,21 @@ export const sdk = {
   },
 
   // 🔑 Used by login to create cookie session
-  async createSessionToken(userId: number) {
+  async createSessionToken(userIdOrKey: number | string, options?: { name?: string; expiresInMs?: number }) {
+    // Support "email:<id>" string format used by the login mutation
+    const userId =
+      typeof userIdOrKey === "string" && userIdOrKey.startsWith("email:")
+        ? parseInt(userIdOrKey.slice("email:".length), 10)
+        : (userIdOrKey as number);
+
+    const expiresIn = options?.expiresInMs
+      ? Math.floor(options.expiresInMs / 1000) // jsonwebtoken accepts seconds when a number is given
+      : "30d";
+
     return sign(
-      { userId },
+      { userId, ...(options?.name !== undefined ? { name: options.name } : {}) },
       process.env.JWT_SECRET!,
-      { expiresIn: "30d" }
+      { expiresIn }
     );
   }
 };
