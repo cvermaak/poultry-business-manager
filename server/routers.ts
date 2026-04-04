@@ -87,6 +87,7 @@ export const appRouter = router({
         
         return {
           success: true,
+          token: sessionToken,
           mustChangePassword: user.mustChangePassword,
           user: {
             id: user.id,
