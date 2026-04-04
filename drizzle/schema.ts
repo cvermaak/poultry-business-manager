@@ -587,9 +587,9 @@ export const invoices = mysqlTable("invoices", {
 	totalBirds: int(),
 		totalWeight: decimal({ precision: 10, scale: 2 }),
 		vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
-		exclusiveTotal: decimal({ precision: 15, scale: 2 }),
-		vatAmount: decimal({ precision: 15, scale: 2 }),
-		inclusiveTotal: decimal({ precision: 15, scale: 2 }),
+		exclusiveTotal: decimal({ precision: 12, scale: 2 }),
+		vatAmount: decimal({ precision: 12, scale: 2 }),
+		inclusiveTotal: decimal({ precision: 12, scale: 2 }),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
