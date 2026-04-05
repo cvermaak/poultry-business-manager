@@ -2803,11 +2803,17 @@ export async function createInvoice(data: {
   createdBy?: number;
 }): Promise<{ insertId: number }> {
   const db = await getDb();
+  
+   // Convert all values to numbers to handle Decimal types from Drizzle ORM
+  const pricePerKgExcl = typeof data.pricePerKgExcl === 'string' ? parseFloat(data.pricePerKgExcl) : Number(data.pricePerKgExcl);
+  const totalWeight = typeof data.totalWeight === 'string' ? parseFloat(data.totalWeight) : Number(data.totalWeight);
+  const totalBirds = typeof data.totalBirds === 'string' ? parseInt(data.totalBirds) : Number(data.totalBirds);
+  const vatPercentage = typeof data.vatPercentage === 'string' ? parseFloat(data.vatPercentage) : Number(data.vatPercentage);
 
-  // Calculate totals
+   // Calculate totals
   // Price is per kg, so multiply weight by price (not birds)
-  const exclusiveTotal = data.totalWeight * data.pricePerKgExcl;
-  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
+  const exclusiveTotal = totalWeight * pricePerKgExcl;
+  const vatAmount = exclusiveTotal * (vatPercentage / 100);
   const inclusiveTotal = exclusiveTotal + vatAmount;
 
   const result = await db.insert(invoices).values({
@@ -2825,7 +2831,7 @@ export async function createInvoice(data: {
     catchSessionId: data.catchSessionId,
     processorId: data.processorId,
     pricePerKgExcl: parseFloat(data.pricePerKgExcl.toFixed(2)),
-    totalBirds: data.totalBirds,
+    totalBirds: Math.round(totalBirds),
     totalWeight: parseFloat(data.totalWeight.toFixed(2)),
     exclusiveTotal: parseFloat(exclusiveTotal.toFixed(2)),
     vatAmount: parseFloat(vatAmount.toFixed(2)),
