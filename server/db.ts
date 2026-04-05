@@ -2821,17 +2821,16 @@ export async function createInvoice(data: {
     paidAmount: 0,
     balanceDue: Math.round(inclusiveTotal * 100),
     status: "draft",
-	notes: null,
     createdBy: data.createdBy,
     catchSessionId: data.catchSessionId,
     processorId: data.processorId,
-    pricePerKgExcl: data.pricePerKgExcl,
+    pricePerKgExcl: parseFloat(data.pricePerKgExcl.toFixed(2)),
     totalBirds: data.totalBirds,
-    totalWeight: data.totalWeight,
-    exclusiveTotal,
-    vatAmount,
-    inclusiveTotal,
-    vatPercentage: data.vatPercentage,
+    totalWeight: parseFloat(data.totalWeight.toFixed(2)),
+    exclusiveTotal: parseFloat(exclusiveTotal.toFixed(2)),
+    vatAmount: parseFloat(vatAmount.toFixed(2)),
+    inclusiveTotal: parseFloat(inclusiveTotal.toFixed(2)),
+    vatPercentage: parseFloat(data.vatPercentage.toFixed(2)),
   });
 
   // Create a line item for the invoice
@@ -2863,7 +2862,6 @@ export async function createInvoice(data: {
 
   return { insertId: invoiceId };
 }
-
 
 export async function getCatchSessionById(catchSessionId: number) {
   const db = await getDb();
