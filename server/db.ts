@@ -2809,19 +2809,29 @@ export async function createInvoice(data: {
   const totalWeight = typeof data.totalWeight === 'string' ? parseFloat(data.totalWeight) : Number(data.totalWeight);
   const totalBirds = typeof data.totalBirds === 'string' ? parseInt(data.totalBirds) : Number(data.totalBirds);
   const vatPercentage = typeof data.vatPercentage === 'string' ? parseFloat(data.vatPercentage) : Number(data.vatPercentage);
+  const invoiceDate = data.invoiceDate instanceof Date ? data.invoiceDate : new Date(data.invoiceDate);
+  const dueDate = data.dueDate instanceof Date ? data.dueDate : new Date(data.dueDate);
 
   // Calculate totals
   // Price is per kg, so multiply weight by price (not birds)
   const exclusiveTotal = totalWeight * pricePerKgExcl;
   const vatAmount = exclusiveTotal * (vatPercentage / 100);
   const inclusiveTotal = exclusiveTotal + vatAmount;
-
-  const result = await db.insert(invoices).values({
+  const exclusiveTotalStr = exclusiveTotal.toFixed(2);
+  const vatAmountStr = vatAmount.toFixed(2);
+  const inclusiveTotalStr = inclusiveTotal.toFixed(2);
+  const vatPercentageStr = vatPercentage.toFixed(2);
+  const pricePerKgExclStr = pricePerKgExcl.toFixed(2);
+  const totalWeightStr = totalWeight.toFixed(2); // or toFixed(3) if you want 3 decimals
+  
+  let result;
+try {
+  result = await db.insert(invoices).values({
     invoiceNumber: data.invoiceNumber,
-    customerId: data.customerId,
+	customerId: data.customerId,
 	orderId: null,
-    invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString() : data.invoiceDate,
-    dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
+	invoiceDate: invoiceDate,
+	dueDate: dueDate,
     subtotal: Math.round(exclusiveTotal * 100),
     taxAmount: Math.round(vatAmount * 100),
     totalAmount: Math.round(inclusiveTotal * 100),
@@ -2842,7 +2852,10 @@ export async function createInvoice(data: {
     paymentMethod: null,
     paymentDate: null,
   });
-
+} catch (error: any) {
+  console.error('Insert invoice error:', error?.message, error);
+  throw error;
+}
 
   // Create a line item for the invoice
   const subtotal = Math.round(exclusiveTotal * 100);
