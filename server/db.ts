@@ -2837,7 +2837,11 @@ export async function createInvoice(data: {
     vatAmount: parseFloat(vatAmount.toFixed(2)),
     inclusiveTotal: parseFloat(inclusiveTotal.toFixed(2)),
     vatPercentage: parseFloat(vatPercentage.toFixed(2)),
+    overallDiscountPercent: 0,
+    paymentMethod: null,
+    paymentDate: null,
   });
+
 
   // Create a line item for the invoice
   const subtotal = Math.round(exclusiveTotal * 100);
