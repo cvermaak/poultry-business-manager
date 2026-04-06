@@ -911,12 +911,17 @@ export async function getInvoiceById(id: number) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+import { invoiceLineItems } from './schema'; // ensure this import exists
+
 export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
   if (!db) return [];
 
   console.log(`[DEBUG] getInvoiceItems called with invoiceId: ${invoiceId} (type: ${typeof invoiceId})`);
-  const result = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  const result = await db
+    .select()
+    .from(invoiceLineItems)
+    .where(eq(invoiceLineItems.invoiceId, invoiceId));
   console.log(`[DEBUG] getInvoiceItems result:`, result);
   return result;
 }
