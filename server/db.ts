@@ -2819,6 +2819,7 @@ export async function createInvoice(data: {
   const result = await db.insert(invoices).values({
     invoiceNumber: data.invoiceNumber,
     customerId: data.customerId,
+	orderId: null,
     invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString() : data.invoiceDate,
     dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
     subtotal: Math.round(exclusiveTotal * 100),
