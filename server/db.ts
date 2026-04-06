@@ -1,4 +1,4 @@
-import { invoiceLineItems } from '../drizzle/schema'; // ensure this import exists
+import { invoiceLineItems } from '../drizzle/schema';
 import { eq, and, gte, lte, desc, asc, sql, or, like, inArray, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
@@ -2870,19 +2870,18 @@ try {
   const invoiceId = (result as any)[0]?.insertId ?? (result as any).insertId;
   console.log(`[DEBUG] Invoice created with ID: ${invoiceId}`);
   
-  try {
+    try {
     console.log(`[DEBUG] Creating line item for invoice ${invoiceId}`);
-    const lineItemResult = await db.insert(invoiceItems).values({
-	  invoiceId: invoiceId,
-	  description: `${data.totalBirds} Broiler Chickens @ R${data.pricePerKgExcl} per kg`,
-	  quantity: data.totalWeight,
-	  unit: 'kg',
-	  unitPrice: Math.round(data.pricePerKgExcl * 100),
-	  subtotal: subtotal,
-	  taxRate: data.vatPercentage,
-	  taxAmount: taxAmount,
-	  totalAmount: totalAmount,
-});
+    const lineItemResult = await db.insert(invoiceLineItems).values({
+      invoiceId: invoiceId,
+      description: `${data.totalBirds} Broiler Chickens @ R${data.pricePerKgExcl} per kg`,
+      quantity: parseFloat(totalWeight.toFixed(2)),
+      pricePerUnit: parseFloat(pricePerKgExcl.toFixed(2)),
+      discount: 0,
+      discountAmount: 0,
+      vatPercentage: parseFloat(vatPercentage.toFixed(2)),
+      amount: parseFloat(inclusiveTotal.toFixed(2)),
+    });
     console.log(`[DEBUG] Line item created successfully`);
   } catch (error) {
     console.error('[DEBUG] Error creating line item:', error);
