@@ -1,6 +1,6 @@
+import { invoiceLineItems } from '../drizzle/schema'; // ensure this import exists
 import { eq, and, gte, lte, desc, asc, sql, or, like, inArray, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { invoiceLineItems } from '../drizzle/schema'; // ensure this import exists
 import {
   InsertUser,
   users,
@@ -2873,16 +2873,16 @@ try {
   try {
     console.log(`[DEBUG] Creating line item for invoice ${invoiceId}`);
     const lineItemResult = await db.insert(invoiceItems).values({
-      invoiceId: invoiceId,
-      description: `${data.totalBirds} Broiler Chickens @ R${data.pricePerKgExcl} per kg`,
-      quantity: data.totalWeight,
-      unit: 'kg',
-      unitPrice: Math.round(data.pricePerKgExcl * 100),
-      subtotal: subtotal,
-      taxRate: data.vatPercentage,
-      taxAmount: taxAmount,
-      totalAmount: totalAmount,
-    });
+	  invoiceId: invoiceId,
+	  description: `${data.totalBirds} Broiler Chickens @ R${data.pricePerKgExcl} per kg`,
+	  quantity: data.totalWeight,
+	  unit: 'kg',
+	  unitPrice: Math.round(data.pricePerKgExcl * 100),
+	  subtotal: subtotal,
+	  taxRate: data.vatPercentage,
+	  taxAmount: taxAmount,
+	  totalAmount: totalAmount,
+});
     console.log(`[DEBUG] Line item created successfully`);
   } catch (error) {
     console.error('[DEBUG] Error creating line item:', error);
