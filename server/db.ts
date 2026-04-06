@@ -2868,6 +2868,7 @@ export async function createInvoice(data: {
 
   return { insertId: invoiceId };
 }
+
 export async function getCatchSessionById(catchSessionId: number) {
   const db = await getDb();
   const result = await db
