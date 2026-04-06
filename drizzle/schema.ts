@@ -593,7 +593,7 @@ export const invoices = mysqlTable("invoices", {
 	inclusiveTotal: decimal({ precision: 15, scale: 2 }),
 	overallDiscountPercent: decimal({ precision: 5, scale: 2 }).default('0'),
 	paymentMethod: varchar({ length: 50 }),
-	paymentDate: datetime(),
+	paymentDate: timestamp({ mode: 'string' }),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
