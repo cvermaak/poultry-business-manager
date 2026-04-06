@@ -1,5 +1,6 @@
 import { eq, and, gte, lte, desc, asc, sql, or, like, inArray, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { invoiceLineItems } from '../drizzle/schema'; // ensure this import exists
 import {
   InsertUser,
   users,
@@ -910,8 +911,6 @@ export async function getInvoiceById(id: number) {
   const result = await db.select().from(invoices).where(eq(invoices.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
-
-import { invoiceLineItems } from './schema'; // ensure this import exists
 
 export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
