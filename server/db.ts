@@ -2867,8 +2867,10 @@ try {
   const totalAmount = Math.round(inclusiveTotal * 100);
   
   // Extract the invoice ID from the insert result
-  const invoiceId = (result as any)[0]?.insertId ?? (result as any).insertId;
-  console.log(`[DEBUG] Invoice created with ID: ${invoiceId}`);
+  const invoiceId = (result as any).insertId;
+if (!invoiceId) {
+  throw new Error('Failed to get invoice ID from insert result');
+}
   
     try {
     console.log(`[DEBUG] Creating line item for invoice ${invoiceId}`);
