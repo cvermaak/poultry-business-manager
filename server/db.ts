@@ -2885,7 +2885,7 @@ export async function createInvoice(data: {
     throw error;
   }
 
-  const invoiceId = (result as any).insertId;
+  const invoiceId = result[0].insertId;
   if (!invoiceId) {
     throw new Error('Failed to get invoice ID from insert result');
   }
