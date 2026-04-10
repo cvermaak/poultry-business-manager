@@ -1675,18 +1675,17 @@ export const appRouter = router({
           const companySettings = await db.getCompanySettings();
           console.log('Invoice line items from DB:', invoiceLineItems);
           
-          // Transform line items to match PDF generator format
           const lineItems = invoiceLineItems.map(item => {
-            // unitPrice is stored in cents, convert to decimal by dividing by 100
-            const unitPriceDecimal = parseFloat(item.unitPrice?.toString() || '0') / 100;
-            return {
-              description: item.description || 'Product',
-              quantity: parseFloat(item.quantity?.toString() || '0'),
-              pricePerUnit: unitPriceDecimal,
-              discount: undefined,
-              vatPercentage: item.taxRate ? parseFloat(item.taxRate.toString()) : 15,
-            };
-          });
+		  // invoiceLineItems stores pricePerUnit as DECIMAL, not cents
+		  // Use pricePerUnit directly, no division needed
+		  return {
+			description: item.description || 'Product',
+			quantity: parseFloat(item.quantity?.toString() || '0'),
+			pricePerUnit: parseFloat(item.pricePerUnit?.toString() || '0'),
+			discount: parseFloat(item.discount?.toString() || '0'),
+			vatPercentage: parseFloat(item.vatPercentage?.toString() || '15'),
+		  };
+		});
           console.log('Transformed line items:', lineItems);
           
           // Prepare bank details from company settings
