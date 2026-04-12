@@ -2962,21 +2962,32 @@ export async function updateCompanySettings(data: any, userId: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
   const existing = await db.query.companySettings.findFirst();
-  
+
+  // Build an explicit update payload using only the known schema columns
+  const updatePayload: Record<string, any> = {};
+  if (data.companyName !== undefined) updatePayload.companyName = data.companyName;
+  if (data.vatNumber !== undefined) updatePayload.vatNumber = data.vatNumber;
+  if (data.registrationNumber !== undefined) updatePayload.registrationNumber = data.registrationNumber;
+  if (data.address !== undefined) updatePayload.address = data.address;
+  if (data.phone !== undefined) updatePayload.phone = data.phone;
+  if (data.email !== undefined) updatePayload.email = data.email;
+  if (data.website !== undefined) updatePayload.website = data.website;
+  if (data.bankName !== undefined) updatePayload.bankName = data.bankName;
+  if (data.branchCode !== undefined) updatePayload.branchCode = data.branchCode;
+  if (data.accountName !== undefined) updatePayload.accountName = data.accountName;
+  if (data.accountNumber !== undefined) updatePayload.accountNumber = data.accountNumber;
+  if (data.accountReference !== undefined) updatePayload.accountReference = data.accountReference;
+  if (data.logoUrl !== undefined) updatePayload.logoUrl = data.logoUrl;
+
   if (existing) {
     return await db
       .update(companySettings)
-      .set({
-        ...data,
-        updatedAt: new Date().toISOString(),
-      })
+      .set(updatePayload)
       .where(eq(companySettings.id, existing.id));
   } else {
     return await db.insert(companySettings).values({
-      ...data,
+      ...updatePayload,
       createdBy: userId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     });
   }
 }
