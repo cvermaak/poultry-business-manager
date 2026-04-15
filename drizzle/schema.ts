@@ -1011,6 +1011,7 @@ export const vaccines = mysqlTable("vaccines", {
 
 export const companySettings = mysqlTable("company_settings", {
 	id: int().autoincrement().notNull(),
+<<<<<<< HEAD
 	companyName: varchar({ length: 255 }).notNull(),
 	vatNumber: varchar({ length: 50 }).notNull(),
 	registrationNumber: varchar({ length: 50 }),
@@ -1029,6 +1030,24 @@ export const companySettings = mysqlTable("company_settings", {
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	createdBy: int().references(() => users.id),
 	
+=======
+	companyName: varchar("company_name", { length: 255 }).notNull(),
+	vatNumber: varchar("vat_number", { length: 50 }).notNull(),
+	registrationNumber: varchar("registration_number", { length: 50 }),
+	address: text("address").notNull(),
+	phone: varchar("phone", { length: 20 }),
+	email: varchar("email", { length: 100 }),
+	website: varchar("website", { length: 255 }),
+	bankName: varchar("bank_name", { length: 100 }),
+	branchCode: varchar("branch_code", { length: 20 }),
+	accountName: varchar("account_name", { length: 100 }),
+	accountNumber: varchar("account_number", { length: 50 }),
+	accountReference: varchar("account_reference", { length: 100 }),
+	logoUrl: varchar("logo_url", { length: 500 }),
+	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int("created_by").references(() => users.id),
+>>>>>>> fa65e56251e1b313cf2d2d324ac4737fdf68fd0a
 },
 (table) => [
 	index("idx_company_settings_id").on(table.id),

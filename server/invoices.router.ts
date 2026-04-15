@@ -25,7 +25,8 @@ export const invoiceRouter = router({
       // Calculate due date (default to 30 days from now)
       const dueDate = input.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-      // Create invoice
+      // Create invoice — totalBirds and totalWeight are derived from the catch
+      // session inside createInvoice; pass 0 as required-field placeholders.
       const result = await db.createInvoice({
         invoiceNumber,
         customerId: input.customerId,
