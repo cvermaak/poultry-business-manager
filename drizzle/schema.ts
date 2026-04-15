@@ -1029,7 +1029,6 @@ export const companySettings = mysqlTable("company_settings", {
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	createdBy: int().references(() => users.id),
 	
-=======
 	companyName: varchar("company_name", { length: 255 }).notNull(),
 	vatNumber: varchar("vat_number", { length: 50 }).notNull(),
 	registrationNumber: varchar("registration_number", { length: 50 }),
@@ -1046,7 +1045,7 @@ export const companySettings = mysqlTable("company_settings", {
 	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	createdBy: int("created_by").references(() => users.id),
->>>>>>> fa65e56251e1b313cf2d2d324ac4737fdf68fd0a
+
 },
 (table) => [
 	index("idx_company_settings_id").on(table.id),
