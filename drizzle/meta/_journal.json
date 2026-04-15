@@ -183,6 +183,20 @@
       "when": 1774166115726,
       "tag": "0025_dark_colossus",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1775448930949,
+      "tag": "0026_hot_the_fallen",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "5",
+      "when": 1775452355484,
+      "tag": "0027_friendly_ego",
+      "breakpoints": true
     }
   ]
 }

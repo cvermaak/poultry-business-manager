@@ -193,6 +193,13 @@ export const addCatchCrate = protectedProcedure
       .where(eq(catchCrates.sessionId, input.sessionId));
 
     const crateNumber = existingCrates.length + 1;
+	// Get user's timezone from company settings
+	const settings = await db.query.companySettings.findFirst();
+	const timezone = settings?.timezone || 'UTC';
+
+	// Record timestamp in user's timezone
+	const now = new Date();
+	const recordedAtStr = formatTimestampInTimezone(now.getTime(), timezone, 'datetime');
 
     // Insert crate record
     await db.insert(catchCrates).values({
@@ -203,6 +210,7 @@ export const addCatchCrate = protectedProcedure
       grossWeight: input.grossWeight.toString(),
       netWeight: netWeight.toString(),
       averageBirdWeight: averageBirdWeight.toString(),
+	  recordedAt: recordedAtStr,  // Use timezone-aware timestamp
     });
 
     // Update session totals

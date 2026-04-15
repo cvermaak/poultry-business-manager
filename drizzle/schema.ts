@@ -1024,9 +1024,11 @@ export const companySettings = mysqlTable("company_settings", {
 	accountNumber: varchar({ length: 50 }),
 	accountReference: varchar({ length: 100 }),
 	logoUrl: varchar({ length: 500 }),
+	timezone: varchar("timezone", { length: 100 }).default('UTC').notNull(),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	createdBy: int().references(() => users.id),
+	
 },
 (table) => [
 	index("idx_company_settings_id").on(table.id),

@@ -1532,6 +1532,7 @@ export default function CatchOperations() {
 // to Excel using SheetJS. Works for both active and completed sessions.
 function ExcelExportButton({ sessionId, flockNumber, catchDate }: { sessionId: number; flockNumber: string; catchDate: string }) {
   const [enabled, setEnabled] = useState(false);
+  const { data: companySettings } = trpc.companySettings.get.useQuery();
   const { data: details, isFetching } = trpc.catch.getCatchSessionDetails.useQuery(
     { sessionId },
     {
@@ -1541,11 +1542,12 @@ function ExcelExportButton({ sessionId, flockNumber, catchDate }: { sessionId: n
   );
 
   useEffect(() => {
-    if (!details || !enabled) return;
+    if (!details || !enabled || !companySettings) return;
     setEnabled(false); // reset so next click re-fetches if needed
 
     const wb = XLSX.utils.book_new();
     const dateStr = new Date(catchDate).toLocaleDateString("en-ZA");
+	const timezone = companySettings?.timezone || 'UTC';
 
     // Summary sheet
     const summaryData = [
@@ -1604,7 +1606,7 @@ function ExcelExportButton({ sessionId, flockNumber, catchDate }: { sessionId: n
     const filename = `Catch-WeightIn-${flockNumber.replace(/[^a-zA-Z0-9]/g, "-")}-${dateStr.replace(/\//g, "-")}.xlsx`;
     XLSX.writeFile(wb, filename);
     toast.success(`Excel report downloaded: ${filename}`);
-  }, [details, enabled]);
+  }, [details, enabled, companySettings]);
 
   return (
     <Button
