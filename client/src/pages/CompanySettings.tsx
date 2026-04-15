@@ -8,6 +8,34 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
+const TIMEZONES = [
+  { value: "UTC", label: "UTC (Coordinated Universal Time)" },
+  { value: "Africa/Johannesburg", label: "Africa/Johannesburg (SAST)" },
+  { value: "Africa/Cairo", label: "Africa/Cairo (EET)" },
+  { value: "Africa/Lagos", label: "Africa/Lagos (WAT)" },
+  { value: "Africa/Nairobi", label: "Africa/Nairobi (EAT)" },
+  { value: "America/New_York", label: "America/New_York (EST/EDT)" },
+  { value: "America/Chicago", label: "America/Chicago (CST/CDT)" },
+  { value: "America/Denver", label: "America/Denver (MST/MDT)" },
+  { value: "America/Los_Angeles", label: "America/Los_Angeles (PST/PDT)" },
+  { value: "America/Toronto", label: "America/Toronto (EST/EDT)" },
+  { value: "America/Sao_Paulo", label: "America/Sao_Paulo (BRT/BRST)" },
+  { value: "Europe/London", label: "Europe/London (GMT/BST)" },
+  { value: "Europe/Paris", label: "Europe/Paris (CET/CEST)" },
+  { value: "Europe/Berlin", label: "Europe/Berlin (CET/CEST)" },
+  { value: "Europe/Moscow", label: "Europe/Moscow (MSK)" },
+  { value: "Asia/Dubai", label: "Asia/Dubai (GST)" },
+  { value: "Asia/Kolkata", label: "Asia/Kolkata (IST)" },
+  { value: "Asia/Bangkok", label: "Asia/Bangkok (ICT)" },
+  { value: "Asia/Singapore", label: "Asia/Singapore (SGT)" },
+  { value: "Asia/Hong_Kong", label: "Asia/Hong_Kong (HKT)" },
+  { value: "Asia/Tokyo", label: "Asia/Tokyo (JST)" },
+  { value: "Asia/Seoul", label: "Asia/Seoul (KST)" },
+  { value: "Australia/Sydney", label: "Australia/Sydney (AEDT/AEST)" },
+  { value: "Australia/Melbourne", label: "Australia/Melbourne (AEDT/AEST)" },
+  { value: "Pacific/Auckland", label: "Pacific/Auckland (NZDT/NZST)" },
+];
+
 export function CompanySettings() {
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -23,6 +51,7 @@ export function CompanySettings() {
     accountName: "",
     accountNumber: "",
     accountReference: "",
+    timezone: "UTC",
   });
 
   // Fetch company settings
@@ -54,11 +83,12 @@ export function CompanySettings() {
         accountName: settings.accountName || "",
         accountNumber: settings.accountNumber || "",
         accountReference: settings.accountReference || "",
+        timezone: settings.timezone || "UTC",
       });
     }
   }, [settings]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
@@ -170,6 +200,22 @@ export function CompanySettings() {
                   placeholder="123 Farm Road, Gauteng, South Africa"
                   rows={3}
                 />
+              </div>
+              <div>
+                <Label htmlFor="timezone">Timezone</Label>
+                <select
+                  id="timezone"
+                  name="timezone"
+                  value={formData.timezone}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-orange-500 focus:border-orange-500"
+                >
+                  {TIMEZONES.map((tz) => (
+                    <option key={tz.value} value={tz.value}>
+                      {tz.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </CardContent>
           </Card>
