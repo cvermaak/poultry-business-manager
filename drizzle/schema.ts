@@ -1011,7 +1011,6 @@ export const vaccines = mysqlTable("vaccines", {
 
 export const companySettings = mysqlTable("company_settings", {
 	id: int().autoincrement().notNull(),
-<<<<<<< HEAD
 	companyName: varchar({ length: 255 }).notNull(),
 	vatNumber: varchar({ length: 50 }).notNull(),
 	registrationNumber: varchar({ length: 50 }),
