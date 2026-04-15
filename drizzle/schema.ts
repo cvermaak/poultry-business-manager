@@ -1,9 +1,9 @@
-import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint } from "drizzle-orm/mysql-core"
+import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint, datetime } from "drizzle-orm/mysql-core"
 import { sql } from "drizzle-orm"
 
 export const catchBatches = mysqlTable("catch_batches", {
 	id: int().autoincrement().notNull(),
-	sessionId: int().notNull().references(() => catchSessions.id),
+	sessionId: int().notNull().references(() => catchSessions.id, { onDelete: "cascade" } ),
 	crateTypeId: int().notNull().references(() => crateTypes.id),
 	batchNumber: int().notNull(),
 	numberOfCrates: int().notNull(),
@@ -14,7 +14,7 @@ export const catchBatches = mysqlTable("catch_batches", {
 	palletWeight: decimal({ precision: 8, scale: 3 }),
 	totalNetWeight: decimal({ precision: 10, scale: 3 }).notNull(),
 	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
-		recordedAt: timestamp({ mode: 'string' }).notNull(),
+	recordedAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	notes: text(),
 },
 (table) => [
@@ -24,7 +24,7 @@ export const catchBatches = mysqlTable("catch_batches", {
 
 export const catchConfigurations = mysqlTable("catch_configurations", {
 	id: int().autoincrement().notNull(),
-	flockId: int().notNull().references(() => flocks.id),
+	flockId: int().notNull().references(() => flocks.id, { onDelete: "cascade" } ),
 	targetDeliveredWeight: decimal({ precision: 10, scale: 3 }).notNull(),
 	calculatedCatchingWeight: decimal({ precision: 10, scale: 3 }).notNull(),
 	feedWithdrawalLossPercent: decimal({ precision: 5, scale: 2 }).default('4.00').notNull(),
@@ -46,7 +46,7 @@ export const catchConfigurations = mysqlTable("catch_configurations", {
 
 export const catchCrates = mysqlTable("catch_crates", {
 	id: int().autoincrement().notNull(),
-	sessionId: int().notNull().references(() => catchSessions.id),
+	sessionId: int().notNull().references(() => catchSessions.id, { onDelete: "cascade" } ),
 	crateTypeId: int().notNull().references(() => crateTypes.id),
 	batchId: varchar({ length: 50 }),
 	crateNumber: int().notNull(),
@@ -54,7 +54,7 @@ export const catchCrates = mysqlTable("catch_crates", {
 	grossWeight: decimal({ precision: 8, scale: 3 }).notNull(),
 	netWeight: decimal({ precision: 8, scale: 3 }).notNull(),
 	averageBirdWeight: decimal({ precision: 8, scale: 3 }).notNull(),
-	recordedAt: timestamp({ mode: 'string' }).notNull(),
+	recordedAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	notes: text(),
 },
 (table) => [
@@ -64,7 +64,7 @@ export const catchCrates = mysqlTable("catch_crates", {
 
 export const catchSessions = mysqlTable("catch_sessions", {
 	id: int().autoincrement().notNull(),
-	flockId: int().notNull().references(() => flocks.id),
+	flockId: int().notNull().references(() => flocks.id, { onDelete: "cascade" } ),
 	catchDate: timestamp({ mode: 'string' }).notNull(),
 	catchTeam: varchar({ length: 200 }),
 	targetBirds: int(),
@@ -116,6 +116,27 @@ export const chartOfAccounts = mysqlTable("chart_of_accounts", {
 	index("idx_chart_of_accounts_type").on(table.accountType),
 ]);
 
+	export const companySettings = mysqlTable("company_settings", {
+		id: int().autoincrement().notNull(),
+		companyName: varchar({ length: 255 }).notNull(),
+		vatNumber: varchar({ length: 20 }),
+		registrationNumber: varchar({ length: 50 }),
+		address: text(),
+		phone: varchar({ length: 20 }),
+		email: varchar({ length: 100 }),
+		website: varchar({ length: 255 }),
+		bankName: varchar({ length: 100 }),
+		branchCode: varchar({ length: 20 }),
+		accountName: varchar({ length: 100 }),
+		accountNumber: varchar({ length: 50 }),
+		accountReference: varchar({ length: 100 }),
+		logoUrl: varchar({ length: 500 }),
+		timezone: varchar({ length: 100 }).default('UTC').notNull(),
+		createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+		updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+		createdBy: int(),
+	});
+
 export const crateTypes = mysqlTable("crate_types", {
 	id: int().autoincrement().notNull(),
 	name: varchar({ length: 100 }).notNull(),
@@ -149,26 +170,26 @@ export const customerAddresses = mysqlTable("customer_addresses", {
 	index("idx_customer_addresses_customer_id").on(table.customerId),
 ]);
 
-	export const customers = mysqlTable("customers", {
-		id: int().autoincrement().notNull(),
-		customerNumber: varchar({ length: 50 }).notNull(),
-		name: varchar({ length: 200 }).notNull(),
-		companyName: varchar({ length: 200 }),
-		contactPerson: varchar({ length: 200 }),
-		email: varchar({ length: 320 }),
-		phone: varchar({ length: 50 }),
-		whatsapp: varchar({ length: 50 }),
-		segment: mysqlEnum(['wholesale','retail','contract']).default('retail').notNull(),
-		creditLimit: int().default(0),
-		paymentTerms: varchar({ length: 100 }).default('cash'),
-		taxNumber: varchar({ length: 100 }),
-		vatNumber: varchar({ length: 100 }),
-		isActive: tinyint().default(1).notNull(),
-		notes: text(),
-		createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
-		updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-		createdBy: int().references(() => users.id),
-	},
+export const customers = mysqlTable("customers", {
+	id: int().autoincrement().notNull(),
+	customerNumber: varchar({ length: 50 }).notNull(),
+	name: varchar({ length: 200 }).notNull(),
+	companyName: varchar({ length: 200 }),
+	contactPerson: varchar({ length: 200 }),
+	email: varchar({ length: 320 }),
+	phone: varchar({ length: 50 }),
+	whatsapp: varchar({ length: 50 }),
+	segment: mysqlEnum(['wholesale','retail','contract']).default('retail').notNull(),
+	creditLimit: int().default(0),
+	paymentTerms: varchar({ length: 100 }).default('cash'),
+	taxNumber: varchar({ length: 100 }),
+	vatNumber: varchar({ length: 100 }),
+	isActive: tinyint().default(1).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
 (table) => [
 	index("customers_customerNumber_unique").on(table.customerNumber),
 ]);
@@ -301,6 +322,7 @@ export const flocks = mysqlTable("flocks", {
 	initialCount: int().notNull(),
 	currentCount: int().notNull(),
 	targetSlaughterWeight: decimal({ precision: 10, scale: 2 }).default('1.70'),
+	catchPlan: json(),
 	growingPeriod: int().default(42),
 	status: mysqlEnum(['planned','active','harvesting','completed','cancelled']).default('planned').notNull(),
 	collectionDate: timestamp({ mode: 'string' }),
@@ -330,7 +352,6 @@ export const flocks = mysqlTable("flocks", {
 	isManualStatusChange: tinyint().default(0),
 	targetDeliveredWeight: decimal({ precision: 10, scale: 3 }),
 	targetCatchingWeight: decimal({ precision: 10, scale: 3 }),
-	catchPlan: json(),
 },
 (table) => [
 	index("flocks_flockNumber_unique").on(table.flockNumber),
@@ -361,7 +382,7 @@ export const generalLedgerEntries = mysqlTable("general_ledger_entries", {
 
 export const harvestRecords = mysqlTable("harvest_records", {
 	id: int().autoincrement().notNull(),
-	flockId: int().notNull().references(() => flocks.id),
+	flockId: int().notNull().references(() => flocks.id, { onDelete: "cascade" } ),
 	harvestDate: timestamp({ mode: 'string' }).notNull(),
 	harvestStartTime: timestamp({ mode: 'string' }).notNull(),
 	harvestDurationMinutes: int(),
@@ -471,9 +492,6 @@ export const houses = mysqlTable("houses", {
 export const inventoryItems = mysqlTable("inventory_items", {
 	id: int().autoincrement().notNull(),
 	itemNumber: varchar({ length: 50 }).notNull(),
-	primaryClass: varchar("primary_class", { length: 2 }),
-	subType: varchar("sub_type", { length: 2 }),
-	form: varchar({ length: 3 }),
 	name: varchar({ length: 200 }).notNull(),
 	longDescription: text("long_description"),
 	itemStatus: mysqlEnum("item_status", ['active','inactive','discontinued','obsolete']).default('active').notNull(),
@@ -493,6 +511,9 @@ export const inventoryItems = mysqlTable("inventory_items", {
 	isActive: tinyint().default(1).notNull(),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	primaryClass: varchar("primary_class", { length: 2 }),
+	subType: varchar("sub_type", { length: 2 }),
+	form: varchar({ length: 3 }),
 },
 (table) => [
 	index("inventory_items_itemNumber_unique").on(table.itemNumber),
@@ -565,6 +586,19 @@ export const invoiceItems = mysqlTable("invoice_items", {
 	index("idx_invoice_items_invoice_id").on(table.invoiceId),
 ]);
 
+export const invoiceLineItems = mysqlTable("invoice_line_items", {
+	id: int().autoincrement().notNull(),
+	invoiceId: int().notNull().references(() => invoices.id, { onDelete: "cascade" } ),
+	description: varchar({ length: 500 }),
+	quantity: decimal({ precision: 10, scale: 2 }),
+	unitPrice: decimal({ precision: 12, scale: 2 }),
+	discountPercent: decimal({ precision: 5, scale: 2 }).default('0'),
+	vatPercent: decimal({ precision: 5, scale: 2 }).default('15'),
+	lineTotal: decimal({ precision: 12, scale: 2 }),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP'),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow(),
+});
+
 export const invoices = mysqlTable("invoices", {
 	id: int().autoincrement().notNull(),
 	invoiceNumber: varchar({ length: 50 }).notNull(),
@@ -582,18 +616,18 @@ export const invoices = mysqlTable("invoices", {
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	createdBy: int().references(() => users.id),
-	catchSessionId: int().references(() => catchSessions.id),
-	processorId: int().references(() => processors.id),
+	catchSessionId: int(),
+	processorId: int(),
 	pricePerKgExcl: decimal({ precision: 10, scale: 2 }),
 	totalBirds: int(),
 	totalWeight: decimal({ precision: 10, scale: 3 }),
-	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
 	exclusiveTotal: decimal({ precision: 15, scale: 2 }),
 	vatAmount: decimal({ precision: 15, scale: 2 }),
 	inclusiveTotal: decimal({ precision: 15, scale: 2 }),
+	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
 	overallDiscountPercent: decimal({ precision: 5, scale: 2 }).default('0'),
 	paymentMethod: varchar({ length: 50 }),
-	paymentDate: timestamp({ mode: 'string' }),
+	paymentDate: datetime({ mode: 'string'}),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
@@ -686,7 +720,7 @@ export const processors = mysqlTable("processors", {
 	isActive: tinyint().default(1).notNull(),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-	createdBy: int().references(() => users.id),
+	createdBy: int().references(() => users.id, { onDelete: "cascade" } ),
 },
 (table) => [
 	index("name").on(table.name),
@@ -1007,63 +1041,3 @@ export const vaccines = mysqlTable("vaccines", {
 	storageTemperature: varchar("storage_temperature", { length: 100 }),
 	shelfLifeDays: int("shelf_life_days"),
 });
-
-
-export const companySettings = mysqlTable("company_settings", {
-	id: int().autoincrement().notNull(),
-	companyName: varchar({ length: 255 }).notNull(),
-	vatNumber: varchar({ length: 50 }).notNull(),
-	registrationNumber: varchar({ length: 50 }),
-	address: text().notNull(),
-	phone: varchar({ length: 20 }),
-	email: varchar({ length: 100 }),
-	website: varchar({ length: 255 }),
-	bankName: varchar({ length: 100 }),
-	branchCode: varchar({ length: 20 }),
-	accountName: varchar({ length: 100 }),
-	accountNumber: varchar({ length: 50 }),
-	accountReference: varchar({ length: 100 }),
-	logoUrl: varchar({ length: 500 }),
-	timezone: varchar("timezone", { length: 100 }).default('UTC').notNull(),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-	createdBy: int().references(() => users.id),
-	
-	companyName: varchar("company_name", { length: 255 }).notNull(),
-	vatNumber: varchar("vat_number", { length: 50 }).notNull(),
-	registrationNumber: varchar("registration_number", { length: 50 }),
-	address: text("address").notNull(),
-	phone: varchar("phone", { length: 20 }),
-	email: varchar("email", { length: 100 }),
-	website: varchar("website", { length: 255 }),
-	bankName: varchar("bank_name", { length: 100 }),
-	branchCode: varchar("branch_code", { length: 20 }),
-	accountName: varchar("account_name", { length: 100 }),
-	accountNumber: varchar("account_number", { length: 50 }),
-	accountReference: varchar("account_reference", { length: 100 }),
-	logoUrl: varchar("logo_url", { length: 500 }),
-	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
-	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-	createdBy: int("created_by").references(() => users.id),
-
-},
-(table) => [
-	index("idx_company_settings_id").on(table.id),
-]);
-
-export const invoiceLineItems = mysqlTable("invoice_line_items", {
-	id: int().autoincrement().notNull(),
-	invoiceId: int().notNull().references(() => invoices.id),
-	description: varchar({ length: 500 }).notNull(),
-	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
-	pricePerUnit: decimal({ precision: 10, scale: 2 }).notNull(),
-	discount: decimal({ precision: 5, scale: 2 }).default('0.00').notNull(),
-	discountAmount: decimal({ precision: 10, scale: 2 }).default('0.00').notNull(),
-	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00').notNull(),
-	amount: decimal({ precision: 15, scale: 2 }).notNull(),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
-},
-(table) => [
-	index("idx_invoice_line_items_invoice_id").on(table.invoiceId),
-]);

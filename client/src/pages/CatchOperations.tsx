@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import * as XLSX from "xlsx";
+import { formatTimestampInTimezone } from "@/lib/timezone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -49,10 +50,6 @@ export default function CatchOperations() {
   const [reportProcessingDate, setReportProcessingDate] = useState(new Date().toISOString().split("T")[0]);
   const [reportLotNumber, setReportLotNumber] = useState("");
   const [reportTransporter, setReportTransporter] = useState("");
-  
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
 
   // Start Session Form State
   const [selectedFlockId, setSelectedFlockId] = useState<string>("");
@@ -111,17 +108,10 @@ export default function CatchOperations() {
   ).length ?? 0;
   const currentCatchDay = completedForFlock + 1; // 1-based
   const planDay = catchPlan?.days?.find((d) => d.day === currentCatchDay) ?? null;
-  const { data: completedSessionsData } = trpc.catch.listCatchSessions.useQuery(
+  const { data: completedSessions } = trpc.catch.listCatchSessions.useQuery(
     { status: "completed" },
     { refetchInterval: 30000 } // Refetch every 30 seconds
   );
-  
-  // Calculate pagination
-  const totalSessions = completedSessionsData?.length ?? 0;
-  const totalPages = Math.ceil(totalSessions / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const completedSessions = completedSessionsData?.slice(startIndex, endIndex) ?? [];
 
   // Query for any active sessions — used to auto-resume after connection loss
   const { data: activeSessions, isLoading: isLoadingActiveSessions } = trpc.catch.listCatchSessions.useQuery(
@@ -1413,7 +1403,7 @@ export default function CatchOperations() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {completedSessions.map((session) => (
+                {completedSessions.slice(0, 10).map((session) => (
                   <TableRow key={session.id}>
                     <TableCell>
                       {new Date(session.catchDate).toLocaleDateString()}
@@ -1461,65 +1451,6 @@ export default function CatchOperations() {
                 ))}
               </TableBody>
             </Table>
-            
-            {/* Pagination Controls */}
-            {totalSessions > 0 && (
-              <div className="flex items-center justify-between pt-4 border-t">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">
-                    Showing {startIndex + 1}-{Math.min(endIndex, totalSessions)} of {totalSessions} sessions
-                  </span>
-                  <Select value={pageSize.toString()} onValueChange={(v) => {
-                    setPageSize(parseInt(v));
-                    setCurrentPage(1);
-                  }}>
-                    <SelectTrigger className="w-[120px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="10">10 per page</SelectItem>
-                      <SelectItem value="25">25 per page</SelectItem>
-                      <SelectItem value="50">50 per page</SelectItem>
-                      <SelectItem value="100">100 per page</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Previous
-                  </Button>
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                      const pageNum = i + 1;
-                      return (
-                        <Button
-                          key={pageNum}
-                          variant={currentPage === pageNum ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setCurrentPage(pageNum)}
-                        >
-                          {pageNum}
-                        </Button>
-                      );
-                    })}
-                    {totalPages > 5 && <span className="text-sm text-muted-foreground">... Page {currentPage} of {totalPages}</span>}
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
       )}
@@ -1542,12 +1473,12 @@ function ExcelExportButton({ sessionId, flockNumber, catchDate }: { sessionId: n
   );
 
   useEffect(() => {
-    if (!details || !enabled || !companySettings) return;
+    if (!details || !enabled) return;
     setEnabled(false); // reset so next click re-fetches if needed
 
     const wb = XLSX.utils.book_new();
     const dateStr = new Date(catchDate).toLocaleDateString("en-ZA");
-	const timezone = companySettings?.timezone || 'UTC';
+    const timezone = companySettings?.timezone || "UTC";
 
     // Summary sheet
     const summaryData = [
@@ -1579,7 +1510,7 @@ function ExcelExportButton({ sessionId, flockNumber, catchDate }: { sessionId: n
         parseFloat(c.crateTypeTareWeight ?? "0").toFixed(3),
         parseFloat(c.netWeight).toFixed(3),
         parseFloat(c.averageBirdWeight).toFixed(3),
-        new Date(c.recordedAt).toLocaleTimeString("en-ZA"),
+        formatTimestampInTimezone(c.recordedAt, timezone, "time"),
       ]);
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
@@ -1596,7 +1527,7 @@ function ExcelExportButton({ sessionId, flockNumber, catchDate }: { sessionId: n
         parseFloat(b.crateWeight).toFixed(3),
         parseFloat(b.totalNetWeight).toFixed(3),
         parseFloat(b.averageBirdWeight).toFixed(3),
-        new Date(b.recordedAt).toLocaleTimeString("en-ZA"),
+        formatTimestampInTimezone(b.recordedAt, timezone, "time"),
       ]);
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       ws["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 12 }];
