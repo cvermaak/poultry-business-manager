@@ -2,8 +2,9 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { crateTypes, catchSessions, catchCrates, catchBatches, flocks, harvestRecords } from "../../drizzle/schema";
+import { crateTypes, catchSessions, catchCrates, catchBatches, flocks, harvestRecords, companySettings } from "../../drizzle/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { formatTimestampInTimezone } from "../lib/timezone-server";
 import { addCatchCrateBatch, updateCatchBatch, deleteCatchBatch } from "./catch-batch";
 import { catchReportProcedures } from "./catch-report";
 
@@ -193,13 +194,14 @@ export const addCatchCrate = protectedProcedure
       .where(eq(catchCrates.sessionId, input.sessionId));
 
     const crateNumber = existingCrates.length + 1;
-	// Get user's timezone from company settings
-	const settings = await db.query.companySettings.findFirst();
-	const timezone = settings?.timezone || 'UTC';
 
-	// Record timestamp in user's timezone
-	const now = new Date();
-	const recordedAtStr = formatTimestampInTimezone(now.getTime(), timezone, 'datetime');
+    // Get user's timezone from company settings
+    const settings = await db.query.companySettings.findFirst();
+    const timezone = settings?.timezone || 'UTC';
+    
+    // Record timestamp in user's timezone
+    const now = new Date();
+    const recordedAtStr = formatTimestampInTimezone(now.getTime(), timezone, 'datetime');
 
     // Insert crate record
     await db.insert(catchCrates).values({
@@ -210,7 +212,7 @@ export const addCatchCrate = protectedProcedure
       grossWeight: input.grossWeight.toString(),
       netWeight: netWeight.toString(),
       averageBirdWeight: averageBirdWeight.toString(),
-	  recordedAt: recordedAtStr,  // Use timezone-aware timestamp
+      recordedAt: recordedAtStr,
     });
 
     // Update session totals
@@ -457,20 +459,7 @@ export const listCatchSessions = protectedProcedure
     }
 
     const sessions = await query.orderBy(desc(catchSessions.catchDate));
-    
-    // Calculate sequence number for each catch session on the same day/house/flock
-    const sessionsWithSequence = sessions.map((session: any) => {
-      const sameDayHouseFlock = sessions.filter((s: any) => 
-        s.flockId === session.flockId && 
-        s.catchTeam === session.catchTeam &&
-        new Date(s.catchDate).toDateString() === new Date(session.catchDate).toDateString()
-      );
-      
-      const sequence = sameDayHouseFlock.findIndex((s: any) => s.id === session.id) + 1;
-      return { ...session, sequence };
-    });
-    
-    return sessionsWithSequence;
+    return sessions;
   });
 
 // ============================================================================

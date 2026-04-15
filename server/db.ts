@@ -20,7 +20,6 @@ import {
   salesOrderItems,
   invoices,
   invoiceItems,
-  invoiceLineItems,
   payments,
   paymentAllocations,
   suppliers,
@@ -45,66 +44,65 @@ import {
   harvestRecords,
   processors,
   catchSessions,
-  catchBatches,
   companySettings,
 } from "../drizzle/schema";
+import "../drizzle/relations";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
-
-// Create schema object for Drizzle query helpers
-const schema = {
-  users,
-  houses,
-  flocks,
-  flockDailyRecords,
-  vaccinationSchedules,
-  healthRecords,
-  mortalityRecords,
-  feedFormulations,
-  feedBatches,
-  rawMaterials,
-  rawMaterialTransactions,
-  qualityControlRecords,
-  customers,
-  customerAddresses,
-  salesOrders,
-  salesOrderItems,
-  invoices,
-  invoiceItems,
-  payments,
-  paymentAllocations,
-  suppliers,
-  itemTemplates,
-  procurementSchedules,
-  procurementOrders,
-  procurementOrderItems,
-  chartOfAccounts,
-  generalLedgerEntries,
-  inventoryItems,
-  inventoryLocations,
-  inventoryTransactions,
-  documents,
-  userActivityLogs,
-  reminders,
-  vaccines,
-  stressPacks,
-  flockVaccinationSchedules,
-  flockStressPackSchedules,
-  reminderTemplates,
-  healthProtocolTemplates,
-  harvestRecords,
-  processors,
-  catchSessions,
-  catchBatches,
-  companySettings,
-};
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL, { schema, mode: 'default' });
+      _db = drizzle(process.env.DATABASE_URL, {
+        mode: "default",
+        schema: {
+          users,
+          houses,
+          flocks,
+          flockDailyRecords,
+          vaccinationSchedules,
+          healthRecords,
+          mortalityRecords,
+          feedFormulations,
+          feedBatches,
+          rawMaterials,
+          rawMaterialTransactions,
+          qualityControlRecords,
+          customers,
+          customerAddresses,
+          salesOrders,
+          salesOrderItems,
+          invoices,
+          invoiceItems,
+          payments,
+          paymentAllocations,
+          suppliers,
+          itemTemplates,
+          procurementSchedules,
+          procurementOrders,
+          procurementOrderItems,
+          chartOfAccounts,
+          generalLedgerEntries,
+          inventoryItems,
+          inventoryLocations,
+          inventoryTransactions,
+          documents,
+          userActivityLogs,
+          reminders,
+          vaccines,
+          stressPacks,
+          flockVaccinationSchedules,
+          flockStressPackSchedules,
+          reminderTemplates,
+          healthProtocolTemplates,
+          harvestRecords,
+          processors,
+          catchSessions,
+          companySettings,
+        },
+      });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -917,13 +915,7 @@ export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  console.log(`[DEBUG] getInvoiceItems called with invoiceId: ${invoiceId} (type: ${typeof invoiceId})`);
-  const result = await db
-    .select()
-    .from(invoiceLineItems)
-    .where(eq(invoiceLineItems.invoiceId, invoiceId));
-  console.log(`[DEBUG] getInvoiceItems result:`, result);
-  return result;
+  return await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
 }
 
 export async function listPayments(customerId?: number) {
@@ -2809,131 +2801,38 @@ export async function createInvoice(data: {
 }): Promise<{ insertId: number }> {
   const db = await getDb();
 
-  // Convert scalar inputs to numbers to handle Decimal types from Drizzle ORM
-  const pricePerKgExcl = typeof data.pricePerKgExcl === 'string' ? parseFloat(data.pricePerKgExcl) : Number(data.pricePerKgExcl);
-  const vatPercentage = typeof data.vatPercentage === 'string' ? parseFloat(data.vatPercentage) : Number(data.vatPercentage);
-  const invoiceDate = data.invoiceDate instanceof Date ? data.invoiceDate : new Date(data.invoiceDate);
-  const dueDate = data.dueDate instanceof Date ? data.dueDate : new Date(data.dueDate);
-
-  // ── Step 1: Fetch catch session to get real totals ──────────────────────────
-  const catchSessionRows = await db
-    .select()
-    .from(catchSessions)
-    .where(eq(catchSessions.id, data.catchSessionId))
-    .limit(1);
-
-  const catchSession = catchSessionRows[0] ?? null;
-
-  // ── Step 2: Fetch catch batches for per-batch line items ────────────────────
-  const batches = catchSession
-    ? await db
-        .select()
-        .from(catchBatches)
-        .where(eq(catchBatches.sessionId, data.catchSessionId))
-        .orderBy(asc(catchBatches.batchNumber))
-    : [];
-
-  // ── Step 3: Derive real totalBirds / totalWeight from catch session ─────────
-  const realTotalBirds = catchSession
-    ? (typeof catchSession.totalBirdsCaught === 'string'
-        ? parseInt(catchSession.totalBirdsCaught)
-        : Number(catchSession.totalBirdsCaught)) || 0
-    : 0;
-
-  const realTotalWeight = catchSession
-    ? (typeof catchSession.totalNetWeight === 'string'
-        ? parseFloat(catchSession.totalNetWeight)
-        : Number(catchSession.totalNetWeight)) || 0
-    : 0;
-
-  // ── Step 4: Calculate invoice financial totals using real weight ─────────────
-  const exclusiveTotal = realTotalWeight * pricePerKgExcl;
-  const vatAmount = exclusiveTotal * (vatPercentage / 100);
+  // Calculate totals
+  // Price is per kg, so multiply weight by price (not birds)
+  const exclusiveTotal = data.totalWeight * data.pricePerKgExcl;
+  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
   const inclusiveTotal = exclusiveTotal + vatAmount;
 
-  // ── Step 5: Insert the invoice header ───────────────────────────────────────
-  let result;
-  try {
-    result = await db.insert(invoices).values({
-      invoiceNumber: data.invoiceNumber,
-      customerId: data.customerId,
-      orderId: null,
-      invoiceDate: invoiceDate,
-      dueDate: dueDate,
-      subtotal: Math.round(exclusiveTotal * 100),
-      taxAmount: Math.round(vatAmount * 100),
-      totalAmount: Math.round(inclusiveTotal * 100),
-      paidAmount: 0,
-      balanceDue: Math.round(inclusiveTotal * 100),
-      status: "draft",
-      createdBy: data.createdBy,
-      catchSessionId: data.catchSessionId,
-      processorId: data.processorId,
-      pricePerKgExcl: parseFloat(pricePerKgExcl.toFixed(2)),
-      totalBirds: realTotalBirds,
-      totalWeight: parseFloat(realTotalWeight.toFixed(2)),
-      exclusiveTotal: parseFloat(exclusiveTotal.toFixed(2)),
-      vatAmount: parseFloat(vatAmount.toFixed(2)),
-      inclusiveTotal: parseFloat(inclusiveTotal.toFixed(2)),
-      vatPercentage: parseFloat(vatPercentage.toFixed(2)),
-      overallDiscountPercent: 0,
-      paymentMethod: null,
-      paymentDate: null,
-    });
-  } catch (error: any) {
-    console.error('Insert invoice error:', error?.message, error);
-    throw error;
-  }
+  const result = await db.insert(invoices).values({
+    invoiceNumber: data.invoiceNumber,
+    customerId: data.customerId,
+    invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString() : data.invoiceDate,
+    dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
+    subtotal: Math.round(exclusiveTotal * 100),
+    taxAmount: Math.round(vatAmount * 100),
+    totalAmount: Math.round(inclusiveTotal * 100),
+    paidAmount: 0,
+    balanceDue: Math.round(inclusiveTotal * 100),
+    status: "draft",
+    createdBy: data.createdBy,
+    catchSessionId: data.catchSessionId,
+    processorId: data.processorId,
+    pricePerKgExcl: data.pricePerKgExcl,
+    totalBirds: data.totalBirds,
+    totalWeight: data.totalWeight,
+    exclusiveTotal,
+    vatAmount,
+    inclusiveTotal,
+    vatPercentage: data.vatPercentage,
+  });
 
-  const invoiceId = result[0].insertId;
-  if (!invoiceId) {
-    throw new Error('Failed to get invoice ID from insert result');
-  }
-
-  // ── Step 6: Create line items from catch batches (or a single summary line) ─
-  try {
-    if (batches.length > 0) {
-      // One line item per catch batch
-      for (const batch of batches) {
-        const batchBirds = typeof batch.totalBirds === 'string' ? parseInt(batch.totalBirds) : Number(batch.totalBirds);
-        const batchWeight = typeof batch.totalNetWeight === 'string' ? parseFloat(batch.totalNetWeight) : Number(batch.totalNetWeight);
-        const batchExcl = batchWeight * pricePerKgExcl;
-        const batchVat = batchExcl * (vatPercentage / 100);
-        const batchIncl = batchExcl + batchVat;
-
-        await db.insert(invoiceLineItems).values({
-          invoiceId,
-          description: `Crate batch ${batch.batchNumber} – ${batchBirds} birds @ R${pricePerKgExcl.toFixed(2)}/kg`,
-          quantity: parseFloat(batchWeight.toFixed(2)),
-          pricePerUnit: parseFloat(pricePerKgExcl.toFixed(2)),
-          discount: 0,
-          discountAmount: 0,
-          vatPercentage: parseFloat(vatPercentage.toFixed(2)),
-          amount: parseFloat(batchIncl.toFixed(2)),
-        });
-      }
-      console.log(`[createInvoice] Created ${batches.length} line item(s) from catch batches for invoice ${invoiceId}`);
-    } else {
-      // Fallback: single aggregated line item from catch session totals
-      await db.insert(invoiceLineItems).values({
-        invoiceId,
-        description: `Live birds – ${realTotalBirds} birds @ R${pricePerKgExcl.toFixed(2)}/kg`,
-        quantity: parseFloat(realTotalWeight.toFixed(2)),
-        pricePerUnit: parseFloat(pricePerKgExcl.toFixed(2)),
-        discount: 0,
-        discountAmount: 0,
-        vatPercentage: parseFloat(vatPercentage.toFixed(2)),
-        amount: parseFloat(inclusiveTotal.toFixed(2)),
-      });
-      console.log(`[createInvoice] Created 1 aggregated line item for invoice ${invoiceId}`);
-    }
-  } catch (error) {
-    console.error('[createInvoice] Error creating line items:', error);
-    throw error;
-  }
-
-  return { insertId: invoiceId };
+  return { insertId: result.insertId };
 }
+
 
 export async function getCatchSessionById(catchSessionId: number) {
   const db = await getDb();
@@ -2953,18 +2852,18 @@ export async function getCatchSessionById(catchSessionId: number) {
 
 export async function getCompanySettings() {
   const db = await getDb();
-  if (!db) return null;
   const result = await db.query.companySettings.findFirst();
   return result || null;
 }
 
 export async function updateCompanySettings(data: any, userId: number) {
   const db = await getDb();
-  if (!db) throw new Error('Database not available');
   const existing = await db.query.companySettings.findFirst();
-
-  // Build an explicit update payload using only the known schema columns
-  const updatePayload: Record<string, any> = {};
+  
+  // Build explicit update payload from known schema fields
+  const updatePayload: any = {};
+  
+  // Only include fields that are defined in the schema
   if (data.companyName !== undefined) updatePayload.companyName = data.companyName;
   if (data.vatNumber !== undefined) updatePayload.vatNumber = data.vatNumber;
   if (data.registrationNumber !== undefined) updatePayload.registrationNumber = data.registrationNumber;
@@ -2978,7 +2877,8 @@ export async function updateCompanySettings(data: any, userId: number) {
   if (data.accountNumber !== undefined) updatePayload.accountNumber = data.accountNumber;
   if (data.accountReference !== undefined) updatePayload.accountReference = data.accountReference;
   if (data.logoUrl !== undefined) updatePayload.logoUrl = data.logoUrl;
-
+  if (data.timezone !== undefined) updatePayload.timezone = data.timezone;
+  
   if (existing) {
     return await db
       .update(companySettings)
