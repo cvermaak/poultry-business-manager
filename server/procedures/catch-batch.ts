@@ -1,3 +1,5 @@
+import { formatTimestampInTimezone } from "../lib/timezone-server";
+import { companySettings } from "../../drizzle/schema";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure } from "../_core/trpc";
@@ -85,6 +87,14 @@ export const addCatchCrateBatch = protectedProcedure
       .where(eq(catchBatches.sessionId, input.sessionId));
 
     const batchNumber = existingBatches.length + 1;
+	
+	// Get user's timezone from company settings
+	const settings = await db.query.companySettings.findFirst();
+	const timezone = settings?.timezone || 'UTC';
+
+	// Record timestamp in user's timezone
+	const now = new Date();
+	const recordedAtStr = formatTimestampInTimezone(now.getTime(), timezone, 'datetime');
 
     // Create single batch record
     await db.insert(catchBatches).values({
@@ -99,6 +109,7 @@ export const addCatchCrateBatch = protectedProcedure
       palletWeight: palletWeight > 0 ? palletWeight.toString() : null,
       totalNetWeight: totalNetWeight.toString(),
       averageBirdWeight: averageBirdWeight.toString(),
+	  recordedAt: recordedAtStr,  // Use timezone-aware timestamp
     });
 
     // Update session totals
