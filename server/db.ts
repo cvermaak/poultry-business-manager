@@ -1,4 +1,3 @@
-import { invoiceLineItems } from '../drizzle/schema';
 import { eq, and, gte, lte, desc, asc, sql, or, like, inArray, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
@@ -21,6 +20,7 @@ import {
   salesOrderItems,
   invoices,
   invoiceItems,
+  invoiceLineItems,
   payments,
   paymentAllocations,
   suppliers,
@@ -45,9 +45,9 @@ import {
   harvestRecords,
   processors,
   catchSessions,
+  catchBatches,
   companySettings,
 } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -96,6 +96,7 @@ const schema = {
   harvestRecords,
   processors,
   catchSessions,
+  catchBatches,
   companySettings,
 };
 
@@ -2808,85 +2809,127 @@ export async function createInvoice(data: {
 }): Promise<{ insertId: number }> {
   const db = await getDb();
 
-  // Convert all values to numbers to handle Decimal types from Drizzle ORM
+  // Convert scalar inputs to numbers to handle Decimal types from Drizzle ORM
   const pricePerKgExcl = typeof data.pricePerKgExcl === 'string' ? parseFloat(data.pricePerKgExcl) : Number(data.pricePerKgExcl);
-  const totalWeight = typeof data.totalWeight === 'string' ? parseFloat(data.totalWeight) : Number(data.totalWeight);
-  const totalBirds = typeof data.totalBirds === 'string' ? parseInt(data.totalBirds) : Number(data.totalBirds);
   const vatPercentage = typeof data.vatPercentage === 'string' ? parseFloat(data.vatPercentage) : Number(data.vatPercentage);
   const invoiceDate = data.invoiceDate instanceof Date ? data.invoiceDate : new Date(data.invoiceDate);
   const dueDate = data.dueDate instanceof Date ? data.dueDate : new Date(data.dueDate);
 
-  // Calculate totals
-  // Price is per kg, so multiply weight by price (not birds)
-  const exclusiveTotal = totalWeight * pricePerKgExcl;
+  // ── Step 1: Fetch catch session to get real totals ──────────────────────────
+  const catchSessionRows = await db
+    .select()
+    .from(catchSessions)
+    .where(eq(catchSessions.id, data.catchSessionId))
+    .limit(1);
+
+  const catchSession = catchSessionRows[0] ?? null;
+
+  // ── Step 2: Fetch catch batches for per-batch line items ────────────────────
+  const batches = catchSession
+    ? await db
+        .select()
+        .from(catchBatches)
+        .where(eq(catchBatches.sessionId, data.catchSessionId))
+        .orderBy(asc(catchBatches.batchNumber))
+    : [];
+
+  // ── Step 3: Derive real totalBirds / totalWeight from catch session ─────────
+  const realTotalBirds = catchSession
+    ? (typeof catchSession.totalBirdsCaught === 'string'
+        ? parseInt(catchSession.totalBirdsCaught)
+        : Number(catchSession.totalBirdsCaught)) || 0
+    : 0;
+
+  const realTotalWeight = catchSession
+    ? (typeof catchSession.totalNetWeight === 'string'
+        ? parseFloat(catchSession.totalNetWeight)
+        : Number(catchSession.totalNetWeight)) || 0
+    : 0;
+
+  // ── Step 4: Calculate invoice financial totals using real weight ─────────────
+  const exclusiveTotal = realTotalWeight * pricePerKgExcl;
   const vatAmount = exclusiveTotal * (vatPercentage / 100);
   const inclusiveTotal = exclusiveTotal + vatAmount;
-  const exclusiveTotalStr = exclusiveTotal.toFixed(2);
-  const vatAmountStr = vatAmount.toFixed(2);
-  const inclusiveTotalStr = inclusiveTotal.toFixed(2);
-  const vatPercentageStr = vatPercentage.toFixed(2);
-  const pricePerKgExclStr = pricePerKgExcl.toFixed(2);
-  const totalWeightStr = totalWeight.toFixed(2); // or toFixed(3) if you want 3 decimals
-  
-  let result;
-try {
-  result = await db.insert(invoices).values({
-    invoiceNumber: data.invoiceNumber,
-	customerId: data.customerId,
-	orderId: null,
-	invoiceDate: invoiceDate,
-	dueDate: dueDate,
-    subtotal: Math.round(exclusiveTotal * 100),
-    taxAmount: Math.round(vatAmount * 100),
-    totalAmount: Math.round(inclusiveTotal * 100),
-    paidAmount: 0,
-    balanceDue: Math.round(inclusiveTotal * 100),
-    status: "draft",
-    createdBy: data.createdBy,
-    catchSessionId: data.catchSessionId,
-    processorId: data.processorId,
-    pricePerKgExcl: parseFloat(pricePerKgExcl.toFixed(2)),
-    totalBirds: Math.round(totalBirds),
-    totalWeight: parseFloat(totalWeight.toFixed(2)),
-    exclusiveTotal: parseFloat(exclusiveTotal.toFixed(2)),
-    vatAmount: parseFloat(vatAmount.toFixed(2)),
-    inclusiveTotal: parseFloat(inclusiveTotal.toFixed(2)),
-    vatPercentage: parseFloat(vatPercentage.toFixed(2)),
-    overallDiscountPercent: 0,
-    paymentMethod: null,
-    paymentDate: null,
-  });
-} catch (error: any) {
-  console.error('Insert invoice error:', error?.message, error);
-  throw error;
-}
 
-  // Create a line item for the invoice
-  const subtotal = Math.round(exclusiveTotal * 100);
-  const taxAmount = Math.round(vatAmount * 100);
-  const totalAmount = Math.round(inclusiveTotal * 100);
-  
-  // Extract the invoice ID from the insert result
-  const invoiceId = (result as any).insertId;
-if (!invoiceId) {
-  throw new Error('Failed to get invoice ID from insert result');
-}
-  
-    try {
-    console.log(`[DEBUG] Creating line item for invoice ${invoiceId}`);
-    const lineItemResult = await db.insert(invoiceLineItems).values({
-      invoiceId: invoiceId,
-      description: `${data.totalBirds} Broiler Chickens @ R${data.pricePerKgExcl} per kg`,
-      quantity: parseFloat(totalWeight.toFixed(2)),
-      pricePerUnit: parseFloat(pricePerKgExcl.toFixed(2)),
-      discount: 0,
-      discountAmount: 0,
+  // ── Step 5: Insert the invoice header ───────────────────────────────────────
+  let result;
+  try {
+    result = await db.insert(invoices).values({
+      invoiceNumber: data.invoiceNumber,
+      customerId: data.customerId,
+      orderId: null,
+      invoiceDate: invoiceDate,
+      dueDate: dueDate,
+      subtotal: Math.round(exclusiveTotal * 100),
+      taxAmount: Math.round(vatAmount * 100),
+      totalAmount: Math.round(inclusiveTotal * 100),
+      paidAmount: 0,
+      balanceDue: Math.round(inclusiveTotal * 100),
+      status: "draft",
+      createdBy: data.createdBy,
+      catchSessionId: data.catchSessionId,
+      processorId: data.processorId,
+      pricePerKgExcl: parseFloat(pricePerKgExcl.toFixed(2)),
+      totalBirds: realTotalBirds,
+      totalWeight: parseFloat(realTotalWeight.toFixed(2)),
+      exclusiveTotal: parseFloat(exclusiveTotal.toFixed(2)),
+      vatAmount: parseFloat(vatAmount.toFixed(2)),
+      inclusiveTotal: parseFloat(inclusiveTotal.toFixed(2)),
       vatPercentage: parseFloat(vatPercentage.toFixed(2)),
-      amount: parseFloat(inclusiveTotal.toFixed(2)),
+      overallDiscountPercent: 0,
+      paymentMethod: null,
+      paymentDate: null,
     });
-    console.log(`[DEBUG] Line item created successfully`);
+  } catch (error: any) {
+    console.error('Insert invoice error:', error?.message, error);
+    throw error;
+  }
+
+  const invoiceId = result[0].insertId;
+  if (!invoiceId) {
+    throw new Error('Failed to get invoice ID from insert result');
+  }
+
+  // ── Step 6: Create line items from catch batches (or a single summary line) ─
+  try {
+    if (batches.length > 0) {
+      // One line item per catch batch
+      for (const batch of batches) {
+        const batchBirds = typeof batch.totalBirds === 'string' ? parseInt(batch.totalBirds) : Number(batch.totalBirds);
+        const batchWeight = typeof batch.totalNetWeight === 'string' ? parseFloat(batch.totalNetWeight) : Number(batch.totalNetWeight);
+        const batchExcl = batchWeight * pricePerKgExcl;
+        const batchVat = batchExcl * (vatPercentage / 100);
+        const batchIncl = batchExcl + batchVat;
+
+        await db.insert(invoiceLineItems).values({
+          invoiceId,
+          description: `Crate batch ${batch.batchNumber} – ${batchBirds} birds @ R${pricePerKgExcl.toFixed(2)}/kg`,
+          quantity: parseFloat(batchWeight.toFixed(2)),
+          pricePerUnit: parseFloat(pricePerKgExcl.toFixed(2)),
+          discount: 0,
+          discountAmount: 0,
+          vatPercentage: parseFloat(vatPercentage.toFixed(2)),
+          amount: parseFloat(batchIncl.toFixed(2)),
+        });
+      }
+      console.log(`[createInvoice] Created ${batches.length} line item(s) from catch batches for invoice ${invoiceId}`);
+    } else {
+      // Fallback: single aggregated line item from catch session totals
+      await db.insert(invoiceLineItems).values({
+        invoiceId,
+        description: `Live birds – ${realTotalBirds} birds @ R${pricePerKgExcl.toFixed(2)}/kg`,
+        quantity: parseFloat(realTotalWeight.toFixed(2)),
+        pricePerUnit: parseFloat(pricePerKgExcl.toFixed(2)),
+        discount: 0,
+        discountAmount: 0,
+        vatPercentage: parseFloat(vatPercentage.toFixed(2)),
+        amount: parseFloat(inclusiveTotal.toFixed(2)),
+      });
+      console.log(`[createInvoice] Created 1 aggregated line item for invoice ${invoiceId}`);
+    }
   } catch (error) {
-    console.error('[DEBUG] Error creating line item:', error);
+    console.error('[createInvoice] Error creating line items:', error);
+    throw error;
   }
 
   return { insertId: invoiceId };
@@ -2919,21 +2962,32 @@ export async function updateCompanySettings(data: any, userId: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
   const existing = await db.query.companySettings.findFirst();
-  
+
+  // Build an explicit update payload using only the known schema columns
+  const updatePayload: Record<string, any> = {};
+  if (data.companyName !== undefined) updatePayload.companyName = data.companyName;
+  if (data.vatNumber !== undefined) updatePayload.vatNumber = data.vatNumber;
+  if (data.registrationNumber !== undefined) updatePayload.registrationNumber = data.registrationNumber;
+  if (data.address !== undefined) updatePayload.address = data.address;
+  if (data.phone !== undefined) updatePayload.phone = data.phone;
+  if (data.email !== undefined) updatePayload.email = data.email;
+  if (data.website !== undefined) updatePayload.website = data.website;
+  if (data.bankName !== undefined) updatePayload.bankName = data.bankName;
+  if (data.branchCode !== undefined) updatePayload.branchCode = data.branchCode;
+  if (data.accountName !== undefined) updatePayload.accountName = data.accountName;
+  if (data.accountNumber !== undefined) updatePayload.accountNumber = data.accountNumber;
+  if (data.accountReference !== undefined) updatePayload.accountReference = data.accountReference;
+  if (data.logoUrl !== undefined) updatePayload.logoUrl = data.logoUrl;
+
   if (existing) {
     return await db
       .update(companySettings)
-      .set({
-        ...data,
-        updatedAt: new Date().toISOString(),
-      })
+      .set(updatePayload)
       .where(eq(companySettings.id, existing.id));
   } else {
     return await db.insert(companySettings).values({
-      ...data,
+      ...updatePayload,
       createdBy: userId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     });
   }
 }
