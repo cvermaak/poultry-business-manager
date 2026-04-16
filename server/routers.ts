@@ -1583,6 +1583,7 @@ export const appRouter = router({
         accountNumber: z.string().optional(),
         accountReference: z.string().optional(),
         logoUrl: z.string().optional(),
+		timezone: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         return await db.updateCompanySettings(input, ctx.user.id);
