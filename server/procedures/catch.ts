@@ -256,7 +256,53 @@ export const getCatchSessionDetails = protectedProcedure
       });
     }
 
-    const sessionData = session[0];
+    let sessionData = session[0];
+    
+    // Recalculate session totals from all batches to ensure accuracy
+    try {
+      const allBatches = await db
+        .select({
+          totalBirds: catchBatches.totalBirds,
+          totalNetWeight: catchBatches.totalNetWeight,
+        })
+        .from(catchBatches)
+        .where(eq(catchBatches.sessionId, input.sessionId));
+      
+      if (allBatches.length > 0) {
+        const totalBirdsCaught = allBatches.reduce((sum, b) => {
+          const birds = parseInt(String(b.totalBirds || '0'));
+          return sum + (isNaN(birds) ? 0 : birds);
+        }, 0);
+        
+        const totalWeightCaught = allBatches.reduce((sum, b) => {
+          const weight = parseFloat(String(b.totalNetWeight || '0'));
+          return sum + (isNaN(weight) ? 0 : weight);
+        }, 0);
+        
+        // Update session totals if they don't match
+        const currentBirds = parseInt(String(sessionData.totalBirdsCaught || '0'));
+        const currentWeight = parseFloat(String(sessionData.totalNetWeight || '0'));
+        
+        if (currentBirds !== totalBirdsCaught || currentWeight !== totalWeightCaught) {
+          console.log(`Correcting session ${input.sessionId}: ${currentBirds} -> ${totalBirdsCaught} birds, ${currentWeight} -> ${totalWeightCaught} kg`);
+          await db.update(catchSessions)
+            .set({
+              totalBirdsCaught: totalBirdsCaught,
+              totalNetWeight: totalWeightCaught.toString(),
+            })
+            .where(eq(catchSessions.id, input.sessionId));
+          
+          // Update the sessionData object with corrected values
+          sessionData = {
+            ...sessionData,
+            totalBirdsCaught: totalBirdsCaught,
+            totalNetWeight: totalWeightCaught.toString(),
+          };
+        }
+      }
+    } catch (error) {
+      console.error(`Error recalculating session ${input.sessionId} totals:`, error);
+    }
 
     // For individual weighing method, query catchCrates
     if (sessionData.weighingMethod === "individual") {
@@ -614,6 +660,150 @@ export const reforecastCatchPlanProcedure = protectedProcedure
     return updatedPlan;
   });
 
+// Sync offline batches to server
+export const syncOfflineBatches = protectedProcedure
+  .input(z.array(z.object({
+    sessionId: z.number().int(),
+    crateTypeId: z.number().int(),
+    numberOfCrates: z.number().int().positive(),
+    birdsPerCrate: z.number().int().positive(),
+    totalGrossWeight: z.number().positive(),
+    crateWeight: z.number().positive(),
+    palletWeight: z.number().optional(),
+  })))
+  .mutation(async ({ input }: { input: any }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+    
+    const results = [];
+    const sessionIds = new Set<number>();
+    
+    for (const batch of input) {
+      sessionIds.add(batch.sessionId);
+      try {
+        // Validate session exists
+        const session = await db
+          .select()
+          .from(catchSessions)
+          .where(eq(catchSessions.id, batch.sessionId))
+          .limit(1);
+        
+        if (!session.length) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Catch session not found" });
+        }
+        
+        // Validate crate type exists
+        const crateType = await db
+          .select()
+          .from(crateTypes)
+          .where(eq(crateTypes.id, batch.crateTypeId))
+          .limit(1);
+        
+        if (!crateType.length) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Crate type not found" });
+        }
+        
+        // Calculate net weight
+        const totalCrateWeight = batch.crateWeight * batch.numberOfCrates;
+        const palletWeight = batch.palletWeight || 0;
+        const totalNetWeight = batch.totalGrossWeight - totalCrateWeight - palletWeight;
+        
+        if (totalNetWeight <= 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Net weight is negative or zero" });
+        }
+        
+        // Calculate totals
+        const totalBirds = batch.birdsPerCrate * batch.numberOfCrates;
+        const averageBirdWeight = totalNetWeight / totalBirds;
+        
+        // Get current batch count for numbering
+        const existingBatches = await db
+          .select()
+          .from(catchBatches)
+          .where(eq(catchBatches.sessionId, batch.sessionId));
+        
+        const batchNumber = existingBatches.length + 1;
+        
+        // Get user's timezone from company settings
+        const settings = await db.query.companySettings.findFirst();
+        const timezone = settings?.timezone || 'UTC';
+        
+        // Record timestamp in user's timezone
+        const now = new Date();
+        const recordedAtStr = formatTimestampInTimezone(now.getTime(), timezone, 'datetime');
+        
+        // Insert batch record
+        await db.insert(catchBatches).values({
+          sessionId: batch.sessionId,
+          crateTypeId: batch.crateTypeId,
+          batchNumber,
+          numberOfCrates: batch.numberOfCrates,
+          birdsPerCrate: batch.birdsPerCrate,
+          totalBirds,
+          totalGrossWeight: batch.totalGrossWeight.toString(),
+          crateWeight: batch.crateWeight.toString(),
+          palletWeight: palletWeight > 0 ? palletWeight.toString() : null,
+          totalNetWeight: totalNetWeight.toString(),
+          averageBirdWeight: averageBirdWeight.toString(),
+          recordedAt: recordedAtStr,
+        });
+        
+        // Update session totals
+        const updatedSession = session[0];
+        const currentBirdsCaught = parseInt(updatedSession.totalBirdsCaught || '0') + totalBirds;
+        const currentWeightCaught = parseFloat(updatedSession.totalWeightCaught || '0') + totalNetWeight;
+        
+        await db.update(catchSessions)
+          .set({
+            totalBirdsCaught: currentBirdsCaught.toString(),
+            totalWeightCaught: currentWeightCaught.toString(),
+          })
+          .where(eq(catchSessions.id, batch.sessionId));
+        
+        results.push({ success: true, batchNumber });
+      } catch (error) {
+        console.error("Sync error:", error);
+        results.push({ success: false, error: (error as any).message });
+      }
+    }
+    
+    // Recalculate totals for all affected sessions
+    for (const sessionId of sessionIds) {
+      try {
+        const allBatches = await db
+          .select({
+            totalBirds: catchBatches.totalBirds,
+            totalNetWeight: catchBatches.totalNetWeight,
+          })
+          .from(catchBatches)
+          .where(eq(catchBatches.sessionId, sessionId));
+        
+        const totalBirdsCaught = allBatches.reduce((sum, b) => {
+          const birds = parseInt(String(b.totalBirds || '0'));
+          return sum + (isNaN(birds) ? 0 : birds);
+        }, 0);
+        
+        const totalWeightCaught = allBatches.reduce((sum, b) => {
+          const weight = parseFloat(String(b.totalNetWeight || '0'));
+          return sum + (isNaN(weight) ? 0 : weight);
+        }, 0);
+        
+        console.log(`Recalculating session ${sessionId}: ${totalBirdsCaught} birds, ${totalWeightCaught} kg from ${allBatches.length} batches`);
+        
+        await db.update(catchSessions)
+          .set({
+            totalBirdsCaught: totalBirdsCaught.toString(),
+            totalWeightCaught: totalWeightCaught.toString(),
+          })
+          .where(eq(catchSessions.id, sessionId));
+      } catch (error) {
+        console.error("Error recalculating session totals:", error);
+      }
+    }
+    
+    return { synced: results.filter((r: any) => r.success).length, results };
+  });
+
 export const catchRouter = router({
   // Crate Types
   createCrateType,
@@ -634,6 +824,9 @@ export const catchRouter = router({
   
   // Utilities
   calculateRecommendedBirdsPerCrate,
+  
+  // Offline Sync
+  syncOfflineBatches,
   
   // Reports
   generateTransportReport: catchReportProcedures.generateTransportReport,

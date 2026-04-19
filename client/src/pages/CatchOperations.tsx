@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText, CalendarDays, AlertTriangle, TrendingDown, Minus, Download, XCircle } from "lucide-react";
+import { Loader2, Play, CheckCircle, Package, TrendingUp, Weight, Edit, Trash2, FileText, CalendarDays, AlertTriangle, TrendingDown, Minus, Download, XCircle, Wifi, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
@@ -36,8 +36,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { initializeOfflineSync, onSyncStatusChange, getSyncStatus, syncOfflineData, updatePendingCounts } from "@/lib/offline-sync";
+import { initOfflineDB, addOfflineCrate, addOfflineBatch } from "@/lib/offline-db";
 
 export default function CatchOperations() {
+  // Offline sync state
+  const [syncStatus, setSyncStatus] = useState(getSyncStatus());
+  
+  // Get utils for mutations
+  const utils = trpc.useUtils();
+  const [offlineDBReady, setOfflineDBReady] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [showStartDialog, setShowStartDialog] = useState(false);
   const [showCompleteDialog, setShowCompleteDialog] = useState(false);
@@ -87,6 +95,29 @@ export default function CatchOperations() {
   const [totalGrossWeight, setTotalGrossWeight] = useState("");
   const [crateWeight, setCrateWeight] = useState("");
   const [batchPalletWeight, setBatchPalletWeight] = useState("");
+
+  // Initialize offline DB on mount
+  useEffect(() => {
+    const initOffline = async () => {
+      try {
+        await initOfflineDB();
+        setOfflineDBReady(true);
+      } catch (error) {
+        console.error("Failed to initialize offline DB:", error);
+      }
+    };
+
+    initOffline();
+  }, []);
+
+  // Subscribe to sync status changes
+  useEffect(() => {
+    const unsubscribe = onSyncStatusChange((status) => {
+      setSyncStatus(status);
+    });
+
+    return unsubscribe;
+  }, []);
 
   // Queries
   const { data: flocks } = trpc.flocks.list.useQuery();
@@ -216,6 +247,41 @@ export default function CatchOperations() {
     },
   });
 
+  // Create sync mutation for offline batches
+  const syncOfflineBatchesMutation = trpc.catch.syncOfflineBatches.useMutation({
+    onSuccess: async (data) => {
+      console.log("Offline batches synced successfully:", data);
+      // Force refetch session details with fresh data from server
+      const result = await refetchSession();
+      console.log("Session details after sync:", result.data);
+      toast.success(`${data.synced} batch(es) synced successfully`);
+    },
+    onError: (error) => {
+      console.error("Sync failed:", error);
+      toast.error(`Sync failed: ${error.message}`);
+    },
+  });
+
+  // Initialize offline sync after mutations are defined
+  useEffect(() => {
+    const unsubscribeSync = initializeOfflineSync(syncOfflineBatchesMutation);
+    return () => {
+      unsubscribeSync();
+    };
+  }, [syncOfflineBatchesMutation]);
+
+  // Sync completion is now handled in the mutation's onSuccess callback above
+
+  // Trigger sync when going back online
+  useEffect(() => {
+    if (offlineDBReady) {
+      // Attempt to sync when back online
+      syncOfflineData(syncOfflineBatchesMutation).catch(err => console.error("Sync error:", err));
+    }
+  }, [offlineDBReady, syncOfflineBatchesMutation]);
+
+
+
   const deleteBatch = trpc.catch.deleteCatchBatch.useMutation({
     onSuccess: () => {
       toast.success("Batch deleted successfully");
@@ -338,7 +404,7 @@ export default function CatchOperations() {
     });
   };
 
-  const handleAddCrate = () => {
+  const handleAddCrate = async () => {
     if (!activeSessionId) {
       toast.error("No active session");
       return;
@@ -352,15 +418,40 @@ export default function CatchOperations() {
       return;
     }
 
-    addCrate.mutate({
-      sessionId: activeSessionId,
-      crateTypeId: parseInt(selectedCrateTypeId),
-      birdCount: parseInt(birdCount),
-      grossWeight: parseFloat(grossWeight),
-    });
+    try {
+      if (!navigator.onLine) {
+        // Store locally when offline
+        await addOfflineCrate({
+          sessionId: activeSessionId,
+          crateTypeId: parseInt(selectedCrateTypeId),
+          birdCount: parseInt(birdCount),
+          grossWeight: parseFloat(grossWeight),
+          season,
+          transportDuration: transportDuration ? parseInt(transportDuration) : undefined,
+          recordedAt: new Date().toISOString(),
+          synced: false,
+        });
+        await updatePendingCounts();
+        toast.success("Crate saved offline - will sync when online");
+        // Clear form
+        setBirdCount("");
+        setGrossWeight("");
+        return;
+      }
+
+      // Normal online flow
+      addCrate.mutate({
+        sessionId: activeSessionId,
+        crateTypeId: parseInt(selectedCrateTypeId),
+        birdCount: parseInt(birdCount),
+        grossWeight: parseFloat(grossWeight),
+      });
+    } catch (error) {
+      toast.error("Failed to save crate");
+    }
   };
 
-  const handleAddCrateBatch = () => {
+  const handleAddCrateBatch = async () => {
     if (!activeSessionId) {
       toast.error("No active session");
       return;
@@ -374,15 +465,53 @@ export default function CatchOperations() {
       return;
     }
 
-    addCrateBatch.mutate({
-      sessionId: activeSessionId,
-      crateTypeId: parseInt(selectedCrateTypeId),
-      numberOfCrates: parseInt(numberOfCrates),
-      birdsPerCrate: parseInt(birdsPerCrate),
-      totalGrossWeight: parseFloat(totalGrossWeight),
-      crateWeight: parseFloat(crateWeight),
-      palletWeight: batchPalletWeight ? parseFloat(batchPalletWeight) : undefined,
-    });
+    try {
+      // Check if offline
+      const isOffline = !navigator.onLine;
+      if (isOffline) {
+        // Store locally when offline
+        try {
+          await addOfflineBatch({
+            sessionId: activeSessionId,
+            crateTypeId: parseInt(selectedCrateTypeId),
+            numberOfCrates: parseInt(numberOfCrates),
+            birdsPerCrate: parseInt(birdsPerCrate),
+            totalGrossWeight: parseFloat(totalGrossWeight),
+            crateWeight: parseFloat(crateWeight),
+            palletWeight: batchPalletWeight ? parseFloat(batchPalletWeight) : undefined,
+            recordedAt: new Date().toISOString(),
+            synced: false,
+          });
+          await updatePendingCounts();
+          toast.success("Batch saved offline - will sync when online");
+          // Invalidate session details to refresh the UI
+          await utils.catch.getCatchSessionDetails.invalidate({ sessionId: activeSessionId });
+          // Clear form
+          setNumberOfCrates("");
+          setBirdsPerCrate("");
+          setTotalGrossWeight("");
+          setCrateWeight("");
+          setBatchPalletWeight("");
+        } catch (offlineError) {
+          console.error("Offline batch error:", offlineError);
+          toast.error("Failed to save batch offline");
+        }
+        return;
+      }
+
+      // Normal online flow
+      addCrateBatch.mutate({
+        sessionId: activeSessionId,
+        crateTypeId: parseInt(selectedCrateTypeId),
+        numberOfCrates: parseInt(numberOfCrates),
+        birdsPerCrate: parseInt(birdsPerCrate),
+        totalGrossWeight: parseFloat(totalGrossWeight),
+        crateWeight: parseFloat(crateWeight),
+        palletWeight: batchPalletWeight ? parseFloat(batchPalletWeight) : undefined,
+      });
+    } catch (error) {
+      toast.error("Failed to save batch");
+    }
   };
 
   const handleCompleteSession = () => {
@@ -470,6 +599,44 @@ export default function CatchOperations() {
             <Button onClick={() => refetchSession()} className="mt-4">Retry</Button>
           </CardContent>
         </Card>
+      )}
+
+      {/* Offline Status Indicators */}
+      {!syncStatus.isOnline && (
+        <Alert className="mb-4 border-orange-200 bg-orange-50">
+          <WifiOff className="h-4 w-4 text-orange-600" />
+          <AlertDescription className="text-orange-800">
+            You are offline. Catch data will be saved locally and synced automatically when you're back online.
+            {syncStatus.pendingCrates > 0 || syncStatus.pendingBatches > 0 ? (
+              <span className="ml-2 font-semibold">
+                Pending: {syncStatus.pendingCrates} crates, {syncStatus.pendingBatches} batches
+              </span>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {syncStatus.isSyncing && (
+        <Alert className="mb-4 border-blue-200 bg-blue-50">
+          <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+          <AlertDescription className="text-blue-800">
+            Syncing offline data...
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {syncStatus.syncErrors.length > 0 && (
+        <Alert className="mb-4 border-red-200 bg-red-50">
+          <AlertTriangle className="h-4 w-4 text-red-600" />
+          <AlertDescription className="text-red-800">
+            <div>Sync errors occurred:</div>
+            <ul className="mt-2 ml-4 list-disc">
+              {syncStatus.syncErrors.map((error, idx) => (
+                <li key={idx}>{error}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Active Session Info */}
