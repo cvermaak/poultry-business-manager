@@ -2828,10 +2828,12 @@ export async function createInvoice(data: {
 }): Promise<{ insertId: number }> {
   const db = await getDb();
 
-  // Calculate totals — use provided values (from manual line items) or derive from weight × price
+  // Calculate totals — use provided exclusiveTotal (from manual line items) or derive from weight × price.
+  // vatAmount and inclusiveTotal are always recalculated from exclusiveTotal to prevent stale/zero
+  // values sent by the frontend from being persisted (e.g. vatAmount: 0 when line items are used).
   const exclusiveTotal = data.exclusiveTotal ?? (data.totalWeight * data.pricePerKgExcl);
-  const vatAmount = data.vatAmount ?? (exclusiveTotal * (data.vatPercentage / 100));
-  const inclusiveTotal = data.inclusiveTotal ?? (exclusiveTotal + vatAmount);
+  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
+  const inclusiveTotal = exclusiveTotal + vatAmount;
 
   const result = await db.insert(invoices).values({
     invoiceNumber: data.invoiceNumber,
