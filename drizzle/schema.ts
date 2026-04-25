@@ -1,4 +1,4 @@
-import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint, datetime } from "drizzle-orm/mysql-core"
+import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint } from "drizzle-orm/mysql-core"
 import { sql } from "drizzle-orm"
 
 export const catchBatches = mysqlTable("catch_batches", {
@@ -621,13 +621,13 @@ export const invoices = mysqlTable("invoices", {
 	pricePerKgExcl: decimal({ precision: 10, scale: 2 }),
 	totalBirds: int(),
 	totalWeight: decimal({ precision: 10, scale: 3 }),
-	exclusiveTotal: decimal({ precision: 15, scale: 2 }),
-	vatAmount: decimal({ precision: 15, scale: 2 }),
-	inclusiveTotal: decimal({ precision: 15, scale: 2 }),
-	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00'),
-	overallDiscountPercent: decimal({ precision: 5, scale: 2 }).default('0'),
-	paymentMethod: varchar({ length: 50 }),
-	paymentDate: datetime({ mode: 'string'}),
+	exclusiveTotal: decimal("exclusiveTotal", { precision: 15, scale: 2 }),
+	vatAmount: decimal("vatAmount", { precision: 15, scale: 2 }),
+	inclusiveTotal: decimal("inclusiveTotal", { precision: 15, scale: 2 }),
+	vatPercentage: decimal("vatPercentage", { precision: 5, scale: 2 }).default('15.00'),
+	overallDiscountPercent: decimal("overallDiscountPercent", { precision: 5, scale: 2 }).default('0'),
+	paymentMethod: varchar("paymentMethod", { length: 50 }),
+	paymentDate: timestamp("paymentDate", { mode: 'string' }),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
