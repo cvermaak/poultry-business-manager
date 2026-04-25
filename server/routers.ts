@@ -1594,43 +1594,88 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({
         customerId: z.number(),
-        catchSessionId: z.number(),
-        processorId: z.number(),
-        pricePerKgExcl: z.number().positive(),
+        catchSessionId: z.number().optional(),
+        processorId: z.number().optional(),
+        pricePerKgExcl: z.number().nonnegative().default(0),
         invoiceDate: z.date().optional(),
         dueDate: z.date().optional(),
-        totalBirds: z.number().positive().optional(),
-        totalWeight: z.number().positive().optional(),
+        totalBirds: z.number().nonnegative().optional(),
+        totalWeight: z.number().nonnegative().optional(),
         vatPercentage: z.number().default(15),
+        lineItems: z.array(z.object({
+          description: z.string(),
+          quantity: z.number(),
+          unitPrice: z.number(),
+          discountPercent: z.number().default(0),
+          vatPercent: z.number().default(15),
+        })).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         try {
-          // Get catch session details to fill in missing fields
-          const catchSession = await db.getCatchSessionById(input.catchSessionId);
-          if (!catchSession) {
-            throw new Error('Catch session not found');
-          }
-
           const invoiceNumber = `INV-${Date.now()}`;
           const invoiceDate = input.invoiceDate || new Date();
           const dueDate = input.dueDate || new Date(invoiceDate.getTime() + 30 * 24 * 60 * 60 * 1000);
-          const totalBirds = input.totalBirds || (catchSession as any).totalBirdsCaught || 0;
-          const totalWeight = input.totalWeight || (catchSession as any).totalNetWeight || 0;
+
+          let totalBirds = input.totalBirds || 0;
+          let totalWeight = input.totalWeight || 0;
+          let pricePerKgExcl = input.pricePerKgExcl;
+
+          // If a catch session is provided, derive totals from it
+          if (input.catchSessionId) {
+            const catchSession = await db.getCatchSessionById(input.catchSessionId);
+            if (!catchSession) {
+              throw new Error('Catch session not found');
+            }
+            totalBirds = input.totalBirds || (catchSession as any).totalBirdsCaught || 0;
+            totalWeight = input.totalWeight || parseFloat((catchSession as any).totalNetWeight || '0');
+          }
+
+          // Calculate totals from manual line items when provided
+          let exclusiveTotal: number | undefined;
+          let vatAmount: number | undefined;
+          let inclusiveTotal: number | undefined;
+
+          if (input.lineItems && input.lineItems.length > 0) {
+            exclusiveTotal = 0;
+            vatAmount = 0;
+            for (const item of input.lineItems) {
+              const subtotal = item.quantity * item.unitPrice;
+              const discount = subtotal * (item.discountPercent / 100);
+              const excl = subtotal - discount;
+              const vat = excl * (item.vatPercent / 100);
+              exclusiveTotal += excl;
+              vatAmount += vat;
+            }
+            inclusiveTotal = exclusiveTotal + vatAmount;
+            // Derive a representative pricePerKgExcl for the invoice header
+            if (totalWeight > 0) {
+              pricePerKgExcl = exclusiveTotal / totalWeight;
+            }
+          }
 
           console.log('[INVOICE CREATE] Creating invoice with:', { customerId: input.customerId, totalBirds, totalWeight });
           const result = await db.createInvoice({
             invoiceNumber,
             customerId: input.customerId,
-            catchSessionId: input.catchSessionId,
-            processorId: input.processorId,
+            catchSessionId: input.catchSessionId ?? null,
+            processorId: input.processorId ?? null,
             invoiceDate,
             dueDate,
-            pricePerKgExcl: input.pricePerKgExcl,
+            pricePerKgExcl,
             totalBirds,
             totalWeight,
             vatPercentage: input.vatPercentage,
+            exclusiveTotal,
+            vatAmount,
+            inclusiveTotal,
             createdBy: ctx.user.id,
           });
+
+          // Save manual line items to invoice_line_items table
+          if (input.lineItems && input.lineItems.length > 0) {
+            await db.createInvoiceLineItems(result.insertId, input.lineItems);
+          }
+
           console.log('[INVOICE CREATE] Invoice created successfully:', result);
           return result;
         } catch (error) {
@@ -1638,6 +1683,7 @@ export const appRouter = router({
           throw error;
         }
       }),
+
 
     list: protectedProcedure
       .input(z.object({

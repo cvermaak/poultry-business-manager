@@ -20,6 +20,7 @@ import {
   salesOrderItems,
   invoices,
   invoiceItems,
+  invoiceLineItems,
   payments,
   paymentAllocations,
   suppliers,
@@ -76,6 +77,7 @@ export async function getDb() {
           salesOrderItems,
           invoices,
           invoiceItems,
+          invoiceLineItems,
           payments,
           paymentAllocations,
           suppliers,
@@ -915,7 +917,29 @@ export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  // Fetch from both invoice_items (legacy) and invoice_line_items (manual)
+  const legacyItems = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  const manualItems = await db.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, invoiceId));
+
+  // Normalise manual line items to the same shape expected by the PDF generator
+  const normalisedManual = manualItems.map((item) => ({
+    id: item.id,
+    invoiceId: item.invoiceId,
+    description: item.description || '',
+    quantity: item.quantity,
+    unit: 'unit',
+    unitPrice: item.unitPrice,
+    subtotal: null,
+    taxRate: item.vatPercent,
+    taxAmount: null,
+    totalAmount: null,
+    discount: item.discountPercent,
+    vatPercentage: item.vatPercent,
+    pricePerUnit: item.unitPrice,
+    createdAt: item.createdAt,
+  }));
+
+  return [...legacyItems, ...normalisedManual];
 }
 
 export async function listPayments(customerId?: number) {
@@ -2789,23 +2813,25 @@ export async function getAllActivityLogs() {
 export async function createInvoice(data: {
   invoiceNumber: string;
   customerId: number;
-  catchSessionId: number;
-  processorId: number;
+  catchSessionId?: number | null;
+  processorId?: number | null;
   invoiceDate: Date;
   dueDate: Date;
   pricePerKgExcl: number;
   totalBirds: number;
   totalWeight: number;
   vatPercentage: number;
+  exclusiveTotal?: number;
+  vatAmount?: number;
+  inclusiveTotal?: number;
   createdBy?: number;
 }): Promise<{ insertId: number }> {
   const db = await getDb();
 
-  // Calculate totals
-  // Price is per kg, so multiply weight by price (not birds)
-  const exclusiveTotal = data.totalWeight * data.pricePerKgExcl;
-  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
-  const inclusiveTotal = exclusiveTotal + vatAmount;
+  // Calculate totals — use provided values (from manual line items) or derive from weight × price
+  const exclusiveTotal = data.exclusiveTotal ?? (data.totalWeight * data.pricePerKgExcl);
+  const vatAmount = data.vatAmount ?? (exclusiveTotal * (data.vatPercentage / 100));
+  const inclusiveTotal = data.inclusiveTotal ?? (exclusiveTotal + vatAmount);
 
   const result = await db.insert(invoices).values({
     invoiceNumber: data.invoiceNumber,
@@ -2819,8 +2845,8 @@ export async function createInvoice(data: {
     balanceDue: Math.round(inclusiveTotal * 100),
     status: "draft",
     createdBy: data.createdBy,
-    catchSessionId: data.catchSessionId,
-    processorId: data.processorId,
+    catchSessionId: data.catchSessionId ?? null,
+    processorId: data.processorId ?? null,
     pricePerKgExcl: data.pricePerKgExcl,
     totalBirds: data.totalBirds,
     totalWeight: data.totalWeight,
@@ -2831,6 +2857,39 @@ export async function createInvoice(data: {
   });
 
   return { insertId: result.insertId };
+}
+
+export async function createInvoiceLineItems(
+  invoiceId: number,
+  items: Array<{
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    discountPercent: number;
+    vatPercent: number;
+  }>
+): Promise<void> {
+  const db = await getDb();
+  if (!db || items.length === 0) return;
+
+  const rows = items.map((item) => {
+    const subtotal = item.quantity * item.unitPrice;
+    const discount = subtotal * (item.discountPercent / 100);
+    const exclusive = subtotal - discount;
+    const vat = exclusive * (item.vatPercent / 100);
+    const lineTotal = exclusive + vat;
+    return {
+      invoiceId,
+      description: item.description,
+      quantity: item.quantity.toString(),
+      unitPrice: item.unitPrice.toString(),
+      discountPercent: item.discountPercent.toString(),
+      vatPercent: item.vatPercent.toString(),
+      lineTotal: lineTotal.toString(),
+    };
+  });
+
+  await db.insert(invoiceLineItems).values(rows);
 }
 
 

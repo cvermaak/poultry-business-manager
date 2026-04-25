@@ -44,13 +44,13 @@ export function CreateInvoice() {
 
   // Fetch data for dropdowns
   const { data: customers } = trpc.customers.list.useQuery();
-  const { data: catchSessions } = trpc.catch.list.useQuery();
-  const { data: processors } = trpc.processors.list.useQuery();
-  
+  const { data: catchSessions } = trpc.catch.listCatchSessions.useQuery({});
+  const { data: processors } = trpc.processor.list.useQuery();
+
   // Fetch selected catch session details
-  const { data: selectedCatchSession } = trpc.catch.getById.useQuery(
-    parseInt(formData.catchSessionId),
-    { enabled: !!formData.catchSessionId }
+  const { data: selectedCatchSession } = trpc.catch.getCatchSessionDetails.useQuery(
+    { sessionId: parseInt(formData.catchSessionId) },
+    { enabled: !!formData.catchSessionId && !isNaN(parseInt(formData.catchSessionId)) }
   );
 
   // Create invoice mutation
@@ -135,12 +135,12 @@ export function CreateInvoice() {
 
   // Update line items when catch session is selected
   useEffect(() => {
-    if (selectedCatchSession && formData.catchSessionId) {
-      // Create a line item from the catch session
-      const totalBirds = selectedCatchSession.totalBirdsCaught || 0;
-      const totalWeight = parseFloat(selectedCatchSession.totalNetWeight?.toString() || '0');
+    if (selectedCatchSession?.session && formData.catchSessionId) {
+      const session = selectedCatchSession.session;
+      const totalBirds = session.totalBirdsCaught || 0;
+      const totalWeight = parseFloat(session.totalNetWeight?.toString() || '0');
       const pricePerKg = totalWeight > 0 ? totals.totalExclusive / totalWeight : 0;
-      
+
       setLineItems([
         {
           id: "1",
@@ -157,26 +157,34 @@ export function CreateInvoice() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.customerId || !formData.catchSessionId || !formData.processorId) {
-      toast.error("Please fill in all required fields");
+    if (!formData.customerId) {
+      toast.error("Please select a customer");
       return;
     }
 
     setIsLoading(true);
     try {
-      const totalBirds = selectedCatchSession?.totalBirdsCaught || 0;
-      const totalWeight = parseFloat(selectedCatchSession?.totalNetWeight?.toString() || '0');
-      
+      const session = selectedCatchSession?.session;
+      const totalBirds = session?.totalBirdsCaught || 0;
+      const totalWeight = parseFloat(session?.totalNetWeight?.toString() || '0');
+
       await createInvoiceMutation.mutateAsync({
         customerId: parseInt(formData.customerId),
-        catchSessionId: parseInt(formData.catchSessionId),
-        processorId: parseInt(formData.processorId),
+        catchSessionId: formData.catchSessionId ? parseInt(formData.catchSessionId) : undefined,
+        processorId: formData.processorId ? parseInt(formData.processorId) : undefined,
         invoiceDate: new Date(formData.invoiceDate),
         dueDate: new Date(formData.dueDate),
         pricePerKgExcl: totals.totalExclusive > 0 && totalWeight > 0 ? totals.totalExclusive / totalWeight : 0,
         totalBirds: totalBirds,
         totalWeight: totalWeight,
         vatPercentage: 15,
+        lineItems: lineItems.map((item) => ({
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountPercent: item.discountPercent,
+          vatPercent: item.vatPercent,
+        })),
       });
     } finally {
       setIsLoading(false);
@@ -214,15 +222,15 @@ export function CreateInvoice() {
                 </div>
 
                 <div>
-                  <Label htmlFor="catchSessionId">Catch Session *</Label>
+                  <Label htmlFor="catchSessionId">Catch Session</Label>
                   <Select value={formData.catchSessionId} onValueChange={(value) => setFormData({ ...formData, catchSessionId: value })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select catch session" />
+                      <SelectValue placeholder="Select catch session (optional)" />
                     </SelectTrigger>
                     <SelectContent>
                       {catchSessions?.map((session: any) => (
                         <SelectItem key={session.id} value={session.id.toString()}>
-                          Session {session.id}
+                          {session.flockNumber ? `Flock ${session.flockNumber} — ` : ""}Session {session.id} ({session.catchDate?.slice(0, 10) ?? ""})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -230,10 +238,10 @@ export function CreateInvoice() {
                 </div>
 
                 <div>
-                  <Label htmlFor="processorId">Processor *</Label>
+                  <Label htmlFor="processorId">Processor</Label>
                   <Select value={formData.processorId} onValueChange={(value) => setFormData({ ...formData, processorId: value })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select processor" />
+                      <SelectValue placeholder="Select processor (optional)" />
                     </SelectTrigger>
                     <SelectContent>
                       {processors?.map((processor: any) => (
