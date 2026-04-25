@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -177,7 +178,9 @@ export function CreateInvoice() {
         pricePerKgExcl: totals.totalExclusive > 0 && totalWeight > 0 ? totals.totalExclusive / totalWeight : 0,
         totalBirds: totalBirds,
         totalWeight: totalWeight,
-        vatPercentage: 15,
+        vatPercentage: lineItems.some((item) => item.vatPercent > 0)
+          ? lineItems.find((item) => item.vatPercent > 0)?.vatPercent ?? 0
+          : 0,
         lineItems: lineItems.map((item) => ({
           description: item.description,
           quantity: item.quantity,
@@ -313,7 +316,14 @@ export function CreateInvoice() {
                       <th className="text-right py-2 w-20">Qty</th>
                       <th className="text-right py-2 w-24">Unit Price</th>
                       <th className="text-right py-2 w-20">Discount %</th>
-                      <th className="text-right py-2 w-20">VAT %</th>
+                      <th className="text-right py-2 w-28">
+                        <div>VAT %</div>
+                        <div className="text-xs font-normal text-muted-foreground">0% for zero-rated</div>
+                      </th>
+                      <th className="text-center py-2 w-24">
+                        <div>Zero-rated</div>
+                        <div className="text-xs font-normal text-muted-foreground">Set VAT to 0%</div>
+                      </th>
                       <th className="text-right py-2 w-24">Total</th>
                       <th className="w-10"></th>
                     </tr>
@@ -363,11 +373,28 @@ export function CreateInvoice() {
                             <Input
                               type="number"
                               value={item.vatPercent}
-                              onChange={(e) => handleLineItemChange(item.id, "vatPercent", parseFloat(e.target.value))}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                handleLineItemChange(item.id, "vatPercent", isNaN(val) ? 0 : val);
+                              }}
                               className="text-sm text-right"
                               min="0"
                               max="100"
+                              step="1"
+                              aria-label="VAT percentage"
                             />
+                          </td>
+                          <td className="py-2 text-center">
+                            <div className="flex items-center justify-center">
+                              <Checkbox
+                                id={`zero-rated-${item.id}`}
+                                checked={item.vatPercent === 0}
+                                onCheckedChange={(checked) =>
+                                  handleLineItemChange(item.id, "vatPercent", checked ? 0 : 15)
+                                }
+                                aria-label="Zero-rated (0% VAT)"
+                              />
+                            </div>
                           </td>
                           <td className="py-2 text-right font-semibold">
                             R{itemTotal.inclusive.toFixed(2)}
@@ -409,7 +436,15 @@ export function CreateInvoice() {
                     <span>R{totals.totalExclusive.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span>VAT (15%):</span>
+                    <span>
+                      VAT{" "}
+                      {lineItems.every((item) => item.vatPercent === 0)
+                        ? "(Zero-rated)"
+                        : lineItems.every((item) => item.vatPercent === lineItems[0].vatPercent)
+                        ? `(${lineItems[0].vatPercent}%)`
+                        : "(mixed rates)"}
+                      :
+                    </span>
                     <span>R{totals.totalVat.toFixed(2)}</span>
                   </div>
                   <div className="border-t pt-2 flex justify-between font-bold text-lg">
