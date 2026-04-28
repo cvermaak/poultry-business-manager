@@ -158,8 +158,8 @@ export function CreateInvoice() {
 
       await createInvoiceMutation.mutateAsync({
         customerId: parseInt(formData.customerId),
-        catchSessionId: formData.catchSessionId ? parseInt(formData.catchSessionId) : undefined,
-        processorId: formData.processorId ? parseInt(formData.processorId) : undefined,
+        catchSessionId: formData.catchSessionId !== "" ? parseInt(formData.catchSessionId, 10) : undefined,
+        processorId: formData.processorId !== "" ? parseInt(formData.processorId, 10) : undefined,
         invoiceDate: new Date(formData.invoiceDate),
         dueDate: new Date(formData.dueDate),
         pricePerKgExcl,
