@@ -20,14 +20,14 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
-import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, Clipboard, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, ScrollText } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, Clipboard, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, ScrollText, Cog, ChevronRight } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
 import { Button } from "./ui/button";
 import LoginPage from "@/pages/Login";
 import { ReminderNotifications } from "@/components/ReminderNotifications";
+import { useIsMobile } from "@/hooks/useMobile";
 
 type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
 
@@ -36,6 +36,8 @@ interface MenuItem {
   label: string;
   path: string;
   roles?: UserRole[]; // If undefined, accessible to all roles
+  children?: MenuItem[]; // Submenu items
+  indent?: boolean; // Whether this item is indented as a child
 }
 
 const menuItems: MenuItem[] = [
@@ -52,7 +54,7 @@ const menuItems: MenuItem[] = [
   { icon: Users, label: "Customers", path: "/customers", roles: ["admin", "sales_staff"] },
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
-  { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"] },
+  { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"], indent: true },
   { icon: DollarSign, label: "Finance", path: "/finance", roles: ["admin", "accountant"] },
   { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"] },
@@ -205,19 +207,20 @@ function DashboardLayoutContent({
               {menuItems
                 .filter(item => canAccessMenuItem(item, user?.role))
                 .map(item => {
-                  const isActive = location === item.path;
+                  const isActive = location === item.path || (item.path !== '/' && location.startsWith(item.path) && !item.indent);
+                  const isExactActive = location === item.path;
                   return (
                     <SidebarMenuItem key={item.path}>
                       <SidebarMenuButton
-                        isActive={isActive}
+                        isActive={isExactActive}
                         onClick={() => setLocation(item.path)}
                         tooltip={item.label}
-                        className={`h-10 transition-all font-normal`}
+                        className={`h-10 transition-all font-normal ${item.indent ? 'pl-8' : ''}`}
                       >
                         <item.icon
-                          className={`h-4 w-4 ${isActive ? "text-sidebar-primary" : ""}`}
+                          className={`h-4 w-4 ${isExactActive ? "text-sidebar-primary" : ""} ${item.indent ? 'opacity-70' : ''}`}
                         />
-                        <span>{item.label}</span>
+                        <span className={item.indent ? 'text-sm' : ''}>{item.label}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );

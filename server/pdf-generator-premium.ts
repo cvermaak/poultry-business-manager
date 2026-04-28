@@ -32,14 +32,17 @@ interface InvoiceData {
     branchCode: string;
     accountName: string;
     accountNumber: string;
+    reference?: string;
   };
-  companyName?: string;
-  companyVATNo?: string;
-  companyRegNo?: string;
-  companyAddress?: string;
-  companyPhone?: string;
-  companyEmail?: string;
-  companyWebsite?: string;
+  companyInfo?: {
+    name: string;
+    vatNumber?: string;
+    registrationNumber?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    website?: string;
+  };
 }
 
 export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promise<Buffer> {
@@ -142,9 +145,9 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   });
 
   y -= (logoHeight + 5);
-  y -= 10; // Minimal gap after logo - move company block much higher
+  y -= 4; // Small gap after logo — company block sits close to logo
 
-  // ===== COMPANY INFO BOX - moved significantly higher =====
+  // ===== COMPANY INFO BOX =====
   page.drawRectangle({
     x: 40,
     y: y - 50,
@@ -155,36 +158,44 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderWidth: 0.5,
   });
 
-  const companyName = invoiceData.companyName || 'AFGRO FARMING GROUP (PTY) LTD';
-  const companyVATNo = invoiceData.companyVATNo || '4960323782';
-  const companyRegNo = invoiceData.companyRegNo || '2024/149547/07';
-  const companyAddress = invoiceData.companyAddress || '221 Market Street, Fairland, Randburg 2170';
-  const companyPhone = invoiceData.companyPhone || '+27 (0)11 234 5678';
-  const companyEmail = invoiceData.companyEmail || 'info@afgro.co.za';
-  const companyWebsite = invoiceData.companyWebsite || 'www.afgro.co.za';
-
-  page.drawText(companyName, {
+  // Company name — use settings value or fallback
+  const companyName = invoiceData.companyInfo?.name || 'AFGRO FARMING GROUP (PTY) LTD';
+  page.drawText(companyName.toUpperCase(), {
     x: 50,
     y: y - 15,
     size: normalSize,
     color: darkBlue,
   });
 
-  page.drawText(`VAT NO: ${companyVATNo} | REG NO: ${companyRegNo} | ${companyAddress}`, {
+  // Build registration line from settings
+  const regParts: string[] = [];
+  if (invoiceData.companyInfo?.vatNumber) regParts.push(`VAT NO: ${invoiceData.companyInfo.vatNumber}`);
+  if (invoiceData.companyInfo?.registrationNumber) regParts.push(`REG NO: ${invoiceData.companyInfo.registrationNumber}`);
+  if (invoiceData.companyInfo?.address) regParts.push(invoiceData.companyInfo.address);
+  const regLine = regParts.length > 0 ? regParts.join(' | ') : 'VAT NO: — | REG NO: —';
+  page.drawText(regLine, {
     x: 50,
     y: y - 28,
     size: smallSize,
     color: gray,
   });
 
-  page.drawText(`Phone: ${companyPhone} | Email: ${companyEmail} | Web: ${companyWebsite}`, {
-    x: 50,
-    y: y - 38,
-    size: smallSize,
-    color: gray,
-  });
+  // Build contact line from settings
+  const contactParts: string[] = [];
+  if (invoiceData.companyInfo?.phone) contactParts.push(`Phone: ${invoiceData.companyInfo.phone}`);
+  if (invoiceData.companyInfo?.email) contactParts.push(`Email: ${invoiceData.companyInfo.email}`);
+  if (invoiceData.companyInfo?.website) contactParts.push(`Web: ${invoiceData.companyInfo.website}`);
+  const contactLine = contactParts.length > 0 ? contactParts.join(' | ') : '';
+  if (contactLine) {
+    page.drawText(contactLine, {
+      x: 50,
+      y: y - 38,
+      size: smallSize,
+      color: gray,
+    });
+  }
 
-  y -= 100; // Reduced gap - move invoice details higher to consume more white space
+  y -= 100; // Gap before invoice details section (content below stays in same position)
 
   // ===== INVOICE DETAILS AND CUSTOMER INFO SECTION =====
   // Left column - Invoice details
@@ -278,13 +289,15 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderColor: darkBlue,
   });
 
+  // Column layout (tableWidth = 515px):
+  // Description: 180px | Weight(kg): 65px | Unit Price: 80px | Discount%: 60px | VAT%: 55px | Amount: 75px = 515px
   const cols = [
-    { header: 'Description', width: 180, x: tableX + 3 },
-    { header: 'Qty', width: 45, x: tableX + 183 },
-    { header: 'Unit Price', width: 70, x: tableX + 228 },
-    { header: 'Discount %', width: 60, x: tableX + 298 },
-    { header: 'VAT %', width: 50, x: tableX + 358 },
-    { header: 'Amount', width: 75, x: tableX + 408 },
+    { header: 'Description',  width: 180, x: tableX + 3   },
+    { header: 'Weight (kg)',  width: 65,  x: tableX + 185  },
+    { header: 'Unit Price',  width: 80,  x: tableX + 252  },
+    { header: 'Discount %',  width: 60,  x: tableX + 334  },
+    { header: 'VAT %',       width: 55,  x: tableX + 396  },
+    { header: 'Amount',      width: 75,  x: tableX + 453  },
   ];
 
   for (const col of cols) {
@@ -315,24 +328,30 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     });
 
     const discount = item.discount || 0;
-    const vat = item.vatPercentage || 15;
+    const vat = item.vatPercentage !== undefined && item.vatPercentage !== null ? item.vatPercentage : 0;
     const subtotal = item.quantity * item.pricePerUnit;
     const discountAmount = subtotal * (discount / 100);
     const exclusive = subtotal - discountAmount;
     const vatAmount = exclusive * (vat / 100);
     const total = exclusive + vatAmount;
 
-    // Description
-    page.drawText(item.description, {
+    // Description — use 8pt so full text fits in 180px without overflow
+    // At 8pt, ~50 chars fit; truncate only as a safety net
+    const maxDescChars = 50;
+    const descText = item.description.length > maxDescChars
+      ? item.description.substring(0, maxDescChars - 1) + '…'
+      : item.description;
+    page.drawText(descText, {
       x: cols[0].x,
-      y: rowY - 10,
-      size: normalSize,
+      y: rowY - 9,
+      size: 8,
       color: black,
     });
 
-    // Quantity
-    page.drawText(item.quantity.toString(), {
-      x: cols[1].x + 3,
+    // Weight (kg)
+    const weightText = item.weight != null ? item.weight.toFixed(2) : item.quantity.toString();
+    page.drawText(weightText, {
+      x: cols[1].x + 5,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -340,7 +359,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Unit Price
     page.drawText(`R ${item.pricePerUnit.toFixed(2)}`, {
-      x: cols[2].x + 3,
+      x: cols[2].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -348,7 +367,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Discount %
     page.drawText(`${discount.toFixed(2)}%`, {
-      x: cols[3].x + 3,
+      x: cols[3].x + 10,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -356,7 +375,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // VAT %
     page.drawText(`${vat.toFixed(2)}%`, {
-      x: cols[4].x + 3,
+      x: cols[4].x + 5,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -425,13 +444,17 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   if (invoiceData.bankDetails) {
     page.drawText(`Bank: ${invoiceData.bankDetails.bank}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
-    page.drawText(`Branch Code: ${invoiceData.bankDetails.branchCode}`, { x: 40, y, size: smallSize, color: black });
-    y -= 9;
+    if (invoiceData.bankDetails.branchCode) {
+      page.drawText(`Branch Code: ${invoiceData.bankDetails.branchCode}`, { x: 40, y, size: smallSize, color: black });
+      y -= 9;
+    }
     page.drawText(`Account Name: ${invoiceData.bankDetails.accountName}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
     page.drawText(`Account Number: ${invoiceData.bankDetails.accountNumber}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
-    page.drawText(`Reference: ${invoiceData.invoiceNumber}`, { x: 40, y, size: smallSize, color: black });
+    page.drawText(`Reference: ${invoiceData.bankDetails.reference || invoiceData.invoiceNumber}`, { x: 40, y, size: smallSize, color: black });
+  } else {
+    page.drawText('No banking details configured. Please update company settings.', { x: 40, y, size: smallSize, color: gray });
   }
 
   // ===== TERMS AND CONDITIONS - moved 20mm lower =====
