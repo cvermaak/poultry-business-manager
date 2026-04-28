@@ -20,7 +20,8 @@ export default function Sales() {
 
   const { data: invoices, isLoading, refetch, error: invoicesError } = trpc.invoices.list.useQuery({}, { retry: 1 });
   const { data: customers, error: customersError } = trpc.customers.list.useQuery({ isActive: true }, { retry: 1 });
-  const { data: catchSessions } = trpc.catch.listCatchSessions.useQuery({ status: "completed" as const }, { retry: 1 });
+  const { data: catchSessionsResponse } = trpc.catch.listCatchSessions.useQuery({ status: "completed" as const, page: 1, pageSize: 100 }, { retry: 1 });
+  const catchSessions = catchSessionsResponse?.sessions;
   const { data: processors } = trpc.processor.list.useQuery(undefined, { retry: 1 });
   const createMutation = trpc.invoices.create.useMutation();
   const createMultipleMutation = trpc.invoices.createMultiple.useMutation();
@@ -259,7 +260,7 @@ export default function Sales() {
                       className="w-full px-3 py-2 border border-input rounded-md bg-background"
                     >
                       <option value="">Select a catch session</option>
-                      {catchSessions?.map((session: any) => (
+                      {(catchSessions ?? []).map((session: any) => (
                         <option key={session.id} value={session.id}>
                           {formatCatchSessionDisplay(session)}
                         </option>
@@ -285,7 +286,7 @@ export default function Sales() {
                 <div className="space-y-3">
                   <Label>Select Catch Sessions & Set Prices *</Label>
                   <div className="border rounded-md p-3 max-h-64 overflow-y-auto space-y-2">
-                    {catchSessions?.map((session: any) => (
+                    {(catchSessions ?? []).map((session: any) => (
                       <div key={session.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded">
                         <Checkbox
                           id={`session-${session.id}`}

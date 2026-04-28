@@ -2789,8 +2789,8 @@ export async function getAllActivityLogs() {
 export async function createInvoice(data: {
   invoiceNumber: string;
   customerId: number;
-  catchSessionId: number;
-  processorId: number;
+  catchSessionId?: number;
+  processorId?: number;
   invoiceDate: Date;
   dueDate: Date;
   pricePerKgExcl: number;
@@ -2798,14 +2798,17 @@ export async function createInvoice(data: {
   totalWeight: number;
   vatPercentage: number;
   createdBy?: number;
+  // Optional pre-computed totals (from line items); if provided, skip weight × price calculation
+  exclusiveTotal?: number;
+  vatAmount?: number;
+  inclusiveTotal?: number;
 }): Promise<{ insertId: number }> {
   const db = await getDb();
 
-  // Calculate totals
-  // Price is per kg, so multiply weight by price (not birds)
-  const exclusiveTotal = data.totalWeight * data.pricePerKgExcl;
-  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
-  const inclusiveTotal = exclusiveTotal + vatAmount;
+  // Use pre-computed totals if provided, otherwise calculate from weight × price
+  const exclusiveTotal = data.exclusiveTotal ?? (data.totalWeight * data.pricePerKgExcl);
+  const vatAmount = data.vatAmount ?? (exclusiveTotal * (data.vatPercentage / 100));
+  const inclusiveTotal = data.inclusiveTotal ?? (exclusiveTotal + vatAmount);
 
   const result = await db.insert(invoices).values({
     invoiceNumber: data.invoiceNumber,
@@ -2833,6 +2836,13 @@ export async function createInvoice(data: {
   return { insertId: result.insertId };
 }
 
+
+export async function getInvoiceByNumber(invoiceNumber: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1);
+  return result[0] || null;
+}
 
 export async function getCatchSessionById(catchSessionId: number) {
   const db = await getDb();
