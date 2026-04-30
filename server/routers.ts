@@ -8,7 +8,6 @@ import { systemRouter } from "./_core/systemRouter";
 import { inventoryRouter } from "./inventory-router";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
-import { invoiceItems } from "../drizzle/schema";
 import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, createFlockVaccinationSchedule } from "./db-health-helpers";
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
@@ -1671,35 +1670,22 @@ export const appRouter = router({
           inclusiveTotal,
         });
 
-        // Save line items to the invoiceItems table
-        console.log('[Invoice] Line items to save:', JSON.stringify(input.lineItems));
+        // Save line items to the invoice_line_items table
         if (input.lineItems && input.lineItems.length > 0) {
           try {
             // Look up the invoice by number to get the actual DB id (avoids BigInt issues with insertId)
             const savedInvoice = await db.getInvoiceByNumber(invoiceNumber);
-            console.log('[Invoice] Found saved invoice:', savedInvoice?.id, 'for number:', invoiceNumber);
             const invoiceId = savedInvoice?.id;
             if (invoiceId) {
-              const dbConn = await db.getDb();
-              if (dbConn) {
-                for (const item of input.lineItems) {
-                  const lineSubtotal = item.quantity * item.unitPrice;
-                  const lineDiscount = lineSubtotal * (item.discountPercent / 100);
-                  const lineExclusive = lineSubtotal - lineDiscount;
-                  const lineVat = lineExclusive * (item.vatPercent / 100);
-                  const lineTotal = lineExclusive + lineVat;
-                  await dbConn.insert(invoiceItems).values({
-                    invoiceId: invoiceId,
-                    description: item.description,
-                    quantity: item.quantity.toString(),
-                    unit: 'unit',
-                    unitPrice: Math.round(item.unitPrice * 100),
-                    subtotal: Math.round(lineExclusive * 100),
-                    taxRate: item.vatPercent.toString(),
-                    taxAmount: Math.round(lineVat * 100),
-                    totalAmount: Math.round(lineTotal * 100),
-                  });
-                }
+              for (const item of input.lineItems) {
+                await db.createInvoiceLineItem({
+                  invoiceId,
+                  description: item.description,
+                  quantity: item.quantity,
+                  pricePerUnit: item.unitPrice,
+                  discountPercent: item.discountPercent,
+                  vatPercentage: item.vatPercent,
+                });
               }
             } else {
               console.error('[Invoice] Could not find saved invoice by number:', invoiceNumber);
