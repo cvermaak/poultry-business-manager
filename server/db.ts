@@ -985,6 +985,43 @@ export async function createInvoiceLineItem(data: {
   });
 }
 
+export async function insertInvoiceItems(items: {
+  invoiceId: number;
+  description: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  taxRate?: number;
+}[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  if (!items || items.length === 0) return;
+
+  await db.insert(invoiceLineItems).values(
+    items.map((item) => {
+      const quantity = Number(item.quantity || 0);
+      const pricePerUnit = Number(item.unitPrice || 0);
+      const vatPercentage = Number(item.taxRate ?? 15);
+
+      const subtotal = quantity * pricePerUnit;
+      const taxAmount = subtotal * (vatPercentage / 100);
+      const totalAmount = subtotal + taxAmount;
+
+      return {
+        invoiceId: item.invoiceId,
+        description: item.description,
+        quantity: quantity.toString(),
+        pricePerUnit: pricePerUnit.toString(),
+        discount: "0",
+        discountAmount: "0",
+        vatPercentage: vatPercentage.toString(),
+        amount: totalAmount.toFixed(2),
+      };
+    })
+  );
+}
+
 export async function listPayments(customerId?: number) {
   const db = await getDb();
   if (!db) return [];
