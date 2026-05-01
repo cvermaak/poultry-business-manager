@@ -2833,7 +2833,8 @@ export async function createInvoice(data: {
     vatPercentage: data.vatPercentage,
   });
 
-  return { insertId: result.insertId };
+  return { insertId: Number(result.insertId) };
+
 }
 
 
