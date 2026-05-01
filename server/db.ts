@@ -893,14 +893,16 @@ export async function listInvoices(filters?: { customerId?: number; status?: str
   const db = await getDb();
   if (!db) return [];
 
-  let query = db.select().from(invoices),
-  customerName: customers.name,
- })
- .from(invoices)
- .leftJoin(customers, eq(invoices.customerId, customers.id))
- .$dynamic();
+  let query = db
+    .select({
+      ...invoices,
+      customerName: customers.name,
+    })
+    .from(invoices)
+    .leftJoin(customers, eq(invoices.customerId, customers.id))
+    .$dynamic();
 
- if (filters?.customerId) {
+  if (filters?.customerId) {
     query = query.where(eq(invoices.customerId, filters.customerId));
   }
 
@@ -911,19 +913,22 @@ export async function listInvoices(filters?: { customerId?: number; status?: str
   return await query.orderBy(desc(invoices.invoiceDate));
 }
 
+
 export async function getInvoiceById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
 
-  const result = await db.select().from(invoices),
-  customerName: customers.name,
+  const result = await db
+    .select({
+      ...invoices,
+      customerName: customers.name,
     })
     .from(invoices)
     .leftJoin(customers, eq(invoices.customerId, customers.id))
     .where(eq(invoices.id, id))
     .limit(1);
-	
-	return result.length > 0 ? result[0] : undefined;
+
+  return result.length > 0 ? result[0] : undefined;
 }
 
 export async function getInvoiceItems(invoiceId: number) {
