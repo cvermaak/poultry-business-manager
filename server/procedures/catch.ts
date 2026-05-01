@@ -501,11 +501,22 @@ export const listCatchSessions = protectedProcedure
     }
 
     if (input.status) {
-	  query = query.where(eq(catchSessions.status, "completed"));
+      query = query.where(eq(catchSessions.status, input.status));
     }
 
     const sessions = await query.orderBy(desc(catchSessions.catchDate));
-    return sessions;
+
+return {
+  sessions,
+  pagination: {
+    currentPage: 1,
+    pageSize: sessions.length,
+    totalItems: sessions.length,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  },
+};
   });
 
 // ============================================================================
