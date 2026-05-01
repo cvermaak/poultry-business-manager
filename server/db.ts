@@ -20,6 +20,7 @@ import {
   salesOrderItems,
   invoices,
   invoiceItems,
+  invoiceLineItems,
   payments,
   paymentAllocations,
   suppliers,
@@ -76,6 +77,7 @@ export async function getDb() {
           salesOrderItems,
           invoices,
           invoiceItems,
+          invoiceLineItems,
           payments,
           paymentAllocations,
           suppliers,
@@ -915,7 +917,72 @@ export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  // Fetch from legacy invoiceItems table
+  const legacyItems = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+
+  // Fetch from invoiceLineItems table (manual line items)
+  const lineItems = await db.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, invoiceId));
+
+  // If legacy items exist, return them as-is (they already have the expected shape)
+  if (legacyItems.length > 0) {
+    return legacyItems;
+  }
+
+  // Normalize invoiceLineItems rows to match the invoiceItems shape expected by PDF generation
+  if (lineItems.length > 0) {
+    return lineItems.map((item) => {
+      const pricePerUnit = parseFloat(item.pricePerUnit?.toString() || '0');
+      const quantity = parseFloat(item.quantity?.toString() || '0');
+      const discountPct = parseFloat(item.discount?.toString() || '0');
+      const vatPct = parseFloat(item.vatPercentage?.toString() || '15');
+      const subtotalExcl = quantity * pricePerUnit * (1 - discountPct / 100);
+      const taxAmt = subtotalExcl * (vatPct / 100);
+      return {
+        id: item.id,
+        invoiceId: item.invoiceId,
+        description: item.description,
+        quantity: item.quantity,
+        unit: 'unit',
+        unitPrice: Math.round(pricePerUnit * 100),
+        subtotal: Math.round(subtotalExcl * 100),
+        taxRate: item.vatPercentage,
+        taxAmount: Math.round(taxAmt * 100),
+        totalAmount: Math.round((subtotalExcl + taxAmt) * 100),
+        createdAt: item.createdAt,
+      };
+    });
+  }
+
+  return [];
+}
+
+export async function createInvoiceLineItem(data: {
+  invoiceId: number;
+  description: string;
+  quantity: number;
+  pricePerUnit: number;
+  discountPercent?: number;
+  vatPercentage?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const discount = data.discountPercent ?? 0;
+  const vatPct = data.vatPercentage ?? 15;
+  const subtotal = data.quantity * data.pricePerUnit;
+  const discountAmount = subtotal * (discount / 100);
+  const amount = (subtotal - discountAmount) * (1 + vatPct / 100);
+
+  await db.insert(invoiceLineItems).values({
+    invoiceId: data.invoiceId,
+    description: data.description,
+    quantity: data.quantity.toString(),
+    pricePerUnit: data.pricePerUnit.toString(),
+    discount: discount.toString(),
+    discountAmount: discountAmount.toFixed(2),
+    vatPercentage: vatPct.toString(),
+    amount: amount.toFixed(2),
+  });
 }
 
 export async function listPayments(customerId?: number) {
@@ -2789,8 +2856,8 @@ export async function getAllActivityLogs() {
 export async function createInvoice(data: {
   invoiceNumber: string;
   customerId: number;
-  catchSessionId: number;
-  processorId: number;
+  catchSessionId?: number;
+  processorId?: number;
   invoiceDate: Date;
   dueDate: Date;
   pricePerKgExcl: number;
@@ -2798,20 +2865,23 @@ export async function createInvoice(data: {
   totalWeight: number;
   vatPercentage: number;
   createdBy?: number;
+  // Optional pre-computed totals (from line items); if provided, skip weight × price calculation
+  exclusiveTotal?: number;
+  vatAmount?: number;
+  inclusiveTotal?: number;
 }): Promise<{ insertId: number }> {
   const db = await getDb();
 
-  // Calculate totals
-  // Price is per kg, so multiply weight by price (not birds)
-  const exclusiveTotal = data.totalWeight * data.pricePerKgExcl;
-  const vatAmount = exclusiveTotal * (data.vatPercentage / 100);
-  const inclusiveTotal = exclusiveTotal + vatAmount;
+  // Use pre-computed totals if provided, otherwise calculate from weight × price
+  const exclusiveTotal = data.exclusiveTotal ?? (data.totalWeight * data.pricePerKgExcl);
+  const vatAmount = data.vatAmount ?? (exclusiveTotal * (data.vatPercentage / 100));
+  const inclusiveTotal = data.inclusiveTotal ?? (exclusiveTotal + vatAmount);
 
   const result = await db.insert(invoices).values({
     invoiceNumber: data.invoiceNumber,
     customerId: data.customerId,
-    invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString() : data.invoiceDate,
-    dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString() : data.dueDate,
+    invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString().slice(0, 19).replace('T', ' ') : data.invoiceDate,
+    dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString().slice(0, 19).replace('T', ' ') : data.dueDate,
     subtotal: Math.round(exclusiveTotal * 100),
     taxAmount: Math.round(vatAmount * 100),
     totalAmount: Math.round(inclusiveTotal * 100),
@@ -2830,9 +2900,17 @@ export async function createInvoice(data: {
     vatPercentage: data.vatPercentage,
   });
 
-  return { insertId: result.insertId };
+  return { insertId: Number(result.insertId) };
+
 }
 
+
+export async function getInvoiceByNumber(invoiceNumber: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1);
+  return result[0] || null;
+}
 
 export async function getCatchSessionById(catchSessionId: number) {
   const db = await getDb();
