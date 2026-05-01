@@ -501,7 +501,7 @@ export const listCatchSessions = protectedProcedure
     }
 
     if (input.status) {
-      query = query.where(eq(catchSessions.status, input.status));
+	  query = query.where(eq(catchSessions.status, "completed"));
     }
 
     const sessions = await query.orderBy(desc(catchSessions.catchDate));
