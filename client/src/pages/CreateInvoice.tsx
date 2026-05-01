@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Info } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 
 interface LineItem {
   id: string;
@@ -23,7 +23,14 @@ export function CreateInvoice() {
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(false);
   const [lineItems, setLineItems] = useState<LineItem[]>([
-    { id: "1", description: "", quantity: 1, unitPrice: 0, discountPercent: 0, vatPercent: 15 },
+    {
+      id: "1",
+      description: "",
+      quantity: 1,
+      unitPrice: 0,
+      discountPercent: 0,
+      vatPercent: 15,
+    },
   ]);
 
   const [formData, setFormData] = useState({
@@ -36,52 +43,49 @@ export function CreateInvoice() {
   });
 
   // Fetch data for dropdowns
-  const { data: customers } = trpc.customers.list.useQuery(undefined);
-  const catchSessionsInput = useMemo(() => ({ status: "completed" as const, pageSize: 100, page: 1 }), []);
-  const { data: catchSessionsData } = trpc.catch.listCatchSessions.useQuery(catchSessionsInput);
-  const catchSessions = catchSessionsData?.sessions || [];
-  const { data: processors } = trpc.processor.list.useQuery();
+  const { data: customers } = trpc.customers.list.useQuery();
+  const { data: catchSessions } = trpc.catch.list.useQuery();
+  const { data: processors } = trpc.processors.list.useQuery();
 
-  // When a catch session is selected, auto-populate the first line item description
-  const handleCatchSessionChange = (value: string) => {
-    setFormData((prev) => ({ ...prev, catchSessionId: value }));
-    if (value) {
-      const session = catchSessions.find((s: any) => s.id.toString() === value);
-      if (session) {
-        const birds = (session as any).totalBirdsCaught || 0;
-        const weight = parseFloat((session as any).totalNetWeight || "0");
-        // Update the first line item with session details
-        setLineItems((prev) =>
-          prev.map((item, idx) =>
-            idx === 0
-              ? {
-                  ...item,
-                  description: `${birds} Broiler Chickens`,
-                  quantity: weight,
-                }
-              : item
-          )
-        );
-      }
-    }
-  };
+  // Create invoice mutation
+  const createInvoiceMutation = trpc.invoices.create.useMutation({
+    onSuccess: () => {
+      toast.success("Invoice created successfully");
+      setLocation("/sales/invoices");
+    },
+    onError: (error) => {
+      toast.error(`Failed to create invoice: ${error.message}`);
+    },
+  });
 
-  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
   const handleLineItemChange = (id: string, field: string, value: any) => {
     setLineItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+      prev.map((item) =>
+        item.id === id ? { ...item, [field]: value } : item
+      )
     );
   };
 
   const addLineItem = () => {
-    const newId = (Math.max(...lineItems.map((item) => parseInt(item.id)), 0) + 1).toString();
+    const newId = Math.max(...lineItems.map((item) => parseInt(item.id)), 0) + 1;
     setLineItems((prev) => [
       ...prev,
-      { id: newId, description: "", quantity: 1, unitPrice: 0, discountPercent: 0, vatPercent: 15 },
+      {
+        id: newId.toString(),
+        description: "",
+        quantity: 1,
+        unitPrice: 0,
+        discountPercent: 0,
+        vatPercent: 15,
+      },
     ]);
   };
 
@@ -105,74 +109,44 @@ export function CreateInvoice() {
     let totalExclusive = 0;
     let totalVat = 0;
     let totalDiscount = 0;
+
     lineItems.forEach((item) => {
       const { exclusive, vat, discount } = calculateLineTotal(item);
       totalExclusive += exclusive;
       totalVat += vat;
       totalDiscount += discount;
     });
-    return { totalDiscount, totalExclusive, totalVat, totalInclusive: totalExclusive + totalVat };
+
+    return {
+      totalDiscount,
+      totalExclusive,
+      totalVat,
+      totalInclusive: totalExclusive + totalVat,
+    };
   };
 
   const totals = calculateTotals();
 
-  // Create invoice mutation
-  const createInvoiceMutation = trpc.invoices.create.useMutation({
-    onSuccess: () => {
-      toast.success("Invoice created successfully");
-      setLocation("/sales/invoices");
-    },
-    onError: (error) => {
-      toast.error(`Failed to create invoice: ${error.message}`);
-    },
-  });
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.customerId) {
-      toast.error("Please select a customer");
-      return;
-    }
-    if (lineItems.some((item) => !item.description.trim())) {
-      toast.error("All line items must have a description");
+    if (!formData.customerId || !formData.catchSessionId || !formData.processorId) {
+      toast.error("Please fill in all required fields");
       return;
     }
 
     setIsLoading(true);
     try {
-      // Derive totalBirds and totalWeight from the selected catch session if available
-      let totalBirds = 0;
-      let totalWeight = 0;
-      let pricePerKgExcl = 0;
-
-      if (formData.catchSessionId) {
-        const session = catchSessions.find((s: any) => s.id.toString() === formData.catchSessionId);
-        if (session) {
-          totalBirds = (session as any).totalBirdsCaught || 0;
-          totalWeight = parseFloat((session as any).totalNetWeight || "0");
-          // price per kg = exclusive total / weight (if weight > 0)
-          pricePerKgExcl = totalWeight > 0 ? totals.totalExclusive / totalWeight : 0;
-        }
-      }
-
       await createInvoiceMutation.mutateAsync({
         customerId: parseInt(formData.customerId),
-        catchSessionId: formData.catchSessionId !== "" ? parseInt(formData.catchSessionId, 10) : undefined,
-        processorId: formData.processorId !== "" ? parseInt(formData.processorId, 10) : undefined,
+        catchSessionId: parseInt(formData.catchSessionId),
+        processorId: parseInt(formData.processorId),
         invoiceDate: new Date(formData.invoiceDate),
         dueDate: new Date(formData.dueDate),
-        pricePerKgExcl,
-        totalBirds,
-        totalWeight,
-        vatPercentage: lineItems[0]?.vatPercent ?? 15,
-        lineItems: lineItems.map((item) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountPercent: item.discountPercent,
-          vatPercent: item.vatPercent,
-        })),
+        pricePerKgExcl: totals.totalExclusive / 100, // Placeholder calculation
+        totalBirds: 0,
+        totalWeight: 0,
+        vatPercentage: 15,
       });
     } finally {
       setIsLoading(false);
@@ -182,25 +156,19 @@ export function CreateInvoice() {
   return (
     <div className="container mx-auto py-8 px-4">
       <div className="max-w-6xl mx-auto">
-        <div className="flex items-center gap-4 mb-8">
-          <Button variant="outline" size="sm" onClick={() => setLocation("/sales/invoices")}>
-            ← Back
-          </Button>
-          <h1 className="text-3xl font-bold">Create Invoice</h1>
-        </div>
+        <h1 className="text-3xl font-bold mb-8">Create Invoice</h1>
 
         <form onSubmit={handleSubmit} className="space-y-8">
           {/* Invoice Header */}
           <Card>
             <CardHeader>
               <CardTitle>Invoice Details</CardTitle>
-              <CardDescription>Customer, dates, and optional catch session linkage</CardDescription>
+              <CardDescription>Basic invoice information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Customer — required */}
                 <div>
-                  <Label htmlFor="customerId">Customer <span className="text-red-500">*</span></Label>
+                  <Label htmlFor="customerId">Customer *</Label>
                   <Select value={formData.customerId} onValueChange={(value) => setFormData({ ...formData, customerId: value })}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select customer" />
@@ -215,68 +183,71 @@ export function CreateInvoice() {
                   </Select>
                 </div>
 
-                {/* Invoice Date */}
+                <div>
+                  <Label htmlFor="catchSessionId">Catch Session *</Label>
+                  <Select value={formData.catchSessionId} onValueChange={(value) => setFormData({ ...formData, catchSessionId: value })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select catch session" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {catchSessions?.map((session: any) => (
+                        <SelectItem key={session.id} value={session.id.toString()}>
+                          Session {session.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="processorId">Processor *</Label>
+                  <Select value={formData.processorId} onValueChange={(value) => setFormData({ ...formData, processorId: value })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select processor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {processors?.map((processor: any) => (
+                        <SelectItem key={processor.id} value={processor.id.toString()}>
+                          {processor.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div>
                   <Label htmlFor="invoiceDate">Invoice Date</Label>
-                  <Input id="invoiceDate" name="invoiceDate" type="date" value={formData.invoiceDate} onChange={handleFormChange} />
+                  <Input
+                    id="invoiceDate"
+                    name="invoiceDate"
+                    type="date"
+                    value={formData.invoiceDate}
+                    onChange={handleFormChange}
+                  />
                 </div>
 
-                {/* Due Date */}
                 <div>
                   <Label htmlFor="dueDate">Due Date</Label>
-                  <Input id="dueDate" name="dueDate" type="date" value={formData.dueDate} onChange={handleFormChange} />
+                  <Input
+                    id="dueDate"
+                    name="dueDate"
+                    type="date"
+                    value={formData.dueDate}
+                    onChange={handleFormChange}
+                  />
                 </div>
               </div>
 
-              {/* Optional: Catch Session + Processor */}
-              <div className="border rounded-lg p-4 bg-muted/30 space-y-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Info className="w-4 h-4" />
-                  <span>Optional — link to a catch session and processor for poultry sales</span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label>Catch Session <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                    <Select value={formData.catchSessionId} onValueChange={handleCatchSessionChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select catch session" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">— None —</SelectItem>
-                        {catchSessions.map((session: any) => (
-                          <SelectItem key={session.id} value={session.id.toString()}>
-                            {session.flockNumber ? `${session.flockNumber} — ` : ""}
-                            {session.catchDate ? new Date(session.catchDate).toLocaleDateString("en-ZA") : `Session #${session.id}`}
-                            {session.totalBirdsCaught ? ` — ${session.totalBirdsCaught} birds` : ""}
-                            {session.totalNetWeight ? `, ${parseFloat(session.totalNetWeight).toFixed(2)} kg` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Processor <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                    <Select value={formData.processorId} onValueChange={(value) => setFormData({ ...formData, processorId: value })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select processor" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">— None —</SelectItem>
-                        {processors?.map((processor: any) => (
-                          <SelectItem key={processor.id} value={processor.id.toString()}>
-                            {processor.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Notes */}
               <div>
                 <Label htmlFor="notes">Notes</Label>
-                <Textarea id="notes" name="notes" value={formData.notes} onChange={handleFormChange} placeholder="Additional notes for the invoice" rows={3} />
+                <Textarea
+                  id="notes"
+                  name="notes"
+                  value={formData.notes}
+                  onChange={handleFormChange}
+                  placeholder="Additional notes for the invoice"
+                  rows={3}
+                />
               </div>
             </CardContent>
           </Card>
@@ -287,7 +258,7 @@ export function CreateInvoice() {
               <div className="flex justify-between items-center">
                 <div>
                   <CardTitle>Line Items</CardTitle>
-                  <CardDescription>Add the products or services being invoiced</CardDescription>
+                  <CardDescription>Add products or services</CardDescription>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={addLineItem}>
                   <Plus className="w-4 h-4 mr-2" />
@@ -295,17 +266,17 @@ export function CreateInvoice() {
                 </Button>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-2 pr-2">Description</th>
-                      <th className="text-right py-2 w-24">Qty / Weight</th>
-                      <th className="text-right py-2 w-28">Unit Price</th>
-                      <th className="text-right py-2 w-24">Discount %</th>
+                      <th className="text-left py-2">Description</th>
+                      <th className="text-right py-2 w-20">Qty</th>
+                      <th className="text-right py-2 w-24">Unit Price</th>
+                      <th className="text-right py-2 w-20">Discount %</th>
                       <th className="text-right py-2 w-20">VAT %</th>
-                      <th className="text-right py-2 w-28">Total (incl.)</th>
+                      <th className="text-right py-2 w-24">Total</th>
                       <th className="w-10"></th>
                     </tr>
                   </thead>
@@ -314,7 +285,7 @@ export function CreateInvoice() {
                       const itemTotal = calculateLineTotal(item);
                       return (
                         <tr key={item.id} className="border-b">
-                          <td className="py-2 pr-2">
+                          <td className="py-2">
                             <Input
                               value={item.description}
                               onChange={(e) => handleLineItemChange(item.id, "description", e.target.value)}
@@ -326,19 +297,17 @@ export function CreateInvoice() {
                             <Input
                               type="number"
                               value={item.quantity}
-                              onChange={(e) => handleLineItemChange(item.id, "quantity", parseFloat(e.target.value) || 0)}
+                              onChange={(e) => handleLineItemChange(item.id, "quantity", parseFloat(e.target.value))}
                               className="text-sm text-right"
-                              min="0"
-                              step="0.001"
+                              min="1"
                             />
                           </td>
                           <td className="py-2">
                             <Input
                               type="number"
                               value={item.unitPrice}
-                              onChange={(e) => handleLineItemChange(item.id, "unitPrice", parseFloat(e.target.value) || 0)}
+                              onChange={(e) => handleLineItemChange(item.id, "unitPrice", parseFloat(e.target.value))}
                               className="text-sm text-right"
-                              min="0"
                               step="0.01"
                             />
                           </td>
@@ -346,7 +315,7 @@ export function CreateInvoice() {
                             <Input
                               type="number"
                               value={item.discountPercent}
-                              onChange={(e) => handleLineItemChange(item.id, "discountPercent", parseFloat(e.target.value) || 0)}
+                              onChange={(e) => handleLineItemChange(item.id, "discountPercent", parseFloat(e.target.value))}
                               className="text-sm text-right"
                               min="0"
                               max="100"
@@ -356,7 +325,7 @@ export function CreateInvoice() {
                             <Input
                               type="number"
                               value={item.vatPercent}
-                              onChange={(e) => handleLineItemChange(item.id, "vatPercent", parseFloat(e.target.value) || 0)}
+                              onChange={(e) => handleLineItemChange(item.id, "vatPercent", parseFloat(e.target.value))}
                               className="text-sm text-right"
                               min="0"
                               max="100"
@@ -365,13 +334,12 @@ export function CreateInvoice() {
                           <td className="py-2 text-right font-semibold">
                             R{itemTotal.inclusive.toFixed(2)}
                           </td>
-                          <td className="py-2 text-center">
+                          <td className="py-2">
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
                               onClick={() => removeLineItem(item.id)}
-                              className="text-red-500 hover:text-red-700"
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -391,21 +359,19 @@ export function CreateInvoice() {
               <div className="flex justify-end">
                 <div className="w-80 space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal (before discount):</span>
+                    <span>Subtotal:</span>
                     <span>R{(totals.totalExclusive + totals.totalDiscount).toFixed(2)}</span>
                   </div>
-                  {totals.totalDiscount > 0 && (
-                    <div className="flex justify-between text-sm text-orange-600">
-                      <span>Discount:</span>
-                      <span>-R{totals.totalDiscount.toFixed(2)}</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between text-sm text-orange-600">
+                    <span>Discount:</span>
+                    <span>-R{totals.totalDiscount.toFixed(2)}</span>
+                  </div>
                   <div className="border-t pt-2 flex justify-between text-sm">
                     <span>Exclusive Total:</span>
                     <span>R{totals.totalExclusive.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span>VAT:</span>
+                    <span>VAT (15%):</span>
                     <span>R{totals.totalVat.toFixed(2)}</span>
                   </div>
                   <div className="border-t pt-2 flex justify-between font-bold text-lg">
@@ -417,15 +383,19 @@ export function CreateInvoice() {
             </CardContent>
           </Card>
 
-          {/* Submit */}
+          {/* Submit Buttons */}
           <div className="flex justify-end gap-4">
-            <Button type="button" variant="outline" onClick={() => setLocation("/sales/invoices")}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setLocation("/sales/invoices")}
+            >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={isLoading || createInvoiceMutation.isPending}
-              className="bg-orange-500 hover:bg-orange-600 text-white"
+              className="bg-orange-500 hover:bg-orange-600"
             >
               {isLoading || createInvoiceMutation.isPending ? (
                 <>

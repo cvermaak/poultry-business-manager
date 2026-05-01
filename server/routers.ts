@@ -1593,108 +1593,41 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({
         customerId: z.number(),
-        catchSessionId: z.number().optional(),
-        processorId: z.number().optional(),
-        pricePerKgExcl: z.number().nonnegative().optional(),
+        catchSessionId: z.number(),
+        processorId: z.number(),
+        pricePerKgExcl: z.number().positive(),
         invoiceDate: z.date().optional(),
         dueDate: z.date().optional(),
-        totalBirds: z.number().nonnegative().optional(),
-        totalWeight: z.number().nonnegative().optional(),
+        totalBirds: z.number().positive().optional(),
+        totalWeight: z.number().positive().optional(),
         vatPercentage: z.number().default(15),
-        lineItems: z.array(z.object({
-          description: z.string(),
-          quantity: z.number().nonnegative(),
-          unitPrice: z.number().nonnegative(),
-          discountPercent: z.number().nonnegative().default(0),
-          vatPercent: z.number().nonnegative().default(15),
-        })).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        // Optionally load catch session details if provided
-        let catchSession: any = null;
-        if (input.catchSessionId) {
-          catchSession = await db.getCatchSessionById(input.catchSessionId);
-          if (!catchSession) {
-            throw new Error('Catch session not found');
-          }
+        // Get catch session details to fill in missing fields
+        const catchSession = await db.getCatchSessionById(input.catchSessionId);
+        if (!catchSession) {
+          throw new Error('Catch session not found');
         }
 
         const invoiceNumber = `INV-${Date.now()}`;
         const invoiceDate = input.invoiceDate || new Date();
         const dueDate = input.dueDate || new Date(invoiceDate.getTime() + 30 * 24 * 60 * 60 * 1000);
-        const totalBirds = input.totalBirds ?? (catchSession ? (catchSession.totalBirdsCaught || 0) : 0);
-        const totalWeight = input.totalWeight ?? (catchSession ? (parseFloat(catchSession.totalNetWeight || '0')) : 0);
-
-        // Compute totals from line items if provided; otherwise fall back to weight × price
-        let exclusiveTotal = 0;
-        let vatAmount = 0;
-        let inclusiveTotal = 0;
-        let pricePerKgExcl = input.pricePerKgExcl ?? 0;
-
-        if (input.lineItems && input.lineItems.length > 0) {
-          for (const item of input.lineItems) {
-            const lineSubtotal = item.quantity * item.unitPrice;
-            const lineDiscount = lineSubtotal * (item.discountPercent / 100);
-            const lineExclusive = lineSubtotal - lineDiscount;
-            const lineVat = lineExclusive * (item.vatPercent / 100);
-            exclusiveTotal += lineExclusive;
-            vatAmount += lineVat;
-          }
-          inclusiveTotal = exclusiveTotal + vatAmount;
-          // Derive pricePerKgExcl for poultry invoices
-          if (totalWeight > 0) {
-            pricePerKgExcl = exclusiveTotal / totalWeight;
-          }
-        } else {
-          // Legacy: weight × price calculation
-          exclusiveTotal = totalWeight * pricePerKgExcl;
-          vatAmount = exclusiveTotal * (input.vatPercentage / 100);
-          inclusiveTotal = exclusiveTotal + vatAmount;
-        }
+        const totalBirds = input.totalBirds || (catchSession as any).totalBirdsCaught || 0;
+        const totalWeight = input.totalWeight || (catchSession as any).totalNetWeight || 0;
 
         const result = await db.createInvoice({
           invoiceNumber,
           customerId: input.customerId,
-          catchSessionId: input.catchSessionId ?? undefined,
-          processorId: input.processorId ?? undefined,
+          catchSessionId: input.catchSessionId,
+          processorId: input.processorId,
           invoiceDate,
           dueDate,
-          pricePerKgExcl,
+          pricePerKgExcl: input.pricePerKgExcl,
           totalBirds,
           totalWeight,
           vatPercentage: input.vatPercentage,
           createdBy: ctx.user.id,
-          // Pass pre-computed totals so db helper doesn't recalculate from weight × price
-          exclusiveTotal,
-          vatAmount,
-          inclusiveTotal,
         });
-
-        // Save line items to the invoice_line_items table
-        if (input.lineItems && input.lineItems.length > 0) {
-          try {
-            // Look up the invoice by number to get the actual DB id (avoids BigInt issues with insertId)
-            const savedInvoice = await db.getInvoiceByNumber(invoiceNumber);
-            const invoiceId = savedInvoice?.id;
-            if (invoiceId) {
-              for (const item of input.lineItems) {
-                await db.createInvoiceLineItem({
-                  invoiceId,
-                  description: item.description,
-                  quantity: item.quantity,
-                  pricePerUnit: item.unitPrice,
-                  discountPercent: item.discountPercent,
-                  vatPercentage: item.vatPercent,
-                });
-              }
-            } else {
-              console.error('[Invoice] Could not find saved invoice by number:', invoiceNumber);
-            }
-          } catch (err) {
-            console.error('[Invoice] Failed to save line items:', err);
-          }
-        }
-
         return result;
       }),
 
@@ -1730,57 +1663,8 @@ export const appRouter = router({
             throw new Error('Invoice not found');
           }
 
-          const [customer, companySettings] = await Promise.all([
-            db.getCustomerById(invoice.customerId),
-            db.getCompanySettings(),
-          ]);
-
-          // Build company info from settings
-          const companyInfo = companySettings ? {
-            name: companySettings.companyName,
-            vatNumber: companySettings.vatNumber || undefined,
-            registrationNumber: companySettings.registrationNumber || undefined,
-            address: companySettings.address || undefined,
-            phone: companySettings.phone || undefined,
-            email: companySettings.email || undefined,
-            website: companySettings.website || undefined,
-          } : undefined;
-
-          // Build bank details from company settings if available
-          const bankDetails = (companySettings?.bankName && companySettings?.accountNumber)
-            ? {
-                bank: companySettings.bankName,
-                branchCode: companySettings.branchCode || '',
-                accountName: companySettings.accountName || companySettings.companyName,
-                accountNumber: companySettings.accountNumber,
-                reference: companySettings.accountReference || invoice.invoiceNumber,
-              }
-            : undefined;
+          const customer = await db.getCustomerById(invoice.customerId);
           
-          // Fetch stored line items
-          const storedItems = await db.getInvoiceItems(invoiceId);
-
-          // Build line items for PDF: use stored items if available, otherwise fall back to catch session data
-          const pdfLineItems = storedItems.length > 0
-            ? storedItems.map((item) => ({
-                description: item.description,
-                quantity: parseFloat(item.quantity?.toString() || '1'),
-                pricePerUnit: (item.unitPrice || 0) / 100,
-                weight: parseFloat(item.quantity?.toString() || '0'),
-                vatPercentage: item.taxRate !== null && item.taxRate !== undefined ? parseFloat(item.taxRate.toString()) : 0,
-              }))
-            : [
-                {
-                  description: invoice.catchSessionId
-                    ? `${invoice.totalBirds || 0} Broiler Chickens @ R${parseFloat(invoice.pricePerKgExcl?.toString() || '0').toFixed(2)} per kg`
-                    : 'Invoice item',
-                  quantity: invoice.totalBirds || 1,
-                  pricePerUnit: parseFloat(invoice.pricePerKgExcl?.toString() || '0'),
-                  weight: parseFloat(invoice.totalWeight?.toString() || '0'),
-                  vatPercentage: typeof invoice.vatPercentage === 'number' ? invoice.vatPercentage : 15,
-                },
-              ];
-
           const pdfBuffer = await generatePremiumInvoicePDF({
             invoiceNumber: invoice.invoiceNumber,
             invoiceDate: new Date(invoice.invoiceDate),
@@ -1789,12 +1673,18 @@ export const appRouter = router({
             customerVATNo: customer?.vatNumber || undefined,
             customerRegNo: customer?.taxNumber || undefined,
             customerAddress: customer?.companyName || undefined,
-            lineItems: pdfLineItems,
+            lineItems: [
+              {
+                description: `${invoice.totalBirds || 0} Broiler Chickens @ R${parseFloat(invoice.pricePerKgExcl?.toString() || '0').toFixed(2)} per kg`,
+                quantity: invoice.totalBirds || 0,
+                pricePerUnit: parseFloat(invoice.pricePerKgExcl?.toString() || '0'),
+                weight: parseFloat(invoice.totalWeight?.toString() || '0'),
+                vatPercentage: typeof invoice.vatPercentage === 'number' ? invoice.vatPercentage : 15,
+              },
+            ],
             totalExclusive: parseFloat(invoice.exclusiveTotal?.toString() || '0'),
             totalVAT: parseFloat(invoice.vatAmount?.toString() || '0'),
             totalInclusive: parseFloat(invoice.inclusiveTotal?.toString() || '0'),
-            bankDetails,
-            companyInfo,
           });
 
           return {
