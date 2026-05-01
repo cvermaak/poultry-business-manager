@@ -20,6 +20,7 @@ import {
   salesOrderItems,
   invoices,
   invoiceItems,
+  invoiceLineItems,
   payments,
   paymentAllocations,
   suppliers,
@@ -76,6 +77,7 @@ export async function getDb() {
           salesOrderItems,
           invoices,
           invoiceItems,
+          invoiceLineItems,
           payments,
           paymentAllocations,
           suppliers,
@@ -915,7 +917,72 @@ export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  // Fetch from legacy invoiceItems table
+  const legacyItems = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+
+  // Fetch from invoiceLineItems table (manual line items)
+  const lineItems = await db.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, invoiceId));
+
+  // If legacy items exist, return them as-is (they already have the expected shape)
+  if (legacyItems.length > 0) {
+    return legacyItems;
+  }
+
+  // Normalize invoiceLineItems rows to match the invoiceItems shape expected by PDF generation
+  if (lineItems.length > 0) {
+    return lineItems.map((item) => {
+      const pricePerUnit = parseFloat(item.pricePerUnit?.toString() || '0');
+      const quantity = parseFloat(item.quantity?.toString() || '0');
+      const discountPct = parseFloat(item.discount?.toString() || '0');
+      const vatPct = parseFloat(item.vatPercentage?.toString() || '15');
+      const subtotalExcl = quantity * pricePerUnit * (1 - discountPct / 100);
+      const taxAmt = subtotalExcl * (vatPct / 100);
+      return {
+        id: item.id,
+        invoiceId: item.invoiceId,
+        description: item.description,
+        quantity: item.quantity,
+        unit: 'unit',
+        unitPrice: Math.round(pricePerUnit * 100),
+        subtotal: Math.round(subtotalExcl * 100),
+        taxRate: item.vatPercentage,
+        taxAmount: Math.round(taxAmt * 100),
+        totalAmount: Math.round((subtotalExcl + taxAmt) * 100),
+        createdAt: item.createdAt,
+      };
+    });
+  }
+
+  return [];
+}
+
+export async function createInvoiceLineItem(data: {
+  invoiceId: number;
+  description: string;
+  quantity: number;
+  pricePerUnit: number;
+  discountPercent?: number;
+  vatPercentage?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const discount = data.discountPercent ?? 0;
+  const vatPct = data.vatPercentage ?? 15;
+  const subtotal = data.quantity * data.pricePerUnit;
+  const discountAmount = subtotal * (discount / 100);
+  const amount = (subtotal - discountAmount) * (1 + vatPct / 100);
+
+  await db.insert(invoiceLineItems).values({
+    invoiceId: data.invoiceId,
+    description: data.description,
+    quantity: data.quantity.toString(),
+    pricePerUnit: data.pricePerUnit.toString(),
+    discount: discount.toString(),
+    discountAmount: discountAmount.toFixed(2),
+    vatPercentage: vatPct.toString(),
+    amount: amount.toFixed(2),
+  });
 }
 
 export async function listPayments(customerId?: number) {

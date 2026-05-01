@@ -589,14 +589,15 @@ export const invoiceItems = mysqlTable("invoice_items", {
 export const invoiceLineItems = mysqlTable("invoice_line_items", {
 	id: int().autoincrement().notNull(),
 	invoiceId: int().notNull().references(() => invoices.id, { onDelete: "cascade" } ),
-	description: varchar({ length: 500 }),
-	quantity: decimal({ precision: 10, scale: 2 }),
-	unitPrice: decimal({ precision: 12, scale: 2 }),
-	discountPercent: decimal({ precision: 5, scale: 2 }).default('0'),
-	vatPercent: decimal({ precision: 5, scale: 2 }).default('15'),
-	lineTotal: decimal({ precision: 12, scale: 2 }),
-	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP'),
-	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow(),
+	description: varchar({ length: 500 }).notNull(),
+	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	pricePerUnit: decimal({ precision: 10, scale: 2 }).notNull(),
+	discount: decimal({ precision: 5, scale: 2 }).default('0.00').notNull(),
+	discountAmount: decimal({ precision: 10, scale: 2 }).default('0.00').notNull(),
+	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00').notNull(),
+	amount: decimal({ precision: 15, scale: 2 }).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 });
 
 export const invoices = mysqlTable("invoices", {
