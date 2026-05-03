@@ -132,11 +132,12 @@ export default function CatchOperations() {
   // Count completed sessions for the selected flock to determine which catch day this is
   const { data: allCompletedSessions } = trpc.catch.listCatchSessions.useQuery(
     { status: "completed" },
-    { enabled: !!selectedFlockId }
+    { enabled: !!selectedFlockId && parseInt(selectedFlockId) > 0 }
   );
-  const completedForFlock = allCompletedSessions?.filter(
+  const completedForFlock =
+  allCompletedSessions?.sessions?.filter(
     (s) => s.flockId === parseInt(selectedFlockId)
-  ).length ?? 0;
+  )?.length ?? 0;
   const currentCatchDay = completedForFlock + 1; // 1-based
   const planDay = catchPlan?.days?.find((d) => d.day === currentCatchDay) ?? null;
   const { data: completedSessions } = trpc.catch.listCatchSessions.useQuery(
@@ -152,9 +153,9 @@ export default function CatchOperations() {
 
   // Auto-resume: if there is an active session in the DB and none loaded in state, resume it
   useEffect(() => {
-    if (!activeSessionId && activeSessions && activeSessions.length > 0) {
-      setActiveSessionId(activeSessions[0].id);
-    }
+    if (!activeSessionId && activeSessions?.sessions?.length > 0) {
+		setActiveSessionId(activeSessions.sessions[0].id);
+	}
   }, [activeSessions, activeSessionId]);
 
   // Auto-fill target birds, weight and override catching weight from catch plan or flock defaults
@@ -196,9 +197,14 @@ export default function CatchOperations() {
       season,
       transportDurationHours: transportDuration ? parseFloat(transportDuration) : undefined,
     },
-    {
-      enabled: !!selectedFlockId && !!selectedCrateTypeId && !!activeSessionId,
-    }
+	{ 
+	enabled: 
+		!!selectedFlockId &&
+		parseInt(selectedFlockId) > 0 &&
+		!!selectedCrateTypeId &&
+		parseInt(selectedCrateTypeId) > 0 &&
+		!!activeSessionId
+	}
   );
 
   // Mutations
@@ -1548,7 +1554,7 @@ export default function CatchOperations() {
       </Dialog>
 
       {/* Recent Completed Sessions */}
-      {completedSessions && completedSessions.length > 0 && (
+      {completedSessions && completedSessions?.sessions?.length > 0 && (
         <Card className="mt-8">
           <CardHeader>
             <CardTitle>Recent Completed Sessions</CardTitle>
@@ -1570,7 +1576,7 @@ export default function CatchOperations() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {completedSessions.slice(0, 10).map((session) => (
+                {completedSessions?.sessions?.slice(0, 10).map((session) => (
                   <TableRow key={session.id}>
                     <TableCell>
                       {new Date(session.catchDate).toLocaleDateString()}
