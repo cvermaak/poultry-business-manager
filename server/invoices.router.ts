@@ -24,6 +24,7 @@ export const invoiceRouter = router({
             quantity: z.number(),
             unit: z.string().optional(),
             unitPrice: z.number(),
+			discountPercent: z.number().default(0),
             taxRate: z.number().default(15),
           })
         ).optional(),
@@ -60,6 +61,8 @@ export const invoiceRouter = router({
         await db.insertInvoiceItems(
           input.items.map((item) => {
             const subtotal = item.quantity * item.unitPrice;
+			const discountAmount = subtotal * (item.discountPercent / 100);
+			const discountedSubtotal = subtotal - discountAmount;
             const taxAmount = subtotal * (item.taxRate / 100);
             const totalAmount = subtotal + taxAmount;
 
@@ -69,10 +72,12 @@ export const invoiceRouter = router({
               quantity: item.quantity,
               unit: item.unit || "unit",
               unitPrice: item.unitPrice,
-              subtotal,
+			  subtotal: discountedSubtotal,
               taxRate: item.taxRate,
               taxAmount,
               totalAmount,
+			  discountPercent: item.discountPercent,
+			  discountAmount,
             };
           })
         );
