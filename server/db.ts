@@ -966,6 +966,8 @@ export async function getInvoiceItems(invoiceId: number) {
         taxRate: item.vatPercentage,
         taxAmount: Math.round(taxAmt * 100),
         totalAmount: Math.round((subtotalExcl + taxAmt) * 100),
+		discountPercent: discountPct,
+		discountAmount: Math.round(discountAmount * 100),
         createdAt: item.createdAt,
       };
     });
