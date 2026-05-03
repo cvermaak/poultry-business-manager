@@ -949,32 +949,41 @@ export async function getInvoiceItems(invoiceId: number) {
   // Normalize invoiceLineItems rows to match the invoiceItems shape expected by PDF generation
   if (lineItems.length > 0) {
     return lineItems.map((item) => {
-      const pricePerUnit = parseFloat(item.pricePerUnit?.toString() || '0');
-      const quantity = parseFloat(item.quantity?.toString() || '0');
-      const discountPct = parseFloat(item.discount?.toString() || '0');
-      const vatPct = parseFloat(item.vatPercentage?.toString() || '15');
-      const subtotalExcl = quantity * pricePerUnit * (1 - discountPct / 100);
-      const taxAmt = subtotalExcl * (vatPct / 100);
-      return {
-        id: item.id,
-        invoiceId: item.invoiceId,
-        description: item.description,
-        quantity: item.quantity,
-        unit: 'unit',
-        unitPrice: Math.round(pricePerUnit * 100),
-        subtotal: Math.round(subtotalExcl * 100),
-        taxRate: item.vatPercentage,
-        taxAmount: Math.round(taxAmt * 100),
-        totalAmount: Math.round((subtotalExcl + taxAmt) * 100),
-		discountPercent: discountPct,
-		discountAmount: Math.round(discountAmount * 100),
-        createdAt: item.createdAt,
-      };
-    });
-  }
+	  const pricePerUnit = parseFloat(item.pricePerUnit?.toString() || '0');
+	  const quantity = parseFloat(item.quantity?.toString() || '0');
+	  const discountPct = parseFloat(item.discount?.toString() || '0');
+	  const vatPct = parseFloat(item.vatPercentage?.toString() || '15');
 
-  return [];
-}
+	  const subtotal = quantity * pricePerUnit;
+
+  // ✅ ADD THIS
+	  const discountAmount = subtotal * (discountPct / 100);
+
+	  const subtotalExcl = subtotal - discountAmount;
+	  const taxAmt = subtotalExcl * (vatPct / 100);
+	  const total = subtotalExcl + taxAmt;
+
+  return {
+    id: item.id,
+    invoiceId: item.invoiceId,
+    description: item.description,
+    quantity: item.quantity,
+    unit: 'unit',
+
+    unitPrice: Math.round(pricePerUnit * 100),
+
+    subtotal: Math.round(subtotalExcl * 100),
+    taxRate: vatPct,
+    taxAmount: Math.round(taxAmt * 100),
+    totalAmount: Math.round(total * 100),
+
+    // ✅ FIXED
+    discountPercent: discountPct,
+    discountAmount: Math.round(discountAmount * 100),
+
+    createdAt: item.createdAt,
+  };
+});
 
 export async function createInvoiceLineItem(data: {
   invoiceId: number;
