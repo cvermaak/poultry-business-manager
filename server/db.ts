@@ -935,55 +935,62 @@ export async function getInvoiceItems(invoiceId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  // Fetch from legacy invoiceItems table
-  const legacyItems = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, invoiceId));
+  const legacyItems = await db
+    .select()
+    .from(invoiceItems)
+    .where(eq(invoiceItems.invoiceId, invoiceId));
 
-  // Fetch from invoiceLineItems table (manual line items)
-  const lineItems = await db.select().from(invoiceLineItems).where(eq(invoiceLineItems.invoiceId, invoiceId));
+  const lineItems = await db
+    .select()
+    .from(invoiceLineItems)
+    .where(eq(invoiceLineItems.invoiceId, invoiceId));
 
-  // If legacy items exist, return them as-is (they already have the expected shape)
   if (legacyItems.length > 0) {
     return legacyItems;
   }
 
-  // Normalize invoiceLineItems rows to match the invoiceItems shape expected by PDF generation
   if (lineItems.length > 0) {
     return lineItems.map((item) => {
-	  const pricePerUnit = parseFloat(item.pricePerUnit?.toString() || '0');
-	  const quantity = parseFloat(item.quantity?.toString() || '0');
-	  const discountPct = parseFloat(item.discount?.toString() || '0');
-	  const vatPct = parseFloat(item.vatPercentage?.toString() || '15');
+      const pricePerUnit = parseFloat(item.pricePerUnit?.toString() || '0');
+      const quantity = parseFloat(item.quantity?.toString() || '0');
+      const discountPct = parseFloat(item.discount?.toString() || '0');
+      const vatPct = parseFloat(item.vatPercentage?.toString() || '15');
 
-	  const subtotal = quantity * pricePerUnit;
+      const subtotal = quantity * pricePerUnit;
+      const discountAmount = subtotal * (discountPct / 100);
 
-  // ✅ ADD THIS
-	  const discountAmount = subtotal * (discountPct / 100);
+      const subtotalExcl = subtotal - discountAmount;
+      const taxAmt = subtotalExcl * (vatPct / 100);
+      const total = subtotalExcl + taxAmt;
 
-	  const subtotalExcl = subtotal - discountAmount;
-	  const taxAmt = subtotalExcl * (vatPct / 100);
-	  const total = subtotalExcl + taxAmt;
+      return {
+        id: item.id,
+        invoiceId: item.invoiceId,
+        description: item.description,
 
-  return {
-    id: item.id,
-    invoiceId: item.invoiceId,
-    description: item.description,
-    quantity: item.quantity,
-    unit: 'unit',
+        // ✅ IMPORTANT FIX
+        quantity: quantity,
 
-    unitPrice: Math.round(pricePerUnit * 100),
+        unit: 'unit',
 
-    subtotal: Math.round(subtotalExcl * 100),
-    taxRate: vatPct,
-    taxAmount: Math.round(taxAmt * 100),
-    totalAmount: Math.round(total * 100),
+        unitPrice: Math.round(pricePerUnit * 100),
 
-    // ✅ FIXED
-    discountPercent: discountPct,
-    discountAmount: Math.round(discountAmount * 100),
+        subtotal: Math.round(subtotalExcl * 100),
+        taxRate: vatPct,
+        taxAmount: Math.round(taxAmt * 100),
+        totalAmount: Math.round(total * 100),
 
-    createdAt: item.createdAt,
-  };
-  }));
+        discountPercent: discountPct,
+        discountAmount: Math.round(discountAmount * 100),
+
+        createdAt: item.createdAt,
+      };
+    });
+  }
+
+  // ✅ MISSING IN YOUR FILE
+  return [];
+}
 
 export async function createInvoiceLineItem(data: {
   invoiceId: number;
