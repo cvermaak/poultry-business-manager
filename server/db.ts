@@ -983,7 +983,7 @@ export async function getInvoiceItems(invoiceId: number) {
 
     createdAt: item.createdAt,
   };
-  }});
+  }));
 
 export async function createInvoiceLineItem(data: {
   invoiceId: number;
@@ -3035,4 +3035,3 @@ export async function updateCompanySettings(data: any, userId: number) {
     });
   }
 }
-
