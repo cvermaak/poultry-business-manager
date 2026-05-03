@@ -166,12 +166,12 @@ export function CreateInvoice() {
         totalBirds,
         totalWeight,
         vatPercentage: lineItems[0]?.vatPercent ?? 15,
-        lineItems: lineItems.map((item) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountPercent: item.discountPercent,
-          vatPercent: item.vatPercent,
+        items: lineItems.map((item) => ({
+		  description: item.description,
+		  quantity: item.quantity,
+		  unitPrice: item.unitPrice,
+		  discountPercent: item.discountPercent,
+		  taxRate: item.vatPercent,
         })),
       });
     } finally {

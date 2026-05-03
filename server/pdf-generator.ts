@@ -17,6 +17,8 @@ interface InvoiceData {
   vatAmount: number;
   inclusiveTotal: number;
   vatPercentage: number;
+  discountTotal?: number;
+  discountPercent?: number;
 }
 
 export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<Buffer> {
@@ -234,13 +236,26 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<Buff
   page.drawText(Number(invoiceData.totalWeight).toFixed(2), { x: colX + 5, y: yPosition - 12, size: fontSize, color: black });
   colX += colWidths[3];
   
-  // Discount %
-  page.drawText('0.00%', { x: colX, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[4];
-  
-  // VAT %
-  page.drawText(`${Number(invoiceData.vatPercentage).toFixed(2)}%`, { x: colX, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[5];
+ // Discount %
+ const discountPct = Number(invoiceData.discountPercent || 0);
+ page.drawText(`${discountPct.toFixed(2)}%`, {
+  x: colX,
+  y: yPosition - 12,
+  size: fontSize,
+  color: black,
+ });
+
+ colX += colWidths[4];
+
+ // VAT %
+ page.drawText(`${Number(invoiceData.vatPercentage).toFixed(2)}%`, {
+  x: colX,
+  y: yPosition - 12,
+  size: fontSize,
+  color: black,
+ });
+
+ colX += colWidths[5];
   
   // Exclusive Total
   page.drawText(`R ${Number(invoiceData.exclusiveTotal).toFixed(2)}`, { x: colX, y: yPosition - 12, size: fontSize, color: black });
@@ -277,7 +292,15 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<Buff
   let summaryY = height - 250;
 
   page.drawText('Total Discount:', { x: summaryX, y: summaryY, size: smallFontSize, color: gray });
-  page.drawText('R0.00', { x: summaryX + 110, y: summaryY, size: smallFontSize, color: black });
+  
+  const discountTotal = Number(invoiceData.discountTotal || 0);
+
+  page.drawText(`R ${discountTotal.toFixed(2)}`, {
+  x: summaryX + 110,
+  y: summaryY,
+  size: smallFontSize,
+  color: black,
+  });
 
   summaryY -= 12;
   page.drawText('Total Exclusive:', { x: summaryX, y: summaryY, size: smallFontSize, color: gray });

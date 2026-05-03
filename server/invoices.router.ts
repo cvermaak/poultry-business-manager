@@ -63,8 +63,8 @@ export const invoiceRouter = router({
             const subtotal = item.quantity * item.unitPrice;
 			const discountAmount = subtotal * (item.discountPercent / 100);
 			const discountedSubtotal = subtotal - discountAmount;
-            const taxAmount = subtotal * (item.taxRate / 100);
-            const totalAmount = subtotal + taxAmount;
+			const taxAmount = discountedSubtotal * (item.taxRate / 100);
+			const totalAmount = discountedSubtotal + taxAmount;
 
             return {
               invoiceId,
