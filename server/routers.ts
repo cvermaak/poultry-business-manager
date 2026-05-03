@@ -1768,6 +1768,7 @@ export const appRouter = router({
                 pricePerUnit: (item.unitPrice || 0) / 100,
                 weight: parseFloat(item.quantity?.toString() || '0'),
                 vatPercentage: item.taxRate !== null && item.taxRate !== undefined ? parseFloat(item.taxRate.toString()) : 0,
+				discount: item.discountPercent || 0,
               }))
             : [
                 {
