@@ -3035,3 +3035,4 @@ export async function updateCompanySettings(data: any, userId: number) {
     });
   }
 }
+
