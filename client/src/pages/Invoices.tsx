@@ -226,6 +226,7 @@ export function Invoices() {
                         <TableHead className="text-right">Qty</TableHead>
                         <TableHead className="text-right">Unit Price</TableHead>
                         <TableHead className="text-right">VAT %</TableHead>
+						<TableHead className="text-right">Discount %</TableHead>
                         <TableHead className="text-right">Amount (incl.)</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -237,6 +238,7 @@ export function Invoices() {
                             <TableCell className="text-right">{parseFloat(item.quantity || '1').toFixed(2)}</TableCell>
                             <TableCell className="text-right">{formatCurrency((item.unitPrice || 0) / 100)}</TableCell>
                             <TableCell className="text-right">{parseFloat(item.taxRate || '15').toFixed(2)}%</TableCell>
+							<TableCell className="text-right">{parseFloat(item.discountPercent || '0').toFixed(2)}%</TableCell>
                             <TableCell className="text-right">{formatCurrency((item.totalAmount || 0) / 100)}</TableCell>
                           </TableRow>
                         ))
