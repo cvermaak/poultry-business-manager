@@ -7,6 +7,7 @@ interface LineItem {
   description: string;
   quantity: number;
   pricePerUnit: number;
+  unit?: string;
   weight?: number;
   discount?: number;
   vatPercentage?: number;
@@ -292,13 +293,14 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   // Column layout (tableWidth = 515px):
   // Description: 180px | Qty/Weight(kg): 65px | Unit Price: 80px | Discount%: 60px | VAT%: 55px | Amount: 75px = 515px
   const cols = [
-	  { header: 'Description',  width: 150, x: tableX + 3   },
-	  { header: 'Qty/Weight(kg)',  width: 55,  x: tableX + 155 },
-	  { header: 'Unit Price',   width: 65,  x: tableX + 212 },
-	  { header: 'Disc %',       width: 50,  x: tableX + 279 },
-	  { header: 'Disc (R)',     width: 65,  x: tableX + 331 },
-	  { header: 'VAT %',        width: 45,  x: tableX + 398 },
-	  { header: 'Amount',       width: 70,  x: tableX + 445 },
+	 { header: 'Description',  width: 150, x: tableX + 3 },
+	 { header: 'Qty',          width: 50,  x: tableX + 155 },
+	 { header: 'Unit',         width: 40,  x: tableX + 205 },
+	 { header: 'Unit Price',   width: 65,  x: tableX + 250 },
+	 { header: 'Disc %',       width: 50,  x: tableX + 315 },
+	 { header: 'Disc (R)',     width: 65,  x: tableX + 365 },
+	 { header: 'VAT %',        width: 45,  x: tableX + 430 },
+	 { header: 'Amount',       width: 70,  x: tableX + 480 },
 	];
 
   for (const col of cols) {
@@ -335,6 +337,8 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     const exclusive = subtotal - discountAmount;
     const vatAmount = exclusive * (vat / 100);
     const total = exclusive + vatAmount;
+	const qtyText = item.quantity.toFixed(2);
+	const unitText = (item as any).unit || 'unit';
 
     // Description — use 8pt so full text fits in 180px without overflow
     // At 8pt, ~50 chars fit; truncate only as a safety net
@@ -349,54 +353,61 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
       color: black,
     });
 
-    // Weight (kg)
-    const weightText = item.weight != null ? item.weight.toFixed(2) : item.quantity.toString();
-    page.drawText(weightText, {
-      x: cols[1].x + 5,
-      y: rowY - 10,
-      size: normalSize,
-      color: black,
-    });
-
-    // Unit Price
-    page.drawText(`R ${item.pricePerUnit.toFixed(2)}`, {
-      x: cols[2].x,
-      y: rowY - 10,
-      size: normalSize,
-      color: black,
-    });
-
-    // Discount %
-    page.drawText(`${discount.toFixed(2)}%`, {
-      x: cols[3].x + 10,
-      y: rowY - 10,
-      size: normalSize,
-      color: black,
-    });
-	
-	// Discount Amount (R) ✅ NEW
-	page.drawText(`R ${discountAmount.toFixed(2)}`, {
-	  x: cols[4].x,
+	// Qty
+	page.drawText(item.quantity.toFixed(2), {
+	  x: cols[1].x,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
 	});
 
-    // VAT %
-    page.drawText(`${vat.toFixed(2)}%`, {
-      x: cols[5].x + 5,
-      y: rowY - 10,
-      size: normalSize,
-      color: black,
-    });
+	// Unit
+	page.drawText(item.unit || 'unit', {
+	  x: cols[2].x,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
 
-    // Amount
-    page.drawText(`R ${total.toFixed(2)}`, {
-      x: cols[6].x,
-      y: rowY - 10,
-      size: normalSize,
-      color: black,
-    });
+	// Unit Price
+	page.drawText(`R ${item.pricePerUnit.toFixed(2)}`, {
+	  x: cols[3].x,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
+
+	// Discount %
+	page.drawText(`${discount.toFixed(2)}%`, {
+	  x: cols[4].x + 5,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
+
+	// Discount Amount
+	page.drawText(`R ${discountAmount.toFixed(2)}`, {
+	  x: cols[5].x,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
+
+	// VAT
+	page.drawText(`${vat.toFixed(2)}%`, {
+	  x: cols[6].x + 5,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
+
+	// Amount
+	page.drawText(`R ${total.toFixed(2)}`, {
+	  x: cols[7].x,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
 
     rowY -= 16;
   }
