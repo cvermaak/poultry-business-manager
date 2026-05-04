@@ -352,15 +352,35 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     });
 
 	// Qty
-	page.drawText(item.quantity.toFixed(2), {
-	  x: cols[1].x,
+	const qtyText = item.quantity.toFixed(2);
+	const qtyWidth = qtyText.length * 4.5;
+
+	page.drawText(qtyText, {
+	  x: cols[1].x + cols[1].width - qtyWidth - 5,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
 	});
 
 	// Unit
-	page.drawText(item.unit || 'unit', {
+	let unitText = item.unit;
+
+	if (!unitText) {
+	  const desc = (item.description || '').toLowerCase();
+
+	  if (desc.includes('chicken')) {
+		unitText = 'kg';
+	  } else if (desc.includes('feed')) {
+		unitText = 'bags';
+	  } else if (desc.includes('shaving')) {
+		unitText = 'bags';
+	  } else {
+		unitText = ''; // leave blank instead of "unit"
+	  }
+	}
+
+	// draw Unit (left aligned is fine here)
+	page.drawText(unitText, {
 	  x: cols[2].x,
 	  y: rowY - 10,
 	  size: normalSize,
@@ -368,32 +388,44 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 	});
 
 	// Unit Price
-	page.drawText(`R ${item.pricePerUnit.toFixed(2)}`, {
-	  x: cols[3].x,
+	const priceText = `R ${item.pricePerUnit.toFixed(2)}`;
+	const priceWidth = priceText.length * 4.5;
+
+	page.drawText(priceText, {
+	  x: cols[3].x + cols[3].width - priceWidth - 5,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
 	});
 
 	// Discount %
-	page.drawText(`${discount.toFixed(2)}%`, {
-	  x: cols[4].x + 5,
+	const discPctText = `${discount.toFixed(2)}%`;
+	const discPctWidth = discPctText.length * 4.5;
+
+	page.drawText(discPctText, {
+	  x: cols[4].x + cols[4].width - discPctWidth - 5,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
 	});
 
 	// Discount Amount
-	page.drawText(`R ${discountAmount.toFixed(2)}`, {
-	  x: cols[5].x,
+	const discAmtText = `R ${discountAmount.toFixed(2)}`;
+	const discAmtWidth = discAmtText.length * 4.5;
+
+	page.drawText(discAmtText, {
+	  x: cols[5].x + cols[5].width - discAmtWidth - 5,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
 	});
 
 	// VAT
-	page.drawText(`${vat.toFixed(2)}%`, {
-	  x: cols[6].x + 5,
+	const vatText = `${vat.toFixed(2)}%`;
+	const vatWidth = vatText.length * 4.5;
+
+	page.drawText(vatText, {
+	  x: cols[6].x + cols[6].width - vatWidth - 5,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
