@@ -291,7 +291,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   });
 
   // Column layout (tableWidth = 515px):
-  // Description: 180px | Qty/Weight(kg): 65px | Unit Price: 80px | Discount%: 60px | VAT%: 55px | Amount: 75px = 515px
+  // Description | Qty | Unit | Unit Price | Disc % | Disc (R) | VAT % | Amount
   const cols = [
 	 { header: 'Description',  width: 150, x: tableX + 3 },
 	 { header: 'Qty',          width: 50,  x: tableX + 155 },
@@ -337,8 +337,6 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     const exclusive = subtotal - discountAmount;
     const vatAmount = exclusive * (vat / 100);
     const total = exclusive + vatAmount;
-	const qtyText = item.quantity.toFixed(2);
-	const unitText = (item as any).unit || 'unit';
 
     // Description — use 8pt so full text fits in 180px without overflow
     // At 8pt, ~50 chars fit; truncate only as a safety net
@@ -402,8 +400,12 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 	});
 
 	// Amount
-	page.drawText(`R ${total.toFixed(2)}`, {
-	  x: cols[7].x,
+	const amountText = `R ${total.toFixed(2)}`;
+	const textWidth = amountText.length * 4.5; // rough width estimate
+	const amountX = cols[7].x + cols[7].width - textWidth - 5;
+
+	page.drawText(amountText, {
+	  x: amountX,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
@@ -415,6 +417,15 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   y = rowY - 10;
 
   // ===== TOTALS SECTION =====
+  function drawRightAligned(text: string, rightX: number, y: number, size: number, color: any) {
+  const textWidth = text.length * 4.5; // rough width
+  page.drawText(text, {
+    x: rightX - textWidth,
+    y,
+    size,
+    color,
+  });
+}
   // Align right edge with line items table right edge (width - 40)
   const totalsBoxWidth = 210;
   const totalsX = width - 40 - totalsBoxWidth;
@@ -431,23 +442,49 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderWidth: 1.5,
   });
 
-  totalsY -= 8;
-  page.drawText('Subtotal:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-  page.drawText(`R ${invoiceData.totalExclusive.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
+  const rightEdge = totalsX + totalsBoxWidth - 10;
 
-  totalsY -= 12;
-  page.drawText('Total VAT:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-  page.drawText(`R ${invoiceData.totalVAT.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
+	totalsY -= 8;
+	page.drawText('Subtotal:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
+	drawRightAligned(
+	  `R ${invoiceData.totalExclusive.toFixed(2)}`,
+	  rightEdge,
+	  totalsY,
+	  smallSize,
+	  black
+	);
 
-  if (invoiceData.totalDiscount && invoiceData.totalDiscount > 0) {
-    totalsY -= 12;
-    page.drawText('Total Discount:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-    page.drawText(`R ${invoiceData.totalDiscount.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
-  }
+	totalsY -= 12;
+	page.drawText('Total VAT:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
+	drawRightAligned(
+	  `R ${invoiceData.totalVAT.toFixed(2)}`,
+	  rightEdge,
+	  totalsY,
+	  smallSize,
+	  black
+	);
 
-  totalsY -= 16;
-  page.drawText('TOTAL DUE:', { x: totalsX + 5, y: totalsY, size: 11, color: darkBlue });
-  page.drawText(`R ${invoiceData.totalInclusive.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: 12, color: orange });
+	if (invoiceData.totalDiscount && invoiceData.totalDiscount > 0) {
+	  totalsY -= 12;
+	  page.drawText('Total Discount:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
+	  drawRightAligned(
+		`R ${invoiceData.totalDiscount.toFixed(2)}`,
+		rightEdge,
+		totalsY,
+		smallSize,
+		black
+	  );
+	}
+
+	totalsY -= 16;
+	page.drawText('TOTAL DUE:', { x: totalsX + 5, y: totalsY, size: 11, color: darkBlue });
+	drawRightAligned(
+	  `R ${invoiceData.totalInclusive.toFixed(2)}`,
+	  rightEdge,
+	  totalsY,
+	  12,
+	  orange
+	);
 
   y -= 100;
 
