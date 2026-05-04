@@ -296,6 +296,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     { header: 'Weight (kg)',  width: 65,  x: tableX + 185  },
     { header: 'Unit Price',  width: 80,  x: tableX + 252  },
     { header: 'Discount %',  width: 60,  x: tableX + 334  },
+	{ header: 'Disc (R)',     width: 65,  x: tableX + 361 },
     { header: 'VAT %',       width: 55,  x: tableX + 396  },
     { header: 'Amount',      width: 75,  x: tableX + 453  },
   ];
@@ -372,10 +373,18 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
       size: normalSize,
       color: black,
     });
+	
+	// Discount Amount (R) ✅ NEW
+	page.drawText(`R ${discountAmount.toFixed(2)}`, {
+	  x: cols[4].x,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
 
     // VAT %
     page.drawText(`${vat.toFixed(2)}%`, {
-      x: cols[4].x + 5,
+      x: cols[5].x + 5,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -383,7 +392,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Amount
     page.drawText(`R ${total.toFixed(2)}`, {
-      x: cols[5].x,
+      x: cols[6].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
