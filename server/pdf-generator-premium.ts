@@ -405,16 +405,6 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 	drawRight(`${vat.toFixed(2)}%`, cols[6], rowY - 10, normalSize, black);
 
 	// Amount
-	const textWidth = font.widthOfTextAtSize(text, size);
-
-	  page.drawText(text, {
-		x: totalsX + totalsBoxWidth - textWidth - 10,
-		y,
-		size,
-		color,
-		font,
-	  });
-	
 	drawRight(`R ${total.toFixed(2)}`, cols[7], rowY - 10, normalSize, black);
 
     rowY -= 16;
