@@ -290,16 +290,16 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   });
 
   // Column layout (tableWidth = 515px):
-  // Description: 180px | Weight(kg): 65px | Unit Price: 80px | Discount%: 60px | VAT%: 55px | Amount: 75px = 515px
+  // Description: 180px | Qty/Weight(kg): 65px | Unit Price: 80px | Discount%: 60px | VAT%: 55px | Amount: 75px = 515px
   const cols = [
-    { header: 'Description',  width: 180, x: tableX + 3   },
-    { header: 'Weight (kg)',  width: 65,  x: tableX + 185  },
-    { header: 'Unit Price',  width: 80,  x: tableX + 252  },
-    { header: 'Discount %',  width: 60,  x: tableX + 334  },
-	{ header: 'Disc (R)',     width: 65,  x: tableX + 361 },
-    { header: 'VAT %',       width: 55,  x: tableX + 396  },
-    { header: 'Amount',      width: 75,  x: tableX + 453  },
-  ];
+	  { header: 'Description',  width: 150, x: tableX + 3   },
+	  { header: 'Qty/Weight(kg)',  width: 55,  x: tableX + 155 },
+	  { header: 'Unit Price',   width: 65,  x: tableX + 212 },
+	  { header: 'Disc %',       width: 50,  x: tableX + 279 },
+	  { header: 'Disc (R)',     width: 65,  x: tableX + 331 },
+	  { header: 'VAT %',        width: 45,  x: tableX + 398 },
+	  { header: 'Amount',       width: 70,  x: tableX + 445 },
+	];
 
   for (const col of cols) {
     page.drawText(col.header, {
