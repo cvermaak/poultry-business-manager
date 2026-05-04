@@ -1,4 +1,4 @@
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as fs from 'fs';
 import * as path from 'path';
 import QRCode from 'qrcode';
@@ -50,6 +50,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595, 842]); // A4
   const { width, height } = page.getSize();
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   // Colors
   const darkBlue = rgb(0.05, 0.35, 0.5);
@@ -60,6 +61,18 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   const veryLightGray = rgb(0.98, 0.98, 0.98);
   const borderGray = rgb(0.85, 0.85, 0.85);
   const white = rgb(1, 1, 1);
+  
+  function drawRight(text: string, col: any, y: number, size: number, color: any) {
+  const textWidth = font.widthOfTextAtSize(text, size);
+
+  page.drawText(text, {
+    x: col.x + col.width - textWidth - 5,
+    y,
+    size,
+    color,
+    font,
+  });
+}
 
   // Font sizes
   const titleSize = 28;
@@ -352,15 +365,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     });
 
 	// Qty
-	const qtyText = item.quantity.toFixed(2);
-	const qtyWidth = qtyText.length * 4.5;
-
-	page.drawText(qtyText, {
-	  x: cols[1].x + cols[1].width - qtyWidth - 5,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
+	drawRight(item.quantity.toFixed(2), cols[1], rowY - 10, normalSize, black);
 
 	// Unit
 	let unitText = item.unit;
@@ -388,60 +393,29 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 	});
 
 	// Unit Price
-	const priceText = `R ${item.pricePerUnit.toFixed(2)}`;
-	const priceWidth = priceText.length * 4.5;
-
-	page.drawText(priceText, {
-	  x: cols[3].x + cols[3].width - priceWidth - 5,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
+	drawRight(`R ${item.pricePerUnit.toFixed(2)}`, cols[3], rowY - 10, normalSize, black);
 
 	// Discount %
-	const discPctText = `${discount.toFixed(2)}%`;
-	const discPctWidth = discPctText.length * 4.5;
-
-	page.drawText(discPctText, {
-	  x: cols[4].x + cols[4].width - discPctWidth - 5,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
+	drawRight(`${discount.toFixed(2)}%`, cols[4], rowY - 10, normalSize, black);
 
 	// Discount Amount
-	const discAmtText = `R ${discountAmount.toFixed(2)}`;
-	const discAmtWidth = discAmtText.length * 4.5;
-
-	page.drawText(discAmtText, {
-	  x: cols[5].x + cols[5].width - discAmtWidth - 5,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
+	drawRight(`R ${discountAmount.toFixed(2)}`, cols[5], rowY - 10, normalSize, black);
 
 	// VAT
-	const vatText = `${vat.toFixed(2)}%`;
-	const vatWidth = vatText.length * 4.5;
-
-	page.drawText(vatText, {
-	  x: cols[6].x + cols[6].width - vatWidth - 5,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
+	drawRight(`${vat.toFixed(2)}%`, cols[6], rowY - 10, normalSize, black);
 
 	// Amount
-	const amountText = `R ${total.toFixed(2)}`;
-	const textWidth = amountText.length * 4.5; // rough width estimate
-	const amountX = cols[7].x + cols[7].width - textWidth - 5;
+	const textWidth = font.widthOfTextAtSize(text, size);
 
-	page.drawText(amountText, {
-	  x: amountX,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
+	  page.drawText(text, {
+		x: totalsX + totalsBoxWidth - textWidth - 10,
+		y,
+		size,
+		color,
+		font,
+	  });
+	
+	drawRight(`R ${total.toFixed(2)}`, cols[7], rowY - 10, normalSize, black);
 
     rowY -= 16;
   }
@@ -449,15 +423,18 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   y = rowY - 10;
 
   // ===== TOTALS SECTION =====
-  function drawRightAligned(text: string, rightX: number, y: number, size: number, color: any) {
-  const textWidth = text.length * 4.5; // rough width
-  page.drawText(text, {
-    x: rightX - textWidth,
-    y,
-    size,
-    color,
-  });
-}
+   function drawRightTotals(text: string, y: number, size: number, color: any) {
+   const textWidth = font.widthOfTextAtSize(text, size);
+
+	  page.drawText(text, {
+		x: totalsX + totalsBoxWidth - textWidth - 10,
+		y,
+		size,
+		color,
+		font,
+	  });
+	}
+
   // Align right edge with line items table right edge (width - 40)
   const totalsBoxWidth = 210;
   const totalsX = width - 40 - totalsBoxWidth;
@@ -474,49 +451,23 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderWidth: 1.5,
   });
 
-  const rightEdge = totalsX + totalsBoxWidth - 10;
-
 	totalsY -= 8;
 	page.drawText('Subtotal:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-	drawRightAligned(
-	  `R ${invoiceData.totalExclusive.toFixed(2)}`,
-	  rightEdge,
-	  totalsY,
-	  smallSize,
-	  black
-	);
+	drawRightTotals(`R ${invoiceData.totalExclusive.toFixed(2)}`, totalsY, smallSize, black);
 
 	totalsY -= 12;
 	page.drawText('Total VAT:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-	drawRightAligned(
-	  `R ${invoiceData.totalVAT.toFixed(2)}`,
-	  rightEdge,
-	  totalsY,
-	  smallSize,
-	  black
-	);
+	drawRightTotals(`R ${invoiceData.totalVAT.toFixed(2)}`, totalsY, smallSize, black);
 
 	if (invoiceData.totalDiscount && invoiceData.totalDiscount > 0) {
 	  totalsY -= 12;
 	  page.drawText('Total Discount:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-	  drawRightAligned(
-		`R ${invoiceData.totalDiscount.toFixed(2)}`,
-		rightEdge,
-		totalsY,
-		smallSize,
-		black
-	  );
+	  drawRightTotals(`R ${invoiceData.totalDiscount.toFixed(2)}`, totalsY, smallSize, black);
 	}
 
 	totalsY -= 16;
 	page.drawText('TOTAL DUE:', { x: totalsX + 5, y: totalsY, size: 11, color: darkBlue });
-	drawRightAligned(
-	  `R ${invoiceData.totalInclusive.toFixed(2)}`,
-	  rightEdge,
-	  totalsY,
-	  12,
-	  orange
-	);
+	drawRightTotals(`R ${invoiceData.totalInclusive.toFixed(2)}`, totalsY, 12, orange);
 
   y -= 100;
 
