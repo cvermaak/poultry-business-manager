@@ -66,7 +66,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   const textWidth = font.widthOfTextAtSize(text, size);
 
   page.drawText(text, {
-    x: col.x + col.width - textWidth - 5,
+    x: col.x + col.width - textWidth - 6, // 👈 consistent padding
     y,
     size,
     color,
@@ -306,6 +306,17 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   // Column layout (tableWidth = 515px):
   // Description | Qty | Unit | Unit Price | Disc % | Disc (R) | VAT % | Amount
   const cols = [
+	 { header: 'Description',  width: 150, x: tableX + 3 },
+	 { header: 'Qty',          width: 50,  x: tableX + 155 },
+	 { header: 'Unit',         width: 40,  x: tableX + 205 },
+	 { header: 'Unit Price',   width: 65,  x: tableX + 250 },
+	 { header: 'Disc %',       width: 50,  x: tableX + 315 },
+	 { header: 'Disc (R)',     width: 65,  x: tableX + 365 },
+	 { header: 'VAT %',        width: 45,  x: tableX + 430 },
+	 { header: 'Amount',       width: 70,  x: tableX + 480 },
+	];
+	
+	const cols = [
 	  { header: 'Description', width: 180, x: tableX + 3 },
 	  { header: 'Qty',         width: 55,  x: tableX + 185 },
 	  { header: 'Unit',        width: 45,  x: tableX + 240 },
@@ -315,6 +326,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 	  { header: 'VAT %',       width: 50,  x: tableX + 485 },
 	  { header: 'Amount',      width: 75,  x: tableX + 535 },
 	];
+
 
   for (const col of cols) {
     page.drawText(col.header, {
@@ -358,7 +370,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
       ? item.description.substring(0, maxDescChars - 1) + '…'
       : item.description;
     page.drawText(descText, {
-      x: cols[0].x,
+      x: cols[0].x + 4,
       y: rowY - 9,
       size: 8,
       color: black,
@@ -386,7 +398,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
 	// draw Unit (left aligned is fine here)
 	page.drawText(unitText, {
-	  x: cols[2].x,
+	  x: cols[2].x + 4,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
