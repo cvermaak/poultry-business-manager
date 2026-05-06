@@ -361,8 +361,8 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Amount
     page.drawText(`R ${total.toFixed(2)}`, {
-      x: cols[6].x + 10,
-      y: rowY - 10,
+      x: cols[6].x + 20,
+      y: rowY - 30,
       size: normalSize,
       color: black,
     });
