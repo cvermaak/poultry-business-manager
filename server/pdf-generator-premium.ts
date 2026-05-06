@@ -321,7 +321,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Quantity
     page.drawText(item.quantity.toString(), {
-      x: cols[1].x + 15,
+      x: cols[1].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -337,7 +337,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Discount %
     page.drawText(`${discount.toFixed(2)}%`, {
-      x: cols[3].x + 15,
+      x: cols[3].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -353,7 +353,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // VAT %
     page.drawText(`${vat.toFixed(2)}%`, {
-      x: cols[5].x + 10,
+      x: cols[5].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
