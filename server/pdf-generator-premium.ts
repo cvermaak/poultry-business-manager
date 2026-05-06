@@ -267,7 +267,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   const cols = [
 	 { header: 'Description', width: 130, x: tableX + 3 },
 	 { header: 'Qty',         width: 45,  x: tableX + 133 },
-	 { header: 'Unit', 		  width: 45,  x: tableX + 178
+	 { header: 'Unit', 		  width: 45,  x: tableX + 178 },
 	 { header: 'Unit Price',  width: 65,  x: tableX + 223 },
 	 { header: 'Disc %',      width: 55,  x: tableX + 288 },
 
