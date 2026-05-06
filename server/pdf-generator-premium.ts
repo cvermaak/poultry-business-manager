@@ -273,7 +273,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 	 { header: 'Disc (R)',    width: 70,  x: tableX + 298 },
 
 	 { header: 'VAT %',       width: 50,  x: tableX + 368 },
-	 { header: 'Amount',      width: 75,  x: tableX + 418 },
+	 { header: 'Amount',      width: 75,  x: tableX + 440 },
 	];
 
   for (const col of cols) {
@@ -361,8 +361,8 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Amount
     page.drawText(`R ${total.toFixed(2)}`, {
-      x: cols[6].x + 20,
-      y: rowY - 30,
+      x: cols[6].x,
+      y: rowY - 10,
       size: normalSize,
       color: black,
     });
