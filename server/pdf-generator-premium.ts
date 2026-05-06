@@ -7,6 +7,7 @@ interface LineItem {
   description: string;
   quantity: number;
   pricePerUnit: number;
+  unit?: string; // ✅ add this
   weight?: number;
   discount?: number;
   vatPercentage?: number;
@@ -266,14 +267,15 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   const cols = [
 	 { header: 'Description', width: 130, x: tableX + 3 },
 	 { header: 'Qty',         width: 45,  x: tableX + 133 },
-	 { header: 'Unit Price',  width: 65,  x: tableX + 178 },
-	 { header: 'Disc %',      width: 55,  x: tableX + 243 },
+	 { header: 'Unit', 		  width: 45,  x: tableX + 178
+	 { header: 'Unit Price',  width: 65,  x: tableX + 223 },
+	 { header: 'Disc %',      width: 55,  x: tableX + 288 },
 
 	 // ✅ NEW COLUMN
-	 { header: 'Disc (R)',    width: 70,  x: tableX + 298 },
+	 { header: 'Disc (R)',    width: 70,  x: tableX + 343 },
 
-	 { header: 'VAT %',       width: 50,  x: tableX + 368 },
-	 { header: 'Amount',      width: 75,  x: tableX + 440 },
+	 { header: 'VAT %',       width: 50,  x: tableX + 413 },
+	 { header: 'Amount',      width: 75,  x: tableX + 463 },
 	];
 
   for (const col of cols) {
@@ -326,10 +328,18 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
       size: normalSize,
       color: black,
     });
+	
+    // Unit	
+	page.drawText(item.unit || '', {
+	  x: cols[2].x,
+	  y: rowY - 10,
+	  size: normalSize,
+	  color: black,
+	});
 
     // Unit Price
     page.drawText(`R ${item.pricePerUnit.toFixed(2)}`, {
-      x: cols[2].x,
+      x: cols[3].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -337,7 +347,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Discount %
     page.drawText(`${discount.toFixed(2)}%`, {
-      x: cols[3].x,
+      x: cols[4].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -345,7 +355,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 	
 	// Discount Amount (NEW)
 	page.drawText(`R ${discountAmount.toFixed(2)}`, {
-	  x: cols[4].x,
+	  x: cols[5].x,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
@@ -353,7 +363,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // VAT %
     page.drawText(`${vat.toFixed(2)}%`, {
-      x: cols[5].x,
+      x: cols[6].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -361,7 +371,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Amount
     page.drawText(`R ${total.toFixed(2)}`, {
-      x: cols[6].x,
+      x: cols[7].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
