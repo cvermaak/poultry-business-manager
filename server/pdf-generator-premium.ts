@@ -305,18 +305,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
   // Column layout (tableWidth = 515px):
   // Description | Qty | Unit | Unit Price | Disc % | Disc (R) | VAT % | Amount
-  const cols = [
-	 { header: 'Description',  width: 150, x: tableX + 3 },
-	 { header: 'Qty',          width: 50,  x: tableX + 155 },
-	 { header: 'Unit',         width: 40,  x: tableX + 205 },
-	 { header: 'Unit Price',   width: 65,  x: tableX + 250 },
-	 { header: 'Disc %',       width: 50,  x: tableX + 315 },
-	 { header: 'Disc (R)',     width: 65,  x: tableX + 365 },
-	 { header: 'VAT %',        width: 45,  x: tableX + 430 },
-	 { header: 'Amount',       width: 70,  x: tableX + 480 },
-	];
-	
-	const cols = [
+ 	const cols = [
 	  { header: 'Description', width: 180, x: tableX + 3 },
 	  { header: 'Qty',         width: 55,  x: tableX + 185 },
 	  { header: 'Unit',        width: 45,  x: tableX + 240 },
