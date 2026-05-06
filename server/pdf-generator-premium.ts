@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb } from 'pdf-lib';
 import * as fs from 'fs';
 import * as path from 'path';
 import QRCode from 'qrcode';
@@ -7,7 +7,6 @@ interface LineItem {
   description: string;
   quantity: number;
   pricePerUnit: number;
-  unit?: string;
   weight?: number;
   discount?: number;
   vatPercentage?: number;
@@ -33,16 +32,6 @@ interface InvoiceData {
     branchCode: string;
     accountName: string;
     accountNumber: string;
-    reference?: string;
-  };
-  companyInfo?: {
-    name: string;
-    vatNumber?: string;
-    registrationNumber?: string;
-    address?: string;
-    phone?: string;
-    email?: string;
-    website?: string;
   };
 }
 
@@ -50,7 +39,6 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595, 842]); // A4
   const { width, height } = page.getSize();
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
   // Colors
   const darkBlue = rgb(0.05, 0.35, 0.5);
@@ -61,18 +49,6 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   const veryLightGray = rgb(0.98, 0.98, 0.98);
   const borderGray = rgb(0.85, 0.85, 0.85);
   const white = rgb(1, 1, 1);
-  
-  function drawRight(text: string, col: any, y: number, size: number, color: any) {
-  const textWidth = font.widthOfTextAtSize(text, size);
-
-  page.drawText(text, {
-    x: col.x + col.width - textWidth - 6, // 👈 consistent padding
-    y,
-    size,
-    color,
-    font,
-  });
-}
 
   // Font sizes
   const titleSize = 28;
@@ -159,9 +135,9 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   });
 
   y -= (logoHeight + 5);
-  y -= 4; // Small gap after logo — company block sits close to logo
+  y -= 10; // Minimal gap after logo - move company block much higher
 
-  // ===== COMPANY INFO BOX =====
+  // ===== COMPANY INFO BOX - moved significantly higher =====
   page.drawRectangle({
     x: 40,
     y: y - 50,
@@ -172,44 +148,28 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderWidth: 0.5,
   });
 
-  // Company name — use settings value or fallback
-  const companyName = invoiceData.companyInfo?.name || 'AFGRO FARMING GROUP (PTY) LTD';
-  page.drawText(companyName.toUpperCase(), {
+  page.drawText('AFGRO FARMING GROUP (PTY) LTD', {
     x: 50,
     y: y - 15,
     size: normalSize,
     color: darkBlue,
   });
 
-  // Build registration line from settings
-  const regParts: string[] = [];
-  if (invoiceData.companyInfo?.vatNumber) regParts.push(`VAT NO: ${invoiceData.companyInfo.vatNumber}`);
-  if (invoiceData.companyInfo?.registrationNumber) regParts.push(`REG NO: ${invoiceData.companyInfo.registrationNumber}`);
-  if (invoiceData.companyInfo?.address) regParts.push(invoiceData.companyInfo.address);
-  const regLine = regParts.length > 0 ? regParts.join(' | ') : 'VAT NO: — | REG NO: —';
-  page.drawText(regLine, {
+  page.drawText('VAT NO: 4960323782 | REG NO: 2024/149547/07 | 221 Market Street, Fairland, Randburg 2170', {
     x: 50,
     y: y - 28,
     size: smallSize,
     color: gray,
   });
 
-  // Build contact line from settings
-  const contactParts: string[] = [];
-  if (invoiceData.companyInfo?.phone) contactParts.push(`Phone: ${invoiceData.companyInfo.phone}`);
-  if (invoiceData.companyInfo?.email) contactParts.push(`Email: ${invoiceData.companyInfo.email}`);
-  if (invoiceData.companyInfo?.website) contactParts.push(`Web: ${invoiceData.companyInfo.website}`);
-  const contactLine = contactParts.length > 0 ? contactParts.join(' | ') : '';
-  if (contactLine) {
-    page.drawText(contactLine, {
-      x: 50,
-      y: y - 38,
-      size: smallSize,
-      color: gray,
-    });
-  }
+  page.drawText('Phone: +27 (0)11 234 5678 | Email: info@afgro.co.za | Web: www.afgro.co.za', {
+    x: 50,
+    y: y - 38,
+    size: smallSize,
+    color: gray,
+  });
 
-  y -= 100; // Gap before invoice details section (content below stays in same position)
+  y -= 100; // Reduced gap - move invoice details higher to consume more white space
 
   // ===== INVOICE DETAILS AND CUSTOMER INFO SECTION =====
   // Left column - Invoice details
@@ -303,19 +263,18 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderColor: darkBlue,
   });
 
-  // Column layout (tableWidth = 515px):
-  // Description | Qty | Unit | Unit Price | Disc % | Disc (R) | VAT % | Amount
- 	const cols = [
-	  { header: 'Description', width: 180, x: tableX + 3 },
-	  { header: 'Qty',         width: 55,  x: tableX + 185 },
-	  { header: 'Unit',        width: 45,  x: tableX + 240 },
-	  { header: 'Unit Price',  width: 75,  x: tableX + 285 },
-	  { header: 'Disc %',      width: 55,  x: tableX + 360 },
-	  { header: 'Disc (R)',    width: 70,  x: tableX + 415 },
-	  { header: 'VAT %',       width: 50,  x: tableX + 485 },
-	  { header: 'Amount',      width: 75,  x: tableX + 535 },
-	];
+  const cols = [
+	 { header: 'Description', width: 130, x: tableX + 3 },
+	 { header: 'Qty',         width: 45,  x: tableX + 133 },
+	 { header: 'Unit Price',  width: 65,  x: tableX + 178 },
+	 { header: 'Disc %',      width: 55,  x: tableX + 243 },
 
+	 // ✅ NEW COLUMN
+	 { header: 'Disc (R)',    width: 70,  x: tableX + 298 },
+
+	 { header: 'VAT %',       width: 50,  x: tableX + 368 },
+	 { header: 'Amount',      width: 75,  x: tableX + 418 },
+	];
 
   for (const col of cols) {
     page.drawText(col.header, {
@@ -345,68 +304,68 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     });
 
     const discount = item.discount || 0;
-    const vat = item.vatPercentage !== undefined && item.vatPercentage !== null ? item.vatPercentage : 0;
+    const vat = item.vatPercentage || 15;
     const subtotal = item.quantity * item.pricePerUnit;
     const discountAmount = subtotal * (discount / 100);
     const exclusive = subtotal - discountAmount;
     const vatAmount = exclusive * (vat / 100);
     const total = exclusive + vatAmount;
 
-    // Description — use 8pt so full text fits in 180px without overflow
-    // At 8pt, ~50 chars fit; truncate only as a safety net
-    const maxDescChars = 50;
-    const descText = item.description.length > maxDescChars
-      ? item.description.substring(0, maxDescChars - 1) + '…'
-      : item.description;
-    page.drawText(descText, {
-      x: cols[0].x + 4,
-      y: rowY - 9,
-      size: 8,
+    // Description
+    page.drawText(item.description, {
+      x: cols[0].x,
+      y: rowY - 10,
+      size: normalSize,
       color: black,
     });
 
-	// Qty
-	drawRight(item.quantity.toFixed(2), cols[1], rowY - 10, normalSize, black);
+    // Quantity
+    page.drawText(item.quantity.toString(), {
+      x: cols[1].x + 15,
+      y: rowY - 10,
+      size: normalSize,
+      color: black,
+    });
 
-	// Unit
-	let unitText = item.unit;
+    // Unit Price
+    page.drawText(`R ${item.pricePerUnit.toFixed(2)}`, {
+      x: cols[2].x,
+      y: rowY - 10,
+      size: normalSize,
+      color: black,
+    });
 
-	if (!unitText) {
-	  const desc = (item.description || '').toLowerCase();
-
-	  if (desc.includes('chicken')) {
-		unitText = 'kg';
-	  } else if (desc.includes('feed')) {
-		unitText = 'bags';
-	  } else if (desc.includes('shaving')) {
-		unitText = 'bags';
-	  } else {
-		unitText = ''; // leave blank instead of "unit"
-	  }
-	}
-
-	// draw Unit (left aligned is fine here)
-	page.drawText(unitText, {
-	  x: cols[2].x + 4,
+    // Discount %
+    page.drawText(`${discount.toFixed(2)}%`, {
+      x: cols[3].x + 15,
+      y: rowY - 10,
+      size: normalSize,
+      color: black,
+    });
+	
+	// Discount Amount (NEW)
+	page.drawText(`R ${discountAmount.toFixed(2)}`, {
+	  x: cols[4].x,
 	  y: rowY - 10,
 	  size: normalSize,
 	  color: black,
 	});
 
-	// Unit Price
-	drawRight(`R ${item.pricePerUnit.toFixed(2)}`, cols[3], rowY - 10, normalSize, black);
+    // VAT %
+    page.drawText(`${vat.toFixed(2)}%`, {
+      x: cols[5].x + 10,
+      y: rowY - 10,
+      size: normalSize,
+      color: black,
+    });
 
-	// Discount %
-	drawRight(`${discount.toFixed(2)}%`, cols[4], rowY - 10, normalSize, black);
-
-	// Discount Amount
-	drawRight(`R ${discountAmount.toFixed(2)}`, cols[5], rowY - 10, normalSize, black);
-
-	// VAT
-	drawRight(`${vat.toFixed(2)}%`, cols[6], rowY - 10, normalSize, black);
-
-	// Amount
-	drawRight(`R ${total.toFixed(2)}`, cols[7], rowY - 10, normalSize, black);
+    // Amount
+    page.drawText(`R ${total.toFixed(2)}`, {
+      x: cols[6].x,
+      y: rowY - 10,
+      size: normalSize,
+      color: black,
+    });
 
     rowY -= 16;
   }
@@ -414,18 +373,6 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   y = rowY - 10;
 
   // ===== TOTALS SECTION =====
-   function drawRightTotals(text: string, y: number, size: number, color: any) {
-   const textWidth = font.widthOfTextAtSize(text, size);
-
-	  page.drawText(text, {
-		x: totalsX + totalsBoxWidth - textWidth - 10,
-		y,
-		size,
-		color,
-		font,
-	  });
-	}
-
   // Align right edge with line items table right edge (width - 40)
   const totalsBoxWidth = 210;
   const totalsX = width - 40 - totalsBoxWidth;
@@ -442,23 +389,23 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderWidth: 1.5,
   });
 
-	totalsY -= 8;
-	page.drawText('Subtotal:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-	drawRightTotals(`R ${invoiceData.totalExclusive.toFixed(2)}`, totalsY, smallSize, black);
+  totalsY -= 8;
+  page.drawText('Subtotal:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
+  page.drawText(`R ${invoiceData.totalExclusive.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
 
-	totalsY -= 12;
-	page.drawText('Total VAT:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-	drawRightTotals(`R ${invoiceData.totalVAT.toFixed(2)}`, totalsY, smallSize, black);
+  totalsY -= 12;
+  page.drawText('Total VAT:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
+  page.drawText(`R ${invoiceData.totalVAT.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
 
-	if (invoiceData.totalDiscount && invoiceData.totalDiscount > 0) {
-	  totalsY -= 12;
-	  page.drawText('Total Discount:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-	  drawRightTotals(`R ${invoiceData.totalDiscount.toFixed(2)}`, totalsY, smallSize, black);
-	}
+  if (invoiceData.totalDiscount && invoiceData.totalDiscount > 0) {
+    totalsY -= 12;
+    page.drawText('Total Discount:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
+    page.drawText(`R ${invoiceData.totalDiscount.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
+  }
 
-	totalsY -= 16;
-	page.drawText('TOTAL DUE:', { x: totalsX + 5, y: totalsY, size: 11, color: darkBlue });
-	drawRightTotals(`R ${invoiceData.totalInclusive.toFixed(2)}`, totalsY, 12, orange);
+  totalsY -= 16;
+  page.drawText('TOTAL DUE:', { x: totalsX + 5, y: totalsY, size: 11, color: darkBlue });
+  page.drawText(`R ${invoiceData.totalInclusive.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: 12, color: orange });
 
   y -= 100;
 
@@ -475,17 +422,13 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   if (invoiceData.bankDetails) {
     page.drawText(`Bank: ${invoiceData.bankDetails.bank}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
-    if (invoiceData.bankDetails.branchCode) {
-      page.drawText(`Branch Code: ${invoiceData.bankDetails.branchCode}`, { x: 40, y, size: smallSize, color: black });
-      y -= 9;
-    }
+    page.drawText(`Branch Code: ${invoiceData.bankDetails.branchCode}`, { x: 40, y, size: smallSize, color: black });
+    y -= 9;
     page.drawText(`Account Name: ${invoiceData.bankDetails.accountName}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
     page.drawText(`Account Number: ${invoiceData.bankDetails.accountNumber}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
-    page.drawText(`Reference: ${invoiceData.bankDetails.reference || invoiceData.invoiceNumber}`, { x: 40, y, size: smallSize, color: black });
-  } else {
-    page.drawText('No banking details configured. Please update company settings.', { x: 40, y, size: smallSize, color: gray });
+    page.drawText(`Reference: ${invoiceData.invoiceNumber}`, { x: 40, y, size: smallSize, color: black });
   }
 
   // ===== TERMS AND CONDITIONS - moved 20mm lower =====
