@@ -135,7 +135,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   });
 
   y -= (logoHeight + 5);
-  y -= 10; // Minimal gap after logo - move company block much higher
+  y -= 5; // Minimal gap after logo - move company block much higher
 
   // ===== COMPANY INFO BOX - moved significantly higher =====
   page.drawRectangle({
@@ -391,21 +391,21 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
   totalsY -= 8;
   page.drawText('Subtotal:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-  page.drawText(`R ${invoiceData.totalExclusive.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
+  page.drawText(`R ${invoiceData.totalExclusive.toFixed(2)}`, { x: totalsX + 137, y: totalsY, size: smallSize, color: black });
 
   totalsY -= 12;
   page.drawText('Total VAT:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-  page.drawText(`R ${invoiceData.totalVAT.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
+  page.drawText(`R ${invoiceData.totalVAT.toFixed(2)}`, { x: totalsX + 137, y: totalsY, size: smallSize, color: black });
 
   if (invoiceData.totalDiscount && invoiceData.totalDiscount > 0) {
     totalsY -= 12;
     page.drawText('Total Discount:', { x: totalsX + 5, y: totalsY, size: smallSize, color: gray });
-    page.drawText(`R ${invoiceData.totalDiscount.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: smallSize, color: black });
+    page.drawText(`R ${invoiceData.totalDiscount.toFixed(2)}`, { x: totalsX + 137, y: totalsY, size: smallSize, color: black });
   }
 
   totalsY -= 16;
   page.drawText('TOTAL DUE:', { x: totalsX + 5, y: totalsY, size: 11, color: darkBlue });
-  page.drawText(`R ${invoiceData.totalInclusive.toFixed(2)}`, { x: totalsX + 115, y: totalsY, size: 12, color: orange });
+  page.drawText(`R ${invoiceData.totalInclusive.toFixed(2)}`, { x: totalsX + 137, y: totalsY, size: 12, color: orange });
 
   y -= 100;
 
