@@ -8,6 +8,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { inventoryRouter } from "./inventory-router";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import * as db from "./db";
+
 import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, createFlockVaccinationSchedule } from "./db-health-helpers";
 import * as healthDb from "./db-health-helpers";
 import { hashPassword, verifyPassword, generateTemporaryPassword, validatePasswordStrength } from "./password";
@@ -1761,21 +1762,22 @@ export const appRouter = router({
           const storedItems = await db.getInvoiceItems(invoiceId);
 
           // Build line items for PDF: use stored items if available, otherwise fall back to catch session data
-          const pdfLineItems = storedItems.length > 0
+          type PDFLineItem = { description: string; quantity: number; pricePerUnit: number; weight?: number; vatPercentage?: number; discount?: number };
+          const pdfLineItems: PDFLineItem[] = storedItems.length > 0
             ? storedItems.map((item) => ({
-                description: item.description,
-                quantity: parseFloat(item.quantity?.toString() || '1'),
+                description: item.description ?? '',
+                quantity: typeof item.quantity === 'number' ? item.quantity : parseFloat(String(item.quantity || '1')),
                 pricePerUnit: (item.unitPrice || 0) / 100,
-                weight: parseFloat(item.quantity?.toString() || '0'),
+                weight: typeof item.quantity === 'number' ? item.quantity : parseFloat(String(item.quantity || '0')),
                 vatPercentage: item.taxRate !== null && item.taxRate !== undefined ? parseFloat(item.taxRate.toString()) : 0,
-				discount: item.discountPercent || 0,
+                discount: item.discountPercent || 0,
               }))
             : [
                 {
                   description: invoice.catchSessionId
                     ? `${invoice.totalBirds || 0} Broiler Chickens @ R${parseFloat(invoice.pricePerKgExcl?.toString() || '0').toFixed(2)} per kg`
                     : 'Invoice item',
-                  quantity: invoice.totalBirds || 1,
+                  quantity: Number(invoice.totalBirds || 1),
                   pricePerUnit: parseFloat(invoice.pricePerKgExcl?.toString() || '0'),
                   weight: parseFloat(invoice.totalWeight?.toString() || '0'),
                   vatPercentage: typeof invoice.vatPercentage === 'number' ? invoice.vatPercentage : 15,
@@ -1808,6 +1810,36 @@ export const appRouter = router({
           throw new Error(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }),
+
+    markAsSent: protectedProcedure
+      .input(z.object({
+        invoiceId: z.number(),
+        sentAt: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        return await db.markInvoiceAsSent(input.invoiceId, input.sentAt);
+      }),
+
+    recordPayment: protectedProcedure
+      .input(z.object({
+        invoiceId: z.number(),
+        amount: z.number().positive(),
+        paymentMethod: z.string(),
+        paymentDate: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        return await db.recordInvoicePayment(input.invoiceId, {
+          amount: input.amount,
+          paymentMethod: input.paymentMethod,
+          paymentDate: input.paymentDate,
+        });
+      }),
+
+    cancel: protectedProcedure
+      .input(z.number())
+      .mutation(async ({ input: invoiceId }) => {
+        return await db.cancelInvoice(invoiceId);
+      }),
   }),
 
   // ============================================================================
@@ -1827,6 +1859,133 @@ export const appRouter = router({
         // Additional KPIs will be calculated here
       };
     }),
+  }),
+
+  // ============================================================================
+  // FINANCIAL MANAGEMENT: EXPENSE TRACKING
+  // ============================================================================
+  expenses: router({
+    getCategories: protectedProcedure.query(async () => {
+      return await db.getExpenseCategories();
+    }),
+
+    create: protectedProcedure
+      .input(z.object({
+        categoryId: z.number(),
+        houseId: z.number().optional(),
+        flockId: z.number().optional(),
+        description: z.string(),
+        amount: z.number(),
+        vatPercentage: z.number().optional(),
+        expenseDate: z.string(),
+        paymentMethod: z.string().optional(),
+        reference: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        return await db.createExpense({
+          ...opts.input,
+          createdBy: opts.ctx.user?.id,
+        });
+      }),
+
+    list: protectedProcedure
+      .input(z.object({
+        categoryId: z.number().optional(),
+        houseId: z.number().optional(),
+        flockId: z.number().optional(),
+        status: z.enum(['pending', 'paid', 'overdue', 'cancelled']).optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        limit: z.number().optional(),
+        offset: z.number().optional(),
+      }))
+      .query(async (opts) => {
+        return await db.listExpenses(opts.input);
+      }),
+
+    updateStatus: protectedProcedure
+      .input(z.object({
+        expenseId: z.number(),
+        status: z.enum(['pending', 'paid', 'overdue', 'cancelled']),
+        paymentDate: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        return await db.updateExpenseStatus(
+          opts.input.expenseId,
+          opts.input.status,
+          opts.input.paymentDate
+        );
+      }),
+
+    getSummary: protectedProcedure
+      .input(z.object({
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+      }))
+      .query(async (opts) => {
+        return await db.getExpenseSummary(opts.input.startDate, opts.input.endDate);
+      }),
+  }),
+
+  // ============================================================================
+  // FINANCIAL MANAGEMENT: CASH FLOW FORECASTING
+  // ============================================================================
+  cashFlow: router({
+    createForecast: protectedProcedure
+      .input(z.object({
+        startDate: z.string(),
+        endDate: z.string(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        return await db.createCashFlowForecast({
+          ...opts.input,
+          createdBy: opts.ctx.user?.id,
+        });
+      }),
+
+    addItem: protectedProcedure
+      .input(z.object({
+        forecastId: z.number(),
+        itemDate: z.string(),
+        itemType: z.enum(['income', 'expense']),
+        category: z.string(),
+        description: z.string(),
+        amount: z.number(),
+        houseId: z.number().optional(),
+        flockId: z.number().optional(),
+        relatedExpenseId: z.number().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        return await db.addCashFlowItem(opts.input);
+      }),
+
+    getForecast: protectedProcedure
+      .input(z.object({
+        forecastId: z.number(),
+      }))
+      .query(async (opts) => {
+        return await db.getCashFlowForecast(opts.input.forecastId);
+      }),
+
+    getSummary: protectedProcedure
+      .input(z.object({
+        forecastId: z.number(),
+      }))
+      .query(async (opts) => {
+        return await db.calculateCashFlowSummary(opts.input.forecastId);
+      }),
+
+    listForecasts: protectedProcedure
+      .input(z.object({
+        limit: z.number().optional(),
+        offset: z.number().optional(),
+      }))
+      .query(async (opts) => {
+        return await db.listCashFlowForecasts(opts.input.limit, opts.input.offset);
+      }),
   }),
 });
 

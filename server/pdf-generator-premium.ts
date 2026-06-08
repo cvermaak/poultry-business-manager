@@ -7,7 +7,6 @@ interface LineItem {
   description: string;
   quantity: number;
   pricePerUnit: number;
-  unit?: string; // ✅ add this
   weight?: number;
   discount?: number;
   vatPercentage?: number;
@@ -33,6 +32,16 @@ interface InvoiceData {
     branchCode: string;
     accountName: string;
     accountNumber: string;
+    reference?: string;
+  };
+  companyInfo?: {
+    name: string;
+    vatNumber?: string;
+    registrationNumber?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    website?: string;
   };
 }
 
@@ -136,9 +145,9 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   });
 
   y -= (logoHeight + 5);
-  y -= 5; // Minimal gap after logo - move company block much higher
+  y -= 4; // Small gap after logo — company block sits close to logo
 
-  // ===== COMPANY INFO BOX - moved significantly higher =====
+  // ===== COMPANY INFO BOX =====
   page.drawRectangle({
     x: 40,
     y: y - 50,
@@ -149,28 +158,44 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderWidth: 0.5,
   });
 
-  page.drawText('AFGRO FARMING GROUP (PTY) LTD', {
+  // Company name — use settings value or fallback
+  const companyName = invoiceData.companyInfo?.name || 'AFGRO FARMING GROUP (PTY) LTD';
+  page.drawText(companyName.toUpperCase(), {
     x: 50,
     y: y - 15,
     size: normalSize,
     color: darkBlue,
   });
 
-  page.drawText('VAT NO: 4960323782 | REG NO: 2024/149547/07 | 221 Market Street, Fairland, Randburg 2170', {
+  // Build registration line from settings
+  const regParts: string[] = [];
+  if (invoiceData.companyInfo?.vatNumber) regParts.push(`VAT NO: ${invoiceData.companyInfo.vatNumber}`);
+  if (invoiceData.companyInfo?.registrationNumber) regParts.push(`REG NO: ${invoiceData.companyInfo.registrationNumber}`);
+  if (invoiceData.companyInfo?.address) regParts.push(invoiceData.companyInfo.address);
+  const regLine = regParts.length > 0 ? regParts.join(' | ') : 'VAT NO: — | REG NO: —';
+  page.drawText(regLine, {
     x: 50,
     y: y - 28,
     size: smallSize,
     color: gray,
   });
 
-  page.drawText('Phone: +27 (0)11 234 5678 | Email: info@afgro.co.za | Web: www.afgro.co.za', {
-    x: 50,
-    y: y - 38,
-    size: smallSize,
-    color: gray,
-  });
+  // Build contact line from settings
+  const contactParts: string[] = [];
+  if (invoiceData.companyInfo?.phone) contactParts.push(`Phone: ${invoiceData.companyInfo.phone}`);
+  if (invoiceData.companyInfo?.email) contactParts.push(`Email: ${invoiceData.companyInfo.email}`);
+  if (invoiceData.companyInfo?.website) contactParts.push(`Web: ${invoiceData.companyInfo.website}`);
+  const contactLine = contactParts.length > 0 ? contactParts.join(' | ') : '';
+  if (contactLine) {
+    page.drawText(contactLine, {
+      x: 50,
+      y: y - 38,
+      size: smallSize,
+      color: gray,
+    });
+  }
 
-  y -= 100; // Reduced gap - move invoice details higher to consume more white space
+  y -= 100; // Gap before invoice details section (content below stays in same position)
 
   // ===== INVOICE DETAILS AND CUSTOMER INFO SECTION =====
   // Left column - Invoice details
@@ -264,19 +289,18 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     borderColor: darkBlue,
   });
 
+  // Column layout (tableWidth = 515px):
+  // Description: 130px | Qty: 45px | Unit Price: 65px | Disc%: 55px | Disc(R): 70px | VAT%: 50px | Amount: 75px = 490px
   const cols = [
-	 { header: 'Description', width: 130, x: tableX + 3 },
-	 { header: 'Qty',         width: 45,  x: tableX + 133 },
-	 { header: 'Unit', 		  width: 45,  x: tableX + 178 },
-	 { header: 'Unit Price',  width: 65,  x: tableX + 223 },
-	 { header: 'Disc %',      width: 55,  x: tableX + 288 },
-
-	 // ✅ NEW COLUMN
-	 { header: 'Disc (R)',    width: 70,  x: tableX + 343 },
-
-	 { header: 'VAT %',       width: 50,  x: tableX + 413 },
-	 { header: 'Amount',      width: 75,  x: tableX + 463 },
-	];
+    { header: 'Description', width: 130, x: tableX + 3 },
+    { header: 'Qty',         width: 45,  x: tableX + 133 },
+    { header: 'Unit Price',  width: 65,  x: tableX + 178 },
+    { header: 'Disc %',      width: 55,  x: tableX + 243 },
+    // NEW COLUMN
+    { header: 'Disc (R)',    width: 70,  x: tableX + 298 },
+    { header: 'VAT %',       width: 50,  x: tableX + 368 },
+    { header: 'Amount',      width: 75,  x: tableX + 440 },
+  ];
 
   for (const col of cols) {
     page.drawText(col.header, {
@@ -306,7 +330,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
     });
 
     const discount = item.discount || 0;
-    const vat = item.vatPercentage || 15;
+    const vat = item.vatPercentage !== undefined && item.vatPercentage !== null ? item.vatPercentage : 0;
     const subtotal = item.quantity * item.pricePerUnit;
     const discountAmount = subtotal * (discount / 100);
     const exclusive = subtotal - discountAmount;
@@ -328,18 +352,10 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
       size: normalSize,
       color: black,
     });
-	
-    // Unit	
-	page.drawText(item.unit || '', {
-	  x: cols[2].x,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
 
     // Unit Price
     page.drawText(`R ${item.pricePerUnit.toFixed(2)}`, {
-      x: cols[3].x,
+      x: cols[2].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -347,23 +363,23 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Discount %
     page.drawText(`${discount.toFixed(2)}%`, {
+      x: cols[3].x,
+      y: rowY - 10,
+      size: normalSize,
+      color: black,
+    });
+
+    // Discount Amount (NEW)
+    page.drawText(`R ${discountAmount.toFixed(2)}`, {
       x: cols[4].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
     });
-	
-	// Discount Amount (NEW)
-	page.drawText(`R ${discountAmount.toFixed(2)}`, {
-	  x: cols[5].x,
-	  y: rowY - 10,
-	  size: normalSize,
-	  color: black,
-	});
 
     // VAT %
     page.drawText(`${vat.toFixed(2)}%`, {
-      x: cols[6].x,
+      x: cols[5].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -371,7 +387,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
 
     // Amount
     page.drawText(`R ${total.toFixed(2)}`, {
-      x: cols[7].x,
+      x: cols[6].x,
       y: rowY - 10,
       size: normalSize,
       color: black,
@@ -432,13 +448,17 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoiceData): Promi
   if (invoiceData.bankDetails) {
     page.drawText(`Bank: ${invoiceData.bankDetails.bank}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
-    page.drawText(`Branch Code: ${invoiceData.bankDetails.branchCode}`, { x: 40, y, size: smallSize, color: black });
-    y -= 9;
+    if (invoiceData.bankDetails.branchCode) {
+      page.drawText(`Branch Code: ${invoiceData.bankDetails.branchCode}`, { x: 40, y, size: smallSize, color: black });
+      y -= 9;
+    }
     page.drawText(`Account Name: ${invoiceData.bankDetails.accountName}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
     page.drawText(`Account Number: ${invoiceData.bankDetails.accountNumber}`, { x: 40, y, size: smallSize, color: black });
     y -= 9;
-    page.drawText(`Reference: ${invoiceData.invoiceNumber}`, { x: 40, y, size: smallSize, color: black });
+    page.drawText(`Reference: ${invoiceData.bankDetails.reference || invoiceData.invoiceNumber}`, { x: 40, y, size: smallSize, color: black });
+  } else {
+    page.drawText('No banking details configured. Please update company settings.', { x: 40, y, size: smallSize, color: gray });
   }
 
   // ===== TERMS AND CONDITIONS - moved 20mm lower =====

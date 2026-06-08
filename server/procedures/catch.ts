@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { crateTypes, catchSessions, catchCrates, catchBatches, flocks, harvestRecords, companySettings } from "../../drizzle/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { formatTimestampInTimezone } from "../lib/timezone-server";
 import { addCatchCrateBatch, updateCatchBatch, deleteCatchBatch } from "./catch-batch";
 import { catchReportProcedures } from "./catch-report";
@@ -471,6 +471,8 @@ export const listCatchSessions = protectedProcedure
   .input(z.object({
     flockId: z.number().optional(),
     status: z.enum(["active", "completed", "cancelled"]).optional(),
+    page: z.number().int().positive().default(1),
+    pageSize: z.number().int().min(5).max(100).default(10),
   }))
   .query(async ({ input }: { input: any }) => {
     const db = await getDb();
@@ -504,19 +506,41 @@ export const listCatchSessions = protectedProcedure
       query = query.where(eq(catchSessions.status, input.status));
     }
 
-    const sessions = await query.orderBy(desc(catchSessions.catchDate));
+    // Get total count for pagination
+    const countQuery = db
+      .select({ count: sql<number>`count(*)` })
+      .from(catchSessions)
+      .$dynamic();
+    
+    let countQueryWithFilters = countQuery;
+    if (input.flockId) {
+      countQueryWithFilters = countQueryWithFilters.where(eq(catchSessions.flockId, input.flockId));
+    }
+    if (input.status) {
+      countQueryWithFilters = countQueryWithFilters.where(eq(catchSessions.status, input.status));
+    }
+    
+    const countResult = await countQueryWithFilters;
+    const count = Number(countResult[0]?.count ?? 0);
+    const totalPages = Math.ceil(count / input.pageSize);
+    const offset = (input.page - 1) * input.pageSize;
 
-return {
-  sessions,
-  pagination: {
-    currentPage: 1,
-    pageSize: sessions.length,
-    totalItems: sessions.length,
-    totalPages: 1,
-    hasNextPage: false,
-    hasPreviousPage: false,
-  },
-};
+    const sessions = await query
+      .orderBy(desc(catchSessions.catchDate))
+      .limit(input.pageSize)
+      .offset(offset);
+    
+    return {
+      sessions,
+      pagination: {
+        currentPage: input.page,
+        pageSize: input.pageSize,
+        totalItems: count,
+        totalPages,
+        hasNextPage: input.page < totalPages,
+        hasPreviousPage: input.page > 1,
+      },
+    };
   });
 
 // ============================================================================
@@ -815,6 +839,136 @@ export const syncOfflineBatches = protectedProcedure
     return { synced: results.filter((r: any) => r.success).length, results };
   });
 
+export const syncOfflineCrates = protectedProcedure
+  .input(z.array(z.object({
+    sessionId: z.number().int(),
+    crateTypeId: z.number().int(),
+    birdCount: z.number().int().positive(),
+    grossWeight: z.number().positive(),
+    season: z.string().optional(),
+    transportDuration: z.number().int().optional(),
+    recordedAt: z.string().optional(),
+  })))
+  .mutation(async ({ input }: { input: any }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+
+    const results = [];
+    const sessionIds = new Set<number>();
+
+    for (const crate of input) {
+      sessionIds.add(crate.sessionId);
+      try {
+        // Validate session exists
+        const session = await db
+          .select()
+          .from(catchSessions)
+          .where(eq(catchSessions.id, crate.sessionId))
+          .limit(1);
+
+        if (!session.length) {
+          results.push({ success: false, error: `Session ${crate.sessionId} not found` });
+          continue;
+        }
+
+        // Validate crate type exists and get tare weight
+        const crateType = await db
+          .select()
+          .from(crateTypes)
+          .where(eq(crateTypes.id, crate.crateTypeId))
+          .limit(1);
+
+        if (!crateType.length) {
+          results.push({ success: false, error: `Crate type ${crate.crateTypeId} not found` });
+          continue;
+        }
+
+        const tareWeight = parseFloat(crateType[0].tareWeight);
+        const netWeight = crate.grossWeight - tareWeight;
+
+        if (netWeight <= 0) {
+          results.push({ success: false, error: `Net weight is negative or zero for crate` });
+          continue;
+        }
+
+        const averageBirdWeight = netWeight / crate.birdCount;
+
+        // Get current crate count for numbering
+        const existingCrates = await db
+          .select()
+          .from(catchCrates)
+          .where(eq(catchCrates.sessionId, crate.sessionId));
+
+        const crateNumber = existingCrates.length + 1;
+
+        // Use provided recordedAt or generate from timezone
+        let recordedAtStr: string;
+        if (crate.recordedAt) {
+          recordedAtStr = crate.recordedAt;
+        } else {
+          const settings = await db.query.companySettings.findFirst();
+          const timezone = settings?.timezone || 'UTC';
+          recordedAtStr = formatTimestampInTimezone(Date.now(), timezone, 'datetime');
+        }
+
+        // Insert crate record
+        await db.insert(catchCrates).values({
+          sessionId: crate.sessionId,
+          crateTypeId: crate.crateTypeId,
+          crateNumber,
+          birdCount: crate.birdCount,
+          grossWeight: crate.grossWeight.toString(),
+          netWeight: netWeight.toString(),
+          averageBirdWeight: averageBirdWeight.toString(),
+          recordedAt: recordedAtStr,
+        });
+
+        results.push({ success: true, crateNumber, netWeight, averageBirdWeight });
+      } catch (error) {
+        console.error("Sync crate error:", error);
+        results.push({ success: false, error: (error as any).message });
+      }
+    }
+
+    // Recalculate totals for all affected sessions
+    for (const sessionId of sessionIds) {
+      try {
+        const allCrates = await db
+          .select({
+            birdCount: catchCrates.birdCount,
+            netWeight: catchCrates.netWeight,
+          })
+          .from(catchCrates)
+          .where(eq(catchCrates.sessionId, sessionId));
+
+        const totalBirdsCaught = allCrates.reduce((sum, c) => {
+          const birds = parseInt(String(c.birdCount || '0'));
+          return sum + (isNaN(birds) ? 0 : birds);
+        }, 0);
+
+        const totalWeight = allCrates.reduce((sum, c) => {
+          const weight = parseFloat(String(c.netWeight || '0'));
+          return sum + (isNaN(weight) ? 0 : weight);
+        }, 0);
+
+        const avgWeight = totalBirdsCaught > 0 ? totalWeight / totalBirdsCaught : 0;
+
+        await db.update(catchSessions)
+          .set({
+            totalBirdsCaught: totalBirdsCaught,
+            totalNetWeight: totalWeight.toString(),
+            totalCrates: allCrates.length,
+            averageBirdWeight: avgWeight.toString(),
+          })
+          .where(eq(catchSessions.id, sessionId));
+      } catch (error) {
+        console.error("Error recalculating session totals after crate sync:", error);
+      }
+    }
+
+    return { synced: results.filter((r: any) => r.success).length, results };
+  });
+
 export const catchRouter = router({
   // Crate Types
   createCrateType,
@@ -838,6 +992,7 @@ export const catchRouter = router({
   
   // Offline Sync
   syncOfflineBatches,
+  syncOfflineCrates,
   
   // Reports
   generateTransportReport: catchReportProcedures.generateTransportReport,

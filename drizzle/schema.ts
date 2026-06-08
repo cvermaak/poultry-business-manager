@@ -629,6 +629,7 @@ export const invoices = mysqlTable("invoices", {
 	overallDiscountPercent: decimal("overallDiscountPercent", { precision: 5, scale: 2 }).default('0'),
 	paymentMethod: varchar("paymentMethod", { length: 50 }),
 	paymentDate: timestamp("paymentDate", { mode: 'string' }),
+	sentAt: timestamp("sentAt", { mode: 'string' }),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),
@@ -1042,3 +1043,83 @@ export const vaccines = mysqlTable("vaccines", {
 	storageTemperature: varchar("storage_temperature", { length: 100 }),
 	shelfLifeDays: int("shelf_life_days"),
 });
+
+
+// ============================================================================
+// FINANCIAL MANAGEMENT: EXPENSE TRACKING & CASH FLOW
+// ============================================================================
+
+export const expenseCategories = mysqlTable("expense_categories", {
+	id: int().autoincrement().notNull().primaryKey(),
+	name: varchar({ length: 100 }).notNull(),
+	description: text(),
+	isActive: tinyint().default(1).notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+},
+(table) => [
+	index("idx_expense_categories_name").on(table.name),
+]);
+
+export const expenses = mysqlTable("expenses", {
+	id: int().autoincrement().notNull().primaryKey(),
+	categoryId: int().notNull().references(() => expenseCategories.id),
+	houseId: int().references(() => houses.id),
+	flockId: int().references(() => flocks.id),
+	description: varchar({ length: 255 }).notNull(),
+	amount: int().notNull(), // in cents, excluding VAT
+	vatAmount: int().default(0).notNull(), // in cents
+	totalAmount: int().notNull(), // in cents, including VAT
+	vatPercentage: decimal({ precision: 5, scale: 2 }).default('15.00').notNull(),
+	expenseDate: timestamp({ mode: 'string' }).notNull(),
+	paymentDate: timestamp({ mode: 'string' }),
+	paymentMethod: varchar({ length: 50 }), // EFT, Cash, Cheque, etc.
+	status: mysqlEnum(['pending','paid','overdue','cancelled']).default('pending').notNull(),
+	reference: varchar({ length: 100 }), // Invoice number, PO number, etc.
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_expenses_category_id").on(table.categoryId),
+	index("idx_expenses_house_id").on(table.houseId),
+	index("idx_expenses_flock_id").on(table.flockId),
+	index("idx_expenses_expense_date").on(table.expenseDate),
+	index("idx_expenses_status").on(table.status),
+]);
+
+export const cashFlowForecasts = mysqlTable("cash_flow_forecasts", {
+	id: int().autoincrement().notNull().primaryKey(),
+	forecastDate: timestamp({ mode: 'string' }).notNull(), // The date this forecast was generated
+	startDate: timestamp({ mode: 'string' }).notNull(), // Start of forecast period
+	endDate: timestamp({ mode: 'string' }).notNull(), // End of forecast period
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_cash_flow_forecasts_forecast_date").on(table.forecastDate),
+	index("idx_cash_flow_forecasts_start_date").on(table.startDate),
+]);
+
+export const cashFlowItems = mysqlTable("cash_flow_items", {
+	id: int().autoincrement().notNull().primaryKey(),
+	forecastId: int().notNull().references(() => cashFlowForecasts.id, { onDelete: "cascade" }),
+	itemDate: timestamp({ mode: 'string' }).notNull(), // Date of cash flow item
+	itemType: mysqlEnum(['income','expense']).notNull(),
+	category: varchar({ length: 100 }).notNull(), // e.g., "Chick Purchase", "Feed Payment", "Client Payment", "Labor", etc.
+	description: varchar({ length: 255 }).notNull(),
+	amount: int().notNull(), // in cents
+	houseId: int().references(() => houses.id),
+	flockId: int().references(() => flocks.id),
+	relatedExpenseId: int().references(() => expenses.id), // Link to actual expense if applicable
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+},
+(table) => [
+	index("idx_cash_flow_items_forecast_id").on(table.forecastId),
+	index("idx_cash_flow_items_item_date").on(table.itemDate),
+	index("idx_cash_flow_items_item_type").on(table.itemType),
+	index("idx_cash_flow_items_house_id").on(table.houseId),
+]);

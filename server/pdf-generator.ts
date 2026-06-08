@@ -17,32 +17,33 @@ interface InvoiceData {
   vatAmount: number;
   inclusiveTotal: number;
   vatPercentage: number;
-  discountPercent?: number;
-  discountTotal?: number;
 }
 
 export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<Buffer> {
-  // Create a new PDF document
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595, 842]); // A4 size
   const { width, height } = page.getSize();
 
-  // Set up fonts and colors
-  const fontSize = 9;
-  const smallFontSize = 7;
-  const titleFontSize = 24;
-  const darkBlue = rgb(0.05, 0.35, 0.5); // AFGRO dark blue
-  const orange = rgb(1, 0.55, 0); // AFGRO orange
+  // Colors
+  const darkBlue = rgb(0.05, 0.35, 0.5);
   const black = rgb(0, 0, 0);
-  const gray = rgb(0.5, 0.5, 0.5);
+  const gray = rgb(0.4, 0.4, 0.4);
   const lightGray = rgb(0.95, 0.95, 0.95);
-  const borderGray = rgb(0.8, 0.8, 0.8);
+  const borderGray = rgb(0.85, 0.85, 0.85);
+  const white = rgb(1, 1, 1);
 
-  let yPosition = height - 30;
+  // Font sizes
+  const titleSize = 24;
+  const labelSize = 8;
+  const normalSize = 9;
+  const smallSize = 7.5;
 
-  // Try to load and embed the AFGRO logo - positioned lower
+  let y = height - 30;
+
+  // ===== HEADER SECTION =====
+  // Logo on left
+  let logoHeight = 0;
   try {
-    // Try multiple possible paths
     const possiblePaths = [
       path.join(process.cwd(), 'client', 'public', 'afgro-logo.png'),
       path.join(process.cwd(), 'dist', 'public', 'afgro-logo.png'),
@@ -55,17 +56,18 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<Buff
         try {
           const logoBytes = fs.readFileSync(logoPath);
           const logoImage = await pdfDoc.embedPng(logoBytes);
-          const logoDims = logoImage.scale(0.10);
+          const logoDims = logoImage.scale(0.18);
+          logoHeight = logoDims.height;
           page.drawImage(logoImage, {
             x: 40,
-            y: yPosition - 50,  // Shifted down significantly
+            y: y - logoHeight,
             width: logoDims.width,
             height: logoDims.height,
           });
           logoLoaded = true;
           break;
         } catch (e) {
-          // Try next path
+          // Continue
         }
       }
     }
@@ -74,256 +76,306 @@ export async function generateInvoicePDF(invoiceData: InvoiceData): Promise<Buff
       throw new Error('Logo not found');
     }
   } catch (error) {
-    // If logo fails to load, just use text
     page.drawText('AFGRO', {
       x: 40,
-      y: yPosition - 50,
-      size: 16,
+      y: y - 30,
+      size: titleSize,
       color: darkBlue,
     });
+    logoHeight = 40;
   }
 
-  // Add INVOICE title on the right
+  // Invoice title and details on right
   page.drawText('INVOICE', {
-    x: width - 120,
-    y: yPosition - 15,
-    size: 18,
+    x: width - 150,
+    y: y - 10,
+    size: titleSize,
     color: black,
   });
 
-  yPosition -= 70;
+  // Invoice details
+  const detailsX = width - 200;
+  let detailY = y - 45;
+  const detailLineHeight = 11;
 
-  // Add invoice header details on the right with better spacing
-  const headerX = width - 280;
-  const headerLineHeight = 14;
-  
-  page.drawText(`NUMBER:`, { x: headerX, y: yPosition, size: smallFontSize, color: gray });
-  page.drawText(invoiceData.invoiceNumber, { x: headerX + 80, y: yPosition, size: smallFontSize, color: black });
-  
-  yPosition -= headerLineHeight;
-  page.drawText(`DATE:`, { x: headerX, y: yPosition, size: smallFontSize, color: gray });
-  page.drawText(invoiceData.invoiceDate.toLocaleDateString(), { x: headerX + 80, y: yPosition, size: smallFontSize, color: black });
-  
-  yPosition -= headerLineHeight;
-  page.drawText(`DUE DATE:`, { x: headerX, y: yPosition, size: smallFontSize, color: gray });
-  page.drawText(invoiceData.dueDate.toLocaleDateString(), { x: headerX + 80, y: yPosition, size: smallFontSize, color: black });
+  page.drawText('NUMBER:', { x: detailsX, y: detailY, size: labelSize, color: gray });
+  page.drawText(invoiceData.invoiceNumber, { x: detailsX + 80, y: detailY, size: normalSize, color: black });
+  detailY -= detailLineHeight;
 
-  yPosition -= 25;
+  page.drawText('REFERENCE:', { x: detailsX, y: detailY, size: labelSize, color: gray });
+  page.drawText(invoiceData.invoiceDate.toLocaleDateString(), { x: detailsX + 80, y: detailY, size: normalSize, color: black });
+  detailY -= detailLineHeight;
 
-  // FROM section
+  page.drawText('DATE:', { x: detailsX, y: detailY, size: labelSize, color: gray });
+  page.drawText(invoiceData.invoiceDate.toLocaleDateString(), { x: detailsX + 80, y: detailY, size: normalSize, color: black });
+  detailY -= detailLineHeight;
+
+  page.drawText('DUE DATE:', { x: detailsX, y: detailY, size: labelSize, color: gray });
+  page.drawText(invoiceData.dueDate.toLocaleDateString(), { x: detailsX + 80, y: detailY, size: normalSize, color: black });
+  detailY -= detailLineHeight;
+
+  page.drawText('SALES REP:', { x: detailsX, y: detailY, size: labelSize, color: gray });
+  page.drawText('AFGRO - Brendon', { x: detailsX + 80, y: detailY, size: normalSize, color: black });
+  detailY -= detailLineHeight;
+
+  page.drawText('OVERALL DISCOUNT %:', { x: detailsX, y: detailY, size: labelSize, color: gray });
+  page.drawText('0.00%', { x: detailsX + 80, y: detailY, size: normalSize, color: black });
+  detailY -= detailLineHeight;
+
+  page.drawText('PAGE:', { x: detailsX, y: detailY, size: labelSize, color: gray });
+  page.drawText('1/1', { x: detailsX + 80, y: detailY, size: normalSize, color: black });
+
+  y -= (logoHeight + 30);
+
+  // ===== FROM/TO SECTION =====
+  // FROM section (left)
   page.drawText('FROM', {
-    x: 50,
-    y: yPosition,
-    size: 9,
+    x: 40,
+    y,
+    size: labelSize,
     color: gray,
   });
+  y -= 11;
 
-  yPosition -= 12;
   page.drawText('AFGRO FARMING GROUP (PTY) LTD', {
-    x: 50,
-    y: yPosition,
-    size: fontSize,
+    x: 40,
+    y,
+    size: normalSize,
     color: black,
   });
+  y -= 10;
 
-  yPosition -= 12;
-  page.drawText('VAT NO: 4960323782', { x: 50, y: yPosition, size: smallFontSize, color: black });
-  yPosition -= 10;
-  page.drawText('REG NO: 2024/149547/07', { x: 50, y: yPosition, size: smallFontSize, color: black });
-  yPosition -= 10;
-  page.drawText('POSTAL ADDRESS: 221 Market Street', { x: 50, y: yPosition, size: smallFontSize, color: black });
-  yPosition -= 10;
-  page.drawText('Fairland, Randburg 2170', { x: 50, y: yPosition, size: smallFontSize, color: black });
+  page.drawText('VAT NO: 4960323782', { x: 40, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('REG NO: 2024/149547/07', { x: 40, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('POSTAL ADDRESS:', { x: 40, y, size: smallSize, color: gray });
+  y -= 9;
+  page.drawText('221 Market Street', { x: 40, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('Fairland, Randburg 2170', { x: 40, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('PHYSICAL ADDRESS:', { x: 40, y, size: smallSize, color: gray });
+  y -= 9;
+  page.drawText('221 Market Street', { x: 40, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('Fairland, Randburg 2170', { x: 40, y, size: smallSize, color: black });
 
-  // TO section (on the right)
-  const toX = width / 2 + 50;
-  let toY = height - 90;
+  // TO section (right) - positioned at same level as FROM
+  const toX = width / 2 + 30;
+  let toY = height - 150;
 
   page.drawText('TO', {
     x: toX,
     y: toY,
-    size: 9,
+    size: labelSize,
     color: gray,
   });
+  toY -= 11;
 
-  toY -= 12;
   page.drawText(invoiceData.customerName.toUpperCase(), {
     x: toX,
     y: toY,
-    size: fontSize,
+    size: normalSize,
     color: black,
   });
+  toY -= 10;
 
   if (invoiceData.customerVATNo) {
-    toY -= 10;
-    page.drawText(`CUSTOMER VAT NO: ${invoiceData.customerVATNo}`, { x: toX, y: toY, size: smallFontSize, color: black });
+    page.drawText('CUSTOMER VAT NO:', { x: toX, y: toY, size: smallSize, color: gray });
+    page.drawText(invoiceData.customerVATNo, { x: toX + 110, y: toY, size: smallSize, color: black });
+    toY -= 9;
   }
 
   if (invoiceData.customerRegNo) {
-    toY -= 10;
-    page.drawText(`CUSTOMER REG NO: ${invoiceData.customerRegNo}`, { x: toX, y: toY, size: smallFontSize, color: black });
+    page.drawText('CUSTOMER REG NO:', { x: toX, y: toY, size: smallSize, color: gray });
+    page.drawText(invoiceData.customerRegNo, { x: toX + 110, y: toY, size: smallSize, color: black });
+    toY -= 9;
   }
 
-  if (invoiceData.customerAddress) {
-    toY -= 10;
-    page.drawText(`PHYSICAL ADDRESS: ${invoiceData.customerAddress}`, { x: toX, y: toY, size: smallFontSize, color: black });
-  }
+  page.drawText('POSTAL ADDRESS:', { x: toX, y: toY, size: smallSize, color: gray });
+  toY -= 9;
+  page.drawText('72 Kerk Street', { x: toX, y: toY, size: smallSize, color: black });
+  toY -= 9;
+  page.drawText('Rustenburg', { x: toX, y: toY, size: smallSize, color: black });
+  toY -= 9;
+  page.drawText('PHYSICAL ADDRESS:', { x: toX, y: toY, size: smallSize, color: gray });
+  toY -= 9;
+  page.drawText('72 Kerk Street', { x: toX, y: toY, size: smallSize, color: black });
+  toY -= 9;
+  page.drawText('Rustenburg', { x: toX, y: toY, size: smallSize, color: black });
 
-  yPosition = height - 280;
+  y -= 100;
 
-  // Draw table with better column widths
-  const tableY = yPosition;
-  const tableStartX = 40;
+  // ===== SEPARATOR LINE =====
+  page.drawLine({
+    start: { x: 40, y },
+    end: { x: width - 40, y },
+    thickness: 0.5,
+    color: borderGray,
+  });
+
+  y -= 15;
+
+  // ===== LINE ITEMS TABLE =====
+  const tableX = 40;
   const tableWidth = width - 80;
   
-  // Adjusted column widths for better alignment - more space for totals
-  const colWidths = [110, 35, 45, 55, 30, 30, 65, 65];
-  const colHeaders = ['Description', 'Qty', 'P/KG', 'Wt(kg)', 'Disc%', 'VAT%', 'Excl.Total', 'Incl.Total'];
-  
-  // Draw header background
+  // Column widths
+  const cols = [
+    { header: 'Description', width: 100 },
+    { header: 'Quantity', width: 60 },
+    { header: 'P/KG', width: 50 },
+    { header: 'Weight(kg)', width: 60 },
+    { header: 'Disc %', width: 40 },
+    { header: 'VAT %', width: 40 },
+    { header: 'Excl. Total', width: 70 },
+    { header: 'Incl. Total', width: 75 },
+  ];
+
+  // Table header background
   page.drawRectangle({
-    x: tableStartX,
-    y: tableY - 16,
+    x: tableX,
+    y: y - 14,
     width: tableWidth,
-    height: 16,
+    height: 14,
     color: lightGray,
     borderColor: borderGray,
     borderWidth: 0.5,
   });
 
-  // Draw header text with proper spacing
-  let colX = tableStartX + 3;
-  for (let i = 0; i < colHeaders.length; i++) {
-    page.drawText(colHeaders[i], {
+  // Table header text
+  let colX = tableX + 3;
+  for (const col of cols) {
+    page.drawText(col.header, {
       x: colX,
-      y: tableY - 12,
-      size: smallFontSize,
-      color: black,
+      y: y - 11,
+      size: smallSize,
+      color: gray,
     });
-    colX += colWidths[i];
+    colX += col.width;
   }
 
-  yPosition -= 20;
+  y -= 18;
 
-  // Draw table row border
+  // Table row
   page.drawRectangle({
-    x: tableStartX,
-    y: yPosition - 16,
+    x: tableX,
+    y: y - 14,
     width: tableWidth,
-    height: 16,
-    color: rgb(1, 1, 1),
+    height: 14,
+    color: white,
     borderColor: borderGray,
     borderWidth: 0.5,
   });
 
-  // Draw invoice line item with proper column alignment
-  colX = tableStartX + 3;
+  colX = tableX + 3;
   
   // Description
-  const description = 'AFGRO - Live Chickens';
-  page.drawText(description.substring(0, 18), { x: colX, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[0];
+  page.drawText('AFGRO - Live Chickens', { x: colX, y: y - 10, size: normalSize, color: black });
+  colX += cols[0].width;
   
-  // Qty
-  page.drawText(invoiceData.totalBirds.toString(), { x: colX + 5, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[1];
+  // Quantity
+  page.drawText(invoiceData.totalBirds.toString(), { x: colX + 20, y: y - 10, size: normalSize, color: black });
+  colX += cols[1].width;
   
   // P/KG
-  page.drawText(`R ${Number(invoiceData.pricePerKgExcl).toFixed(2)}`, { x: colX, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[2];
+  page.drawText(Number(invoiceData.pricePerKgExcl).toFixed(2), { x: colX + 5, y: y - 10, size: normalSize, color: black });
+  colX += cols[2].width;
   
   // Weight
-  page.drawText(Number(invoiceData.totalWeight).toFixed(2), { x: colX + 5, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[3];
+  page.drawText(Number(invoiceData.totalWeight).toFixed(2), { x: colX + 15, y: y - 10, size: normalSize, color: black });
+  colX += cols[3].width;
   
   // Discount %
-  const discountPct = Number(invoiceData.discountPercent || 0);
-
-  page.drawText(`${discountPct.toFixed(2)}%`, {
-    x: colX,
-    y: yPosition - 12,
-    size: fontSize,
-    color: black,
-});
-
-  colX += colWidths[4];
+  page.drawText('0.00%', { x: colX + 10, y: y - 10, size: normalSize, color: black });
+  colX += cols[4].width;
   
   // VAT %
-  page.drawText(`${Number(invoiceData.vatPercentage).toFixed(2)}%`, { x: colX, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[5];
+  page.drawText(Number(invoiceData.vatPercentage).toFixed(2) + '%', { x: colX + 10, y: y - 10, size: normalSize, color: black });
+  colX += cols[5].width;
   
   // Exclusive Total
-  page.drawText(`R ${Number(invoiceData.exclusiveTotal).toFixed(2)}`, { x: colX, y: yPosition - 12, size: fontSize, color: black });
-  colX += colWidths[6];
+  page.drawText('R ' + Number(invoiceData.exclusiveTotal).toFixed(2), { x: colX, y: y - 10, size: normalSize, color: black });
+  colX += cols[6].width;
   
   // Inclusive Total
-  page.drawText(`R ${Number(invoiceData.inclusiveTotal).toFixed(2)}`, { x: colX, y: yPosition - 12, size: fontSize, color: black });
+  page.drawText('R ' + Number(invoiceData.inclusiveTotal).toFixed(2), { x: colX, y: y - 10, size: normalSize, color: black });
 
-  yPosition -= 40;
+  y -= 20;
 
-  // Payment Method section
+  // ===== SEPARATOR LINE =====
+  page.drawLine({
+    start: { x: 40, y },
+    end: { x: width - 40, y },
+    thickness: 0.5,
+    color: borderGray,
+  });
+
+  y -= 15;
+
+  // ===== PAYMENT METHOD (LEFT) =====
   page.drawText('Payment Method', {
-    x: 50,
-    y: yPosition,
+    x: 40,
+    y,
     size: 10,
     color: black,
   });
+  y -= 12;
 
-  yPosition -= 12;
-  page.drawText('Bank Transfer:', { x: 50, y: yPosition, size: fontSize, color: black });
-  yPosition -= 10;
-  page.drawText('Bank: First National Bank', { x: 50, y: yPosition, size: smallFontSize, color: black });
-  yPosition -= 9;
-  page.drawText('Branch Code: 250655', { x: 50, y: yPosition, size: smallFontSize, color: black });
-  yPosition -= 9;
-  page.drawText('Account Name: Afgro Farming Group (pty)ltd', { x: 50, y: yPosition, size: smallFontSize, color: black });
-  yPosition -= 9;
-  page.drawText('Account Number: 6315 3992 433', { x: 50, y: yPosition, size: smallFontSize, color: black });
-  yPosition -= 9;
-  page.drawText(`Reference: ${invoiceData.invoiceNumber}`, { x: 50, y: yPosition, size: smallFontSize, color: black });
+  page.drawText('• Bank Transfer:', { x: 40, y, size: normalSize, color: black });
+  y -= 10;
+  page.drawText('Bank: First National Bank', { x: 50, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('Branch Code: 250655', { x: 50, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('Account Name: Afgro Farming Group (pty)ltd', { x: 50, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText('Account Number: 6315 3992 433', { x: 50, y, size: smallSize, color: black });
+  y -= 9;
+  page.drawText(`Reference: ${invoiceData.invoiceNumber}`, { x: 50, y, size: smallSize, color: black });
 
-  // Summary section (on the right)
-  let summaryX = width - 220;
-  let summaryY = height - 250;
+  // ===== TOTALS SECTION (RIGHT) =====
+  let summaryY = height - 320;
+  const summaryX = width - 220;
 
-  const discountTotal = Number(invoiceData.discountTotal || 0);
+  // Summary box background
+  page.drawRectangle({
+    x: summaryX - 10,
+    y: summaryY - 100,
+    width: 210,
+    height: 100,
+    color: lightGray,
+    borderColor: borderGray,
+    borderWidth: 0.5,
+  });
 
-  page.drawText('Total Discount:', {
-    x: summaryX,
-    y: summaryY,
-    size: smallFontSize,
-    color: gray,
- });
-
-  page.drawText(`R ${discountTotal.toFixed(2)}`, {
-    x: summaryX + 110,
-    y: summaryY,
-    size: smallFontSize,
-    color: black,
- });
-
-  summaryY -= 12;
-  page.drawText('Total Exclusive:', { x: summaryX, y: summaryY, size: smallFontSize, color: gray });
-  page.drawText(`R ${Number(invoiceData.exclusiveTotal).toFixed(2)}`, { x: summaryX + 110, y: summaryY, size: smallFontSize, color: black });
+  summaryY -= 8;
+  page.drawText('Total Discount:', { x: summaryX, y: summaryY, size: smallSize, color: gray });
+  page.drawText('R0.00', { x: summaryX + 120, y: summaryY, size: smallSize, color: black });
 
   summaryY -= 12;
-  page.drawText('Total VAT:', { x: summaryX, y: summaryY, size: smallFontSize, color: gray });
-  page.drawText(`R ${Number(invoiceData.vatAmount).toFixed(2)}`, { x: summaryX + 110, y: summaryY, size: smallFontSize, color: black });
+  page.drawText('Total Exclusive:', { x: summaryX, y: summaryY, size: smallSize, color: gray });
+  page.drawText(`R ${Number(invoiceData.exclusiveTotal).toFixed(2)}`, { x: summaryX + 120, y: summaryY, size: smallSize, color: black });
 
   summaryY -= 12;
-  page.drawText('Sub Total:', { x: summaryX, y: summaryY, size: smallFontSize, color: gray });
-  page.drawText(`R ${Number(invoiceData.inclusiveTotal).toFixed(2)}`, { x: summaryX + 110, y: summaryY, size: smallFontSize, color: black });
+  page.drawText('Total VAT:', { x: summaryX, y: summaryY, size: smallSize, color: gray });
+  page.drawText(`R ${Number(invoiceData.vatAmount).toFixed(2)}`, { x: summaryX + 120, y: summaryY, size: smallSize, color: black });
 
-  summaryY -= 20;
+  summaryY -= 12;
+  page.drawText('Sub Total:', { x: summaryX, y: summaryY, size: smallSize, color: gray });
+  page.drawText(`R ${Number(invoiceData.inclusiveTotal).toFixed(2)}`, { x: summaryX + 120, y: summaryY, size: smallSize, color: black });
+
+  summaryY -= 16;
   page.drawText('Grand Total:', { x: summaryX, y: summaryY, size: 11, color: black });
-  page.drawText(`R ${Number(invoiceData.inclusiveTotal).toFixed(2)}`, { x: summaryX + 110, y: summaryY, size: 11, color: black });
+  page.drawText(`R ${Number(invoiceData.inclusiveTotal).toFixed(2)}`, { x: summaryX + 120, y: summaryY, size: 11, color: darkBlue });
 
   summaryY -= 18;
-  page.drawText('BALANCE DUE', { x: summaryX, y: summaryY, size: smallFontSize, color: gray });
+  page.drawText('BALANCE DUE', { x: summaryX, y: summaryY, size: smallSize, color: gray });
   summaryY -= 12;
   page.drawText(`R ${Number(invoiceData.inclusiveTotal).toFixed(2)}`, { x: summaryX, y: summaryY, size: 14, color: darkBlue });
 
-  // Convert PDF to buffer
+  // Convert to buffer
   const pdfBytes = await pdfDoc.save();
   return Buffer.from(pdfBytes);
 }

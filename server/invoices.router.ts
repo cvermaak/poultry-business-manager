@@ -16,28 +16,14 @@ export const invoiceRouter = router({
         pricePerKgExcl: z.number().positive(),
         dueDate: z.date().optional(),
         vatPercentage: z.number().default(15),
-
-        // ✅ ADDED: manual line items support
-        items: z.array(
-          z.object({
-            description: z.string(),
-            quantity: z.number(),
-            unit: z.string().optional(),
-            unitPrice: z.number(),
-			discountPercent: z.number().default(0),
-            taxRate: z.number().default(15),
-          })
-        ).optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
       // Get next invoice number
       const invoiceNumber = await db.getNextInvoiceNumber();
 
-      // Calculate due date (default 30 days)
-      const dueDate =
-        input.dueDate ||
-        new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      // Calculate due date (default to 30 days from now)
+      const dueDate = input.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
       // Create invoice
       const result = await db.createInvoice({
@@ -54,40 +40,7 @@ export const invoiceRouter = router({
         createdBy: ctx.user?.id,
       });
 
-      const invoiceId = (result as any).insertId || result;
-
-      // ✅ INSERT MANUAL LINE ITEMS (FIX)
-      if (input.items && input.items.length > 0) {
-        await db.insertInvoiceItems(
-          input.items.map((item) => {
-            const subtotal = item.quantity * item.unitPrice;
-			const discountAmount = subtotal * (item.discountPercent / 100);
-			const discountedSubtotal = subtotal - discountAmount;
-            const taxAmount = subtotal * (item.taxRate / 100);
-            const totalAmount = subtotal + taxAmount;
-
-            return {
-              invoiceId,
-              description: item.description,
-              quantity: item.quantity,
-              unit: item.unit || "unit",
-              unitPrice: item.unitPrice,
-			  subtotal: discountedSubtotal,
-              taxRate: item.taxRate,
-              taxAmount,
-              totalAmount,
-			  discountPercent: item.discountPercent,
-			  discountAmount,
-            };
-          })
-        );
-      }
-
-      return {
-        success: true,
-        invoiceId,
-        invoiceNumber,
-      };
+      return { success: true, invoiceId: result.insertId, invoiceNumber };
     }),
 
   list: protectedProcedure
@@ -100,10 +53,7 @@ export const invoiceRouter = router({
       })
     )
     .query(async ({ input }) => {
-      const invoices = await db.listInvoices(
-        input.customerId,
-        input.status
-      );
+      const invoices = await db.listInvoices(input.customerId, input.status);
       return invoices.slice(input.offset, input.offset + input.limit);
     }),
 
@@ -111,11 +61,7 @@ export const invoiceRouter = router({
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const invoice = await db.getInvoiceById(input.id);
-      if (!invoice)
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Invoice not found",
-        });
+      if (!invoice) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
       return invoice;
     }),
 
@@ -123,16 +69,9 @@ export const invoiceRouter = router({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const invoice = await db.getInvoiceById(input.id);
-      if (!invoice)
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Invoice not found",
-        });
+      if (!invoice) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
 
-      return {
-        success: true,
-        pdfUrl: "/invoices/" + invoice.invoiceNumber + ".pdf",
-      };
+      return { success: true, pdfUrl: '/invoices/' + invoice.invoiceNumber + '.pdf' };
     }),
 });
 
@@ -148,15 +87,14 @@ export const customerRouter = router({
         phone: z.string().optional(),
         postalAddress: z.string().optional(),
         physicalAddress: z.string().optional(),
-        paymentTerms: z.string().default("cash"),
+        paymentTerms: z.string().default('cash'),
       })
     )
     .mutation(async ({ input, ctx }) => {
       const customerDb = await getDb();
-      if (!customerDb)
-        throw new Error("Database not available");
+      if (!customerDb) throw new Error("Database not available");
 
-      const customerNumber = "CUST" + Date.now();
+      const customerNumber = 'CUST' + Date.now();
 
       const result = await customerDb.insert(customers).values({
         customerNumber,
@@ -172,20 +110,14 @@ export const customerRouter = router({
         createdBy: ctx.user?.id,
       });
 
-      return {
-        success: true,
-        customerId:
-          (result as any)[0]?.insertId ||
-          (result as any).insertId,
-      };
+      return { success: true, customerId: (result as any)[0]?.insertId || (result as any).insertId };
     }),
 
   list: protectedProcedure
     .input(z.object({ isActive: z.boolean().default(true) }))
     .query(async ({ input }) => {
       const customerDb = await getDb();
-      if (!customerDb)
-        throw new Error("Database not available");
+      if (!customerDb) throw new Error("Database not available");
 
       return customerDb
         .select()
@@ -198,8 +130,7 @@ export const customerRouter = router({
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const customerDb = await getDb();
-      if (!customerDb)
-        throw new Error("Database not available");
+      if (!customerDb) throw new Error("Database not available");
 
       const customer = await customerDb
         .select()
@@ -207,12 +138,7 @@ export const customerRouter = router({
         .where(eq(customers.id, input.id))
         .limit(1);
 
-      if (!customer.length)
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Customer not found",
-        });
-
+      if (!customer.length) throw new TRPCError({ code: 'NOT_FOUND', message: 'Customer not found' });
       return customer[0];
     }),
 });

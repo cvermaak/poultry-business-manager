@@ -20,7 +20,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, Clipboard, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, Building2, ScrollText, Cog, ChevronRight } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, Clipboard, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, TrendingDown, Building2, ScrollText, Cog, ChevronRight } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -56,6 +56,8 @@ const menuItems: MenuItem[] = [
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
   { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"], indent: true },
   { icon: DollarSign, label: "Finance", path: "/finance", roles: ["admin", "accountant"] },
+  { icon: TrendingDown, label: "Expenses", path: "/finance/expenses", roles: ["admin", "accountant"], indent: true },
+  { icon: TrendingUp, label: "Cash Flow", path: "/finance/cash-flow", roles: ["admin", "accountant"], indent: true },
   { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"] },
   { icon: Settings, label: "User Management", path: "/user-management", roles: ["admin"] },

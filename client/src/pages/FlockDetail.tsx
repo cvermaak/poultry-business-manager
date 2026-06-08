@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -61,6 +62,7 @@ export default function FlockDetail() {
   const { data: activityLogs } = trpc.flocks.getActivityLogs.useQuery({ flockId });
   const { data: harvests } = trpc.harvest.getByFlock.useQuery({ flockId });
   const { data: catchPlan, refetch: refetchCatchPlan } = trpc.catch.getCatchPlan.useQuery({ flockId });
+  const { data: house } = trpc.houses.getById.useQuery({ id: flock?.houseId ?? 0 }, { enabled: !!flock?.houseId });
   const addTemplate = trpc.reminderTemplates.addToFlock.useMutation();
   const removeTemplate = trpc.reminderTemplates.removeFromFlock.useMutation();
   const syncFromTemplate = trpc.reminders.syncFromTemplate.useMutation();
@@ -219,6 +221,20 @@ export default function FlockDetail() {
   const [reminderActionNotes, setReminderActionNotes] = useState("");
   const [manualReminderDialogOpen, setManualReminderDialogOpen] = useState(false);
   const [activityLogFilter, setActivityLogFilter] = useState<string>("all");
+
+  // Track previous feed type to detect transitions
+  const [prevFeedType, setPrevFeedType] = useState<"starter" | "grower" | "finisher" | null>(null);
+
+  // Breed-specific FCR benchmarks (Ross 308 / Cobb 500 / Arbor Acres)
+  // Sources: breed management guides and SA Poultry Association benchmarks
+  const BREED_FCR_BENCHMARKS: Record<string, { starter: number; grower: number; finisher: number }> = {
+    ross_308:    { starter: 1.05, grower: 1.45, finisher: 1.70 },
+    cobb_500:    { starter: 1.08, grower: 1.48, finisher: 1.72 },
+    arbor_acres: { starter: 1.10, grower: 1.50, finisher: 1.75 },
+  };
+  const breedKey = (house?.breed ?? "ross_308") as string;
+  const breedLabel = breedKey === "ross_308" ? "Ross 308" : breedKey === "cobb_500" ? "Cobb 500" : "Arbor Acres";
+  const fcrBenchmarks = BREED_FCR_BENCHMARKS[breedKey] ?? BREED_FCR_BENCHMARKS["ross_308"]!;
 
   // Form states for daily record
   const [dailyRecordForm, setDailyRecordForm] = useState({
@@ -833,8 +849,8 @@ export default function FlockDetail() {
           <TabsTrigger value="stress-packs">Stress Packs</TabsTrigger>
           <TabsTrigger value="harvests">Harvest Records</TabsTrigger>
           <TabsTrigger value="reminders">Reminders</TabsTrigger>
-		  <TabsTrigger value="catch-plan">Catch Plan</TabsTrigger>
           <TabsTrigger value="status-history">Activity Log</TabsTrigger>
+          <TabsTrigger value="catch-plan">Catch Plan</TabsTrigger>
         </TabsList>
 
         {/* Daily Records Tab */}
@@ -1126,10 +1142,15 @@ export default function FlockDetail() {
                   const today = new Date();
                   const placementDate = flock?.placementDate ? new Date(flock.placementDate) : today;
                   const calculatedDayNumber = Math.floor((today.getTime() - placementDate.getTime()) / (1000 * 60 * 60 * 24));
+                  // Detect last used feed type from existing records (sorted by day)
+                  const sortedRecords = [...(dailyRecords ?? [])].sort((a, b) => a.dayNumber - b.dayNumber);
+                  const lastFeedType = (sortedRecords[sortedRecords.length - 1]?.feedType ?? "starter") as "starter" | "grower" | "finisher";
+                  setPrevFeedType(lastFeedType);
                   setDailyRecordForm(prev => ({
                     ...prev,
                     recordDate: format(today, "yyyy-MM-dd"),
                     dayNumber: Math.max(0, calculatedDayNumber),
+                    feedType: lastFeedType,
                   }));
                 }
               }}>
@@ -1217,7 +1238,10 @@ export default function FlockDetail() {
                           <Label htmlFor="feedType">Feed Type</Label>
                           <Select
                             value={dailyRecordForm.feedType}
-                            onValueChange={(value) => setDailyRecordForm({ ...dailyRecordForm, feedType: value as "starter" | "grower" | "finisher" })}
+                            onValueChange={(value) => {
+                              const newFeedType = value as "starter" | "grower" | "finisher";
+                              setDailyRecordForm({ ...dailyRecordForm, feedType: newFeedType });
+                            }}
                           >
                             <SelectTrigger id="feedType">
                               <SelectValue />
@@ -1242,6 +1266,17 @@ export default function FlockDetail() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Transition-day weight prompt */}
+                    {prevFeedType && dailyRecordForm.feedType !== prevFeedType && (
+                      <Alert className="border-amber-400 bg-amber-50 dark:bg-amber-950/30">
+                        <AlertCircle className="h-4 w-4 text-amber-600" />
+                        <AlertDescription className="text-amber-800 dark:text-amber-300">
+                          <strong>Feed type changed</strong> from <span className="capitalize">{prevFeedType}</span> to <span className="capitalize">{dailyRecordForm.feedType}</span>.
+                          {" "}This is a transition day — please record a weight sample below so the phase FCR can be calculated accurately.
+                        </AlertDescription>
+                      </Alert>
+                    )}
 
                     <div className="border-t pt-4">
                       <h4 className="font-medium mb-3">Weight Sampling</h4>
@@ -1677,19 +1712,48 @@ export default function FlockDetail() {
                   </p>
                 </CardContent>
               </Card>
-              {feedEfficiencyMetrics.feedTypePerformance.map((phase: any) => (
-                <Card key={phase.feedType}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium capitalize">{phase.feedType} FCR</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{phase.fcr}</div>
-                    <p className="text-xs text-muted-foreground">
-                      {phase.weightGain}g gain over {phase.days} days
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
+              {feedEfficiencyMetrics.feedTypePerformance.map((phase: any) => {
+                const target = fcrBenchmarks[phase.feedType as keyof typeof fcrBenchmarks];
+                const actual = parseFloat(phase.fcr);
+                const hasActual = actual > 0 && phase.days > 0;
+                // Lower FCR is better; green if ≤ target, amber within 10%, red if > 10% above
+                const diff = hasActual ? actual - target : null;
+                const statusColor = diff === null
+                  ? "text-muted-foreground"
+                  : diff <= 0
+                    ? "text-green-600 dark:text-green-400"
+                    : diff <= target * 0.10
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-red-600 dark:text-red-400";
+                const statusLabel = diff === null
+                  ? "No data yet"
+                  : diff <= 0
+                    ? `${Math.abs(diff).toFixed(3)} below target ✓`
+                    : `${diff.toFixed(3)} above target`;
+                return (
+                  <Card key={phase.feedType}>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium capitalize">{phase.feedType} FCR</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className={`text-2xl font-bold ${hasActual ? statusColor : ""}`}>
+                        {hasActual ? actual.toFixed(3) : "—"}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {hasActual ? `${phase.weightGain}g gain over ${phase.days} days` : "Awaiting data"}
+                      </p>
+                      <div className="mt-2 pt-2 border-t border-border/50">
+                        <p className="text-xs text-muted-foreground">
+                          {breedLabel} target: <span className="font-medium">{target.toFixed(2)}</span>
+                        </p>
+                        {hasActual && (
+                          <p className={`text-xs font-medium mt-0.5 ${statusColor}`}>{statusLabel}</p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
 

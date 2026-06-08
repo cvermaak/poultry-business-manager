@@ -905,14 +905,12 @@ export async function listInvoices(filters?: { customerId?: number; status?: str
   if (filters?.customerId) {
     query = query.where(eq(invoices.customerId, filters.customerId));
   }
-
   if (filters?.status) {
     query = query.where(eq(invoices.status, filters.status as any));
   }
 
   return await query.orderBy(desc(invoices.invoiceDate));
 }
-
 
 export async function getInvoiceById(id: number) {
   const db = await getDb();
@@ -927,7 +925,6 @@ export async function getInvoiceById(id: number) {
     .leftJoin(customers, eq(invoices.customerId, customers.id))
     .where(eq(invoices.id, id))
     .limit(1);
-
   return result.length > 0 ? result[0] : undefined;
 }
 
@@ -946,7 +943,11 @@ export async function getInvoiceItems(invoiceId: number) {
     .where(eq(invoiceLineItems.invoiceId, invoiceId));
 
   if (legacyItems.length > 0) {
-    return legacyItems;
+    return legacyItems.map((item) => ({
+      ...item,
+      discountPercent: 0,
+      discountAmount: 0,
+    }));
   }
 
   if (lineItems.length > 0) {
@@ -972,9 +973,7 @@ export async function getInvoiceItems(invoiceId: number) {
         quantity: quantity,
 
         unit: 'unit',
-
         unitPrice: Math.round(pricePerUnit * 100),
-
         subtotal: Math.round(subtotalExcl * 100),
         taxRate: vatPct,
         taxAmount: Math.round(taxAmt * 100),
@@ -1001,7 +1000,7 @@ export async function createInvoiceLineItem(data: {
   vatPercentage?: number;
 }) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db) throw new Error('Database not available');
 
   const discount = data.discountPercent ?? 0;
   const vatPct = data.vatPercentage ?? 15;
@@ -1030,8 +1029,7 @@ export async function insertInvoiceItems(items: {
   taxRate?: number;
 }[]) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-
+  if (!db) throw new Error('Database not available');
   if (!items || items.length === 0) return;
 
   await db.insert(invoiceLineItems).values(
@@ -1039,18 +1037,16 @@ export async function insertInvoiceItems(items: {
       const quantity = Number(item.quantity || 0);
       const pricePerUnit = Number(item.unitPrice || 0);
       const vatPercentage = Number(item.taxRate ?? 15);
-
       const subtotal = quantity * pricePerUnit;
       const taxAmount = subtotal * (vatPercentage / 100);
       const totalAmount = subtotal + taxAmount;
-
       return {
         invoiceId: item.invoiceId,
         description: item.description,
         quantity: quantity.toString(),
         pricePerUnit: pricePerUnit.toString(),
-        discount: "0",
-        discountAmount: "0",
+        discount: '0',
+        discountAmount: '0',
         vatPercentage: vatPercentage.toString(),
         amount: totalAmount.toFixed(2),
       };
@@ -1493,27 +1489,58 @@ export async function getFeedEfficiencyMetrics(flockId: number) {
     ? feedIntakeData.reduce((sum, d) => sum + d.feedPerBird, 0) / feedIntakeData.length
     : 0;
 
+  // Phase order for transition-weight lookups
+  const phaseOrder = ['starter', 'grower', 'finisher'];
+
   // Calculate feed type performance
-  const feedTypePerformance = ['starter', 'grower', 'finisher'].map(type => {
+  // Transition-day rule:
+  //   - Phase START weight = weight recorded on the first day of THIS phase (transition day
+  //     from the previous phase), OR the last non-zero weight before the phase if none exists.
+  //   - Phase END weight   = weight recorded on the first day of the NEXT phase (transition
+  //     day into the following phase), OR the last non-zero weight within this phase if there
+  //     is no next phase / no weight on the next phase's first day.
+  //
+  // This ensures the same transition-day weight (e.g. Day 19 when switching starter→grower)
+  // is used as both the end weight of the preceding phase and the start weight of the next.
+  const feedTypePerformance = phaseOrder.map((type, phaseIdx) => {
     const typeRecords = dailyRecords.filter(r => r.feedType === type);
     if (typeRecords.length === 0) return null;
 
-    const totalFeed = typeRecords.reduce((sum, r) => 
+    const totalFeed = typeRecords.reduce((sum, r) =>
       sum + (r.feedConsumed ? parseFloat(r.feedConsumed.toString()) : 0), 0
     );
     const startDay = Math.min(...typeRecords.map(r => r.dayNumber));
-    const endDay = Math.max(...typeRecords.map(r => r.dayNumber));
-    
-    // Get weight gain during this feed phase
-    const startWeight = dailyRecords
+    const endDay   = Math.max(...typeRecords.map(r => r.dayNumber));
+
+    // START weight: first non-zero weight on or before startDay
+    const startWeightRecord = dailyRecords
       .filter(r => r.dayNumber <= startDay && r.averageWeight && parseFloat(r.averageWeight.toString()) > 0)
       .sort((a, b) => b.dayNumber - a.dayNumber)[0];
-    const endWeight = dailyRecords
-      .filter(r => r.dayNumber <= endDay && r.averageWeight && parseFloat(r.averageWeight.toString()) > 0)
-      .sort((a, b) => b.dayNumber - a.dayNumber)[0];
 
-    const weightGain = startWeight && endWeight
-      ? parseFloat(endWeight.averageWeight!.toString()) - parseFloat(startWeight.averageWeight!.toString())
+    // END weight: use the first day of the NEXT phase as the transition boundary.
+    // If the next phase exists and has a weight on its first day, use that.
+    // Otherwise fall back to the last non-zero weight within this phase.
+    const nextPhase = phaseOrder[phaseIdx + 1];
+    const nextPhaseRecords = nextPhase ? dailyRecords.filter(r => r.feedType === nextPhase) : [];
+    const nextPhaseStartDay = nextPhaseRecords.length > 0
+      ? Math.min(...nextPhaseRecords.map(r => r.dayNumber))
+      : null;
+    const nextPhaseStartWeight = nextPhaseStartDay !== null
+      ? dailyRecords
+          .filter(r => r.dayNumber === nextPhaseStartDay && r.averageWeight && parseFloat(r.averageWeight.toString()) > 0)
+          .sort((a, b) => b.dayNumber - a.dayNumber)[0]
+      : null;
+
+    // Fall back to last non-zero weight within this phase if no next-phase transition weight
+    const endWeightRecord = nextPhaseStartWeight
+      ?? dailyRecords
+          .filter(r => r.dayNumber <= endDay && r.averageWeight && parseFloat(r.averageWeight.toString()) > 0)
+          .sort((a, b) => b.dayNumber - a.dayNumber)[0];
+
+    const startWeightVal = startWeightRecord ? parseFloat(startWeightRecord.averageWeight!.toString()) : 0;
+    const endWeightVal   = endWeightRecord   ? parseFloat(endWeightRecord.averageWeight!.toString())   : 0;
+    const weightGain = startWeightVal > 0 && endWeightVal > 0
+      ? endWeightVal - startWeightVal
       : 0;
 
     const phaseFCR = weightGain > 0 && currentCount > 0
@@ -2974,7 +3001,6 @@ export async function createInvoice(data: {
   });
 
   return { insertId: Number(result.insertId) };
-
 }
 
 
@@ -2983,6 +3009,52 @@ export async function getInvoiceByNumber(invoiceNumber: string) {
   if (!db) return null;
   const result = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1);
   return result[0] || null;
+}
+
+export async function markInvoiceAsSent(invoiceId: number, sentAt: string) {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(invoices)
+    .set({ status: 'sent', sentAt, updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') })
+    .where(eq(invoices.id, invoiceId));
+  return { success: true };
+}
+
+export async function recordInvoicePayment(invoiceId: number, data: {
+  amount: number;
+  paymentMethod: string;
+  paymentDate: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+  const invoice = rows[0];
+  if (!invoice) throw new Error('Invoice not found');
+  const totalAmount = invoice.totalAmount;
+  const currentPaid = invoice.paidAmount || 0;
+  const newPaid = currentPaid + Math.round(data.amount * 100);
+  const newBalance = totalAmount - newPaid;
+  const newStatus = newBalance <= 0 ? 'paid' : 'partial';
+  await db.update(invoices)
+    .set({
+      paidAmount: newPaid,
+      balanceDue: Math.max(0, newBalance),
+      status: newStatus as 'paid' | 'partial',
+      paymentMethod: data.paymentMethod,
+      paymentDate: data.paymentDate,
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    })
+    .where(eq(invoices.id, invoiceId));
+  return { success: true, newStatus, newPaid, newBalance: Math.max(0, newBalance) };
+}
+
+export async function cancelInvoice(invoiceId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  await db.update(invoices)
+    .set({ status: 'cancelled', updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') })
+    .where(eq(invoices.id, invoiceId));
+  return { success: true };
 }
 
 export async function getCatchSessionById(catchSessionId: number) {
@@ -3041,4 +3113,273 @@ export async function updateCompanySettings(data: any, userId: number) {
       createdBy: userId,
     });
   }
+}
+
+
+// ============================================================================
+// SCHEDULED TASKS: INVOICE STATUS MANAGEMENT
+// ============================================================================
+
+/**
+ * Flag invoices as overdue if:
+ * - Status is 'sent' or 'partial' (not yet fully paid)
+ * - Due date has passed (dueDate < now)
+ * Returns count of updated invoices
+ */
+export async function flagOverdueInvoices(now: Date): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  
+  const result = await db.update(invoices)
+    .set({ 
+      status: 'overdue',
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+    })
+    .where(
+      and(
+        inArray(invoices.status, ['sent', 'partial']),
+        lt(invoices.dueDate, now.toISOString().slice(0, 19).replace('T', ' '))
+      )
+    );
+  
+  return result.rowsAffected || 0;
+}
+
+/**
+ * Revert invoices from 'overdue' back to 'paid' if:
+ * - Status is 'overdue'
+ * - paidAmount >= inclusiveTotal (fully paid)
+ * Returns count of updated invoices
+ */
+export async function revertPaidFromOverdue(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  
+  // Fetch all overdue invoices
+  const overdueInvoices = await db
+    .select()
+    .from(invoices)
+    .where(eq(invoices.status, 'overdue'));
+  
+  let count = 0;
+  for (const invoice of overdueInvoices) {
+    const paidAmount = invoice.paidAmount || 0;
+    const inclusiveTotal = invoice.inclusiveTotal ? parseFloat(String(invoice.inclusiveTotal)) * 100 : 0;
+    
+    if (paidAmount >= inclusiveTotal) {
+      await db.update(invoices)
+        .set({ 
+          status: 'paid',
+          updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+        })
+        .where(eq(invoices.id, invoice.id));
+      count++;
+    }
+  }
+  
+  return count;
+}
+
+
+// ============================================================================
+// FINANCIAL MANAGEMENT: EXPENSE TRACKING
+// ============================================================================
+
+export async function getExpenseCategories() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db
+    .select()
+    .from(expenseCategories)
+    .where(eq(expenseCategories.isActive, 1))
+    .orderBy(expenseCategories.name);
+}
+
+export async function createExpense(data: {
+  categoryId: number;
+  houseId?: number;
+  flockId?: number;
+  description: string;
+  amount: number;
+  vatPercentage?: number;
+  expenseDate: string;
+  paymentMethod?: string;
+  reference?: string;
+  notes?: string;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const vatPct = data.vatPercentage || 15;
+  const vatAmount = Math.round(data.amount * (vatPct / 100));
+  const totalAmount = data.amount + vatAmount;
+  return await db.insert(expenses).values({
+    categoryId: data.categoryId,
+    houseId: data.houseId,
+    flockId: data.flockId,
+    description: data.description,
+    amount: data.amount,
+    vatAmount,
+    totalAmount,
+    vatPercentage: vatPct.toString(),
+    expenseDate: data.expenseDate,
+    paymentMethod: data.paymentMethod,
+    reference: data.reference,
+    notes: data.notes,
+    createdBy: data.createdBy,
+    status: 'pending',
+  });
+}
+
+export async function listExpenses(filters?: {
+  categoryId?: number;
+  houseId?: number;
+  flockId?: number;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const db = await getDb();
+  if (!db) return { expenses: [], total: 0 };
+  const conditions: any[] = [];
+  if (filters?.categoryId) conditions.push(eq(expenses.categoryId, filters.categoryId));
+  if (filters?.houseId) conditions.push(eq(expenses.houseId, filters.houseId));
+  if (filters?.flockId) conditions.push(eq(expenses.flockId, filters.flockId));
+  if (filters?.status) conditions.push(eq(expenses.status, filters.status as any));
+  if (filters?.startDate) conditions.push(gte(expenses.expenseDate, filters.startDate));
+  if (filters?.endDate) conditions.push(lte(expenses.expenseDate, filters.endDate));
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+  const result = await db.select().from(expenses)
+    .where(whereClause)
+    .orderBy(desc(expenses.expenseDate))
+    .limit(filters?.limit || 100)
+    .offset(filters?.offset || 0);
+  return { expenses: result, total: result.length };
+}
+
+export async function updateExpenseStatus(expenseId: number, status: 'pending' | 'paid' | 'overdue' | 'cancelled', paymentDate?: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const updateData: any = {
+    status,
+    updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ')
+  };
+  if (paymentDate && status === 'paid') updateData.paymentDate = paymentDate;
+  return await db.update(expenses).set(updateData).where(eq(expenses.id, expenseId));
+}
+
+export async function getExpenseSummary(startDate?: string, endDate?: string) {
+  const db = await getDb();
+  if (!db) return { totalExpenses: 0, totalByCategory: [] };
+  const conditions: any[] = [];
+  if (startDate) conditions.push(gte(expenses.expenseDate, startDate));
+  if (endDate) conditions.push(lte(expenses.expenseDate, endDate));
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+  const result = await db.select({
+    categoryName: expenseCategories.name,
+    totalAmount: sql<number>`SUM(${expenses.totalAmount})`,
+    count: sql<number>`COUNT(*)`,
+  })
+    .from(expenses)
+    .innerJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
+    .where(whereClause)
+    .groupBy(expenses.categoryId);
+  const totalExpenses = result.reduce((sum, row) => sum + (row.totalAmount || 0), 0);
+  return { totalExpenses, totalByCategory: result };
+}
+
+// ============================================================================
+// FINANCIAL MANAGEMENT: CASH FLOW FORECASTING
+// ============================================================================
+
+export async function createCashFlowForecast(data: {
+  startDate: string;
+  endDate: string;
+  notes?: string;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  return await db.insert(cashFlowForecasts).values({
+    forecastDate: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    startDate: data.startDate,
+    endDate: data.endDate,
+    notes: data.notes,
+    createdBy: data.createdBy,
+  });
+}
+
+export async function addCashFlowItem(data: {
+  forecastId: number;
+  itemDate: string;
+  itemType: 'income' | 'expense';
+  category: string;
+  description: string;
+  amount: number;
+  houseId?: number;
+  flockId?: number;
+  relatedExpenseId?: number;
+  notes?: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  return await db.insert(cashFlowItems).values({
+    forecastId: data.forecastId,
+    itemDate: data.itemDate,
+    itemType: data.itemType,
+    category: data.category,
+    description: data.description,
+    amount: data.amount,
+    houseId: data.houseId,
+    flockId: data.flockId,
+    relatedExpenseId: data.relatedExpenseId,
+    notes: data.notes,
+  });
+}
+
+export async function getCashFlowForecast(forecastId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const forecast = await db.select().from(cashFlowForecasts).where(eq(cashFlowForecasts.id, forecastId)).limit(1);
+  if (!forecast.length) return null;
+  const items = await db.select().from(cashFlowItems).where(eq(cashFlowItems.forecastId, forecastId)).orderBy(cashFlowItems.itemDate);
+  return { forecast: forecast[0], items };
+}
+
+export async function calculateCashFlowSummary(forecastId: number) {
+  const db = await getDb();
+  if (!db) return { totalIncome: 0, totalExpense: 0, netCashFlow: 0, dailyBalance: [] };
+  const items = await db.select().from(cashFlowItems).where(eq(cashFlowItems.forecastId, forecastId)).orderBy(cashFlowItems.itemDate);
+  let totalIncome = 0;
+  let totalExpense = 0;
+  let runningBalance = 0;
+  const dailyBalance: Array<{ date: string; balance: number; income: number; expense: number }> = [];
+  let currentDate = '';
+  let dayIncome = 0;
+  let dayExpense = 0;
+  for (const item of items) {
+    const itemDate = item.itemDate.split(' ')[0];
+    if (currentDate && itemDate !== currentDate) {
+      runningBalance = runningBalance + dayIncome - dayExpense;
+      dailyBalance.push({ date: currentDate, balance: runningBalance, income: dayIncome, expense: dayExpense });
+      dayIncome = 0;
+      dayExpense = 0;
+    }
+    currentDate = itemDate;
+    if (item.itemType === 'income') { totalIncome += item.amount; dayIncome += item.amount; }
+    else { totalExpense += item.amount; dayExpense += item.amount; }
+  }
+  if (currentDate) {
+    runningBalance = runningBalance + dayIncome - dayExpense;
+    dailyBalance.push({ date: currentDate, balance: runningBalance, income: dayIncome, expense: dayExpense });
+  }
+  return { totalIncome, totalExpense, netCashFlow: totalIncome - totalExpense, dailyBalance };
+}
+
+export async function listCashFlowForecasts(limit = 10, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(cashFlowForecasts).orderBy(desc(cashFlowForecasts.forecastDate)).limit(limit).offset(offset);
 }

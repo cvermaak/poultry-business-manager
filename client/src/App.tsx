@@ -31,6 +31,9 @@ import LoginPage from "./pages/Login";
 import { Invoices } from "./pages/Invoices";
 import { CreateInvoice } from "./pages/CreateInvoice";
 import { CompanySettings } from "./pages/CompanySettings";
+import Expenses from "./pages/Expenses";
+import CashFlow from "./pages/CashFlow";
+
 
 function Router() {
   return (
@@ -165,6 +168,19 @@ function Router() {
       <Route path="/settings/company">
         <DashboardLayout>
           <CompanySettings />
+        </DashboardLayout>
+      </Route>
+
+
+      <Route path="/finance/expenses">
+        <DashboardLayout>
+          <Expenses />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/finance/cash-flow">
+        <DashboardLayout>
+          <CashFlow />
         </DashboardLayout>
       </Route>
 
