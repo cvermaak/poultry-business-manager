@@ -46,6 +46,10 @@ import {
   processors,
   catchSessions,
   companySettings,
+  expenseCategories,
+  expenses,
+  cashFlowForecasts,
+  cashFlowItems,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -103,6 +107,10 @@ export async function getDb() {
           processors,
           catchSessions,
           companySettings,
+          expenseCategories,
+          expenses,
+          cashFlowForecasts,
+          cashFlowItems,
         },
       });
     } catch (error) {

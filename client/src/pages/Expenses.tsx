@@ -38,7 +38,7 @@ export default function Expenses() {
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showMarkPaidDialog, setShowMarkPaidDialog] = useState<number | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>("");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterStartDate, setFilterStartDate] = useState("");
   const [filterEndDate, setFilterEndDate] = useState("");
 
@@ -59,7 +59,7 @@ export default function Expenses() {
   const { data: categories } = trpc.expenses.getCategories.useQuery();
   const { data: houses } = trpc.houses.list.useQuery();
   const { data: expenseData, isLoading } = trpc.expenses.list.useQuery({
-    status: filterStatus as any || undefined,
+    status: (filterStatus && filterStatus !== "all") ? filterStatus as any : undefined,
     startDate: filterStartDate || undefined,
     endDate: filterEndDate || undefined,
   });
@@ -105,7 +105,7 @@ export default function Expenses() {
     }
     createMutation.mutate({
       categoryId: parseInt(form.categoryId),
-      houseId: form.houseId ? parseInt(form.houseId) : undefined,
+      houseId: (form.houseId && form.houseId !== "none") ? parseInt(form.houseId) : undefined,
       description: form.description,
       amount: amountCents,
       vatPercentage: vatPct,
@@ -201,7 +201,7 @@ export default function Expenses() {
                 <SelectValue placeholder="All statuses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All statuses</SelectItem>
+                <SelectItem value="all">All statuses</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
                 <SelectItem value="overdue">Overdue</SelectItem>
@@ -316,7 +316,7 @@ export default function Expenses() {
                     <SelectValue placeholder="All houses" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No specific house</SelectItem>
+                    <SelectItem value="none">No specific house</SelectItem>
                     {(houses || []).map((h: any) => (
                       <SelectItem key={h.id} value={String(h.id)}>{h.name}</SelectItem>
                     ))}
