@@ -724,6 +724,9 @@ export default function FlockDetail() {
                     {flock.starterFeedType && (
                       <div className="text-xs capitalize">{flock.starterFeedType}</div>
                     )}
+                    {(flock as any).starterAllocationKgPerBird && (
+                      <div className="text-xs text-muted-foreground">{(flock as any).starterAllocationKgPerBird} kg/bird</div>
+                    )}
                   </div>
                   <div className={`p-2 rounded ${activeFeedPhase === 'grower' ? 'bg-white dark:bg-gray-800 font-semibold' : 'opacity-60'}`}>
                     <div className="text-xs text-muted-foreground">Grower</div>
@@ -735,6 +738,9 @@ export default function FlockDetail() {
                     {flock.growerFeedType && (
                       <div className="text-xs capitalize">{flock.growerFeedType}</div>
                     )}
+                    {(flock as any).growerAllocationKgPerBird && (
+                      <div className="text-xs text-muted-foreground">{(flock as any).growerAllocationKgPerBird} kg/bird</div>
+                    )}
                   </div>
                   <div className={`p-2 rounded ${activeFeedPhase === 'finisher' ? 'bg-white dark:bg-gray-800 font-semibold' : 'opacity-60'}`}>
                     <div className="text-xs text-muted-foreground">Finisher</div>
@@ -745,6 +751,9 @@ export default function FlockDetail() {
                     </div>
                     {flock.finisherFeedType && (
                       <div className="text-xs capitalize">{flock.finisherFeedType}</div>
+                    )}
+                    {(flock as any).finisherAllocationKgPerBird && (
+                      <div className="text-xs text-muted-foreground">{(flock as any).finisherAllocationKgPerBird} kg/bird</div>
                     )}
                   </div>
                 </div>

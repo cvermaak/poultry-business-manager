@@ -20,7 +20,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, Clipboard, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, TrendingDown, Building2, ScrollText, Cog, ChevronRight } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Home as HomeIcon, Activity, Package, Clipboard, ShoppingCart, DollarSign, FileText, Settings, Syringe, Bell, TrendingUp, TrendingDown, Building2, ScrollText, Cog, ChevronRight, FlaskConical, Factory, Tag } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -62,6 +62,10 @@ const menuItems: MenuItem[] = [
   { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"] },
   { icon: Settings, label: "User Management", path: "/user-management", roles: ["admin"] },
   { icon: Settings, label: "Settings", path: "/settings/company", roles: ["admin"] },
+  { icon: FlaskConical, label: "Feed Management", path: "/feed-management", roles: ["admin", "farm_manager"] },
+  { icon: FlaskConical, label: "Formulations", path: "/feed-management/formulations", roles: ["admin", "farm_manager"], indent: true },
+  { icon: Factory, label: "Mill Costs", path: "/feed-management/mill-costs", roles: ["admin", "farm_manager"], indent: true },
+  { icon: Tag, label: "Customer Prices", path: "/feed-management/customer-pricing", roles: ["admin", "farm_manager"], indent: true },
 ];
 
 const canAccessMenuItem = (item: MenuItem, userRole: string | undefined): boolean => {

@@ -33,7 +33,9 @@ import { CreateInvoice } from "./pages/CreateInvoice";
 import { CompanySettings } from "./pages/CompanySettings";
 import Expenses from "./pages/Expenses";
 import CashFlow from "./pages/CashFlow";
-
+import FeedFormulations from "./pages/FeedFormulations";
+import MillCosts from "./pages/MillCosts";
+import CustomerFeedPrices from "./pages/CustomerFeedPrices";
 
 function Router() {
   return (
@@ -171,7 +173,6 @@ function Router() {
         </DashboardLayout>
       </Route>
 
-
       <Route path="/finance/expenses">
         <DashboardLayout>
           <Expenses />
@@ -181,6 +182,24 @@ function Router() {
       <Route path="/finance/cash-flow">
         <DashboardLayout>
           <CashFlow />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/feed-management/formulations">
+        <DashboardLayout>
+          <FeedFormulations />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/feed-management/mill-costs">
+        <DashboardLayout>
+          <MillCosts />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/feed-management/customer-pricing">
+        <DashboardLayout>
+          <CustomerFeedPrices />
         </DashboardLayout>
       </Route>
 

@@ -254,6 +254,11 @@ export const feedFormulations = mysqlTable("feed_formulations", {
 	crudeFiber: decimal({ precision: 5, scale: 2 }),
 	calcium: decimal({ precision: 5, scale: 2 }),
 	phosphorus: decimal({ precision: 5, scale: 2 }),
+	macroKgPerTon: decimal({ precision: 8, scale: 3 }),
+	soyaOilKgPerTon: decimal({ precision: 8, scale: 3 }),
+	probioticKgPerTon: decimal({ precision: 8, scale: 3 }),
+	allocationKgPerBird: decimal({ precision: 6, scale: 3 }),
+	effectiveDate: varchar({ length: 20 }),
 	isActive: tinyint().default(1).notNull(),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
@@ -261,6 +266,40 @@ export const feedFormulations = mysqlTable("feed_formulations", {
 },
 (table) => [
 	index("idx_feed_formulations_range_stage").on(table.feedRange, table.feedStage),
+]);
+
+export const millCosts = mysqlTable("mill_costs", {
+	id: int().autoincrement().notNull(),
+	feedRange: mysqlEnum(['premium','value','econo']).notNull(),
+	feedType: mysqlEnum(['starter','grower','finisher']).notNull(),
+	costPerTon: decimal({ precision: 10, scale: 2 }).notNull(),
+	effectiveDate: varchar({ length: 20 }).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_mill_costs_range_type").on(table.feedRange, table.feedType),
+	index("idx_mill_costs_effective_date").on(table.effectiveDate),
+]);
+
+export const customerFeedPrices = mysqlTable("customer_feed_prices", {
+	id: int().autoincrement().notNull(),
+	customerId: int().notNull().references(() => customers.id),
+	feedRange: mysqlEnum(['premium','value','econo']).notNull(),
+	feedType: mysqlEnum(['starter','grower','finisher']).notNull(),
+	pricePerTon: decimal({ precision: 10, scale: 2 }).notNull(),
+	effectiveDate: varchar({ length: 20 }).notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("idx_customer_feed_prices_customer").on(table.customerId),
+	index("idx_customer_feed_prices_range_type").on(table.feedRange, table.feedType),
+	index("idx_customer_feed_prices_effective_date").on(table.effectiveDate),
 ]);
 
 export const flockDailyRecords = mysqlTable("flock_daily_records", {
@@ -352,6 +391,9 @@ export const flocks = mysqlTable("flocks", {
 	isManualStatusChange: tinyint().default(0),
 	targetDeliveredWeight: decimal({ precision: 10, scale: 3 }),
 	targetCatchingWeight: decimal({ precision: 10, scale: 3 }),
+	starterAllocationKgPerBird: decimal({ precision: 6, scale: 3 }).default('0.900'),
+	growerAllocationKgPerBird: decimal({ precision: 6, scale: 3 }).default('1.750'),
+	finisherAllocationKgPerBird: decimal({ precision: 6, scale: 3 }).default('0.350'),
 },
 (table) => [
 	index("flocks_flockNumber_unique").on(table.flockNumber),

@@ -50,6 +50,8 @@ import {
   expenses,
   cashFlowForecasts,
   cashFlowItems,
+  millCosts,
+  customerFeedPrices,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -111,6 +113,8 @@ export async function getDb() {
           expenses,
           cashFlowForecasts,
           cashFlowItems,
+          millCosts,
+          customerFeedPrices,
         },
       });
     } catch (error) {
@@ -796,26 +800,27 @@ export async function getFlockHealthRecords(flockId: number) {
 // FEED MANUFACTURING
 // ============================================================================
 
-export async function listFeedFormulations(filters?: { feedRange?: string; feedStage?: string }) {
+export async function listFeedFormulations(filters?: {
+  feedRange?: 'premium' | 'value' | 'econo';
+  feedStage?: 'starter' | 'grower' | 'finisher';
+  isActive?: number;
+}) {
   const db = await getDb();
   if (!db) return [];
-
-  let query = db.select().from(feedFormulations).$dynamic();
-
-  if (filters?.feedRange) {
-    query = query.where(eq(feedFormulations.feedRange, filters.feedRange as any));
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (filters?.feedRange) conditions.push(eq(feedFormulations.feedRange, filters.feedRange));
+  if (filters?.feedStage) conditions.push(eq(feedFormulations.feedStage, filters.feedStage));
+  if (filters?.isActive !== undefined) conditions.push(eq(feedFormulations.isActive, filters.isActive));
+  const query = db.select().from(feedFormulations).orderBy(desc(feedFormulations.createdAt));
+  if (conditions.length > 0) {
+    return await query.where(and(...conditions));
   }
-  if (filters?.feedStage) {
-    query = query.where(eq(feedFormulations.feedStage, filters.feedStage as any));
-  }
-
-  return await query.where(eq(feedFormulations.isActive, true)).orderBy(asc(feedFormulations.name));
+  return await query;
 }
 
 export async function getFeedFormulationById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
-
   const result = await db.select().from(feedFormulations).where(eq(feedFormulations.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
@@ -3390,4 +3395,217 @@ export async function listCashFlowForecasts(limit = 10, offset = 0) {
   const db = await getDb();
   if (!db) return [];
   return await db.select().from(cashFlowForecasts).orderBy(desc(cashFlowForecasts.forecastDate)).limit(limit).offset(offset);
+}
+
+
+// ============================================================================
+// FEED MANAGEMENT — FORMULATIONS
+// ============================================================================
+
+export async function createFeedFormulation(data: {
+  name: string;
+  feedRange: 'premium' | 'value' | 'econo';
+  feedStage: 'starter' | 'grower' | 'finisher';
+  version?: number;
+  description?: string;
+  ingredients: string;
+  proteinPercentage?: string;
+  energyContent?: string;
+  crudeProtein?: string;
+  crudeFiber?: string;
+  calcium?: string;
+  phosphorus?: string;
+  macroKgPerTon?: string;
+  soyaOilKgPerTon?: string;
+  probioticKgPerTon?: string;
+  allocationKgPerBird?: string;
+  effectiveDate?: string;
+  isActive?: number;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const result = await db.insert(feedFormulations).values({
+    name: data.name,
+    feedRange: data.feedRange,
+    feedStage: data.feedStage,
+    version: data.version ?? 1,
+    description: data.description,
+    ingredients: data.ingredients,
+    proteinPercentage: data.proteinPercentage,
+    energyContent: data.energyContent,
+    crudeProtein: data.crudeProtein,
+    crudeFiber: data.crudeFiber,
+    calcium: data.calcium,
+    phosphorus: data.phosphorus,
+    macroKgPerTon: data.macroKgPerTon,
+    soyaOilKgPerTon: data.soyaOilKgPerTon,
+    probioticKgPerTon: data.probioticKgPerTon,
+    allocationKgPerBird: data.allocationKgPerBird,
+    effectiveDate: data.effectiveDate,
+    isActive: data.isActive ?? 1,
+    createdBy: data.createdBy,
+  });
+  return Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
+}
+
+export async function deactivateFeedFormulation(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.update(feedFormulations).set({ isActive: 0 }).where(eq(feedFormulations.id, id));
+}
+
+// ============================================================================
+// FEED MANAGEMENT — MILL COSTS
+// ============================================================================
+
+export async function listMillCosts(filters?: {
+  feedRange?: 'premium' | 'value' | 'econo';
+  feedType?: 'starter' | 'grower' | 'finisher';
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (filters?.feedRange) conditions.push(eq(millCosts.feedRange, filters.feedRange));
+  if (filters?.feedType) conditions.push(eq(millCosts.feedType, filters.feedType));
+  const query = db.select().from(millCosts).orderBy(desc(millCosts.effectiveDate));
+  if (conditions.length > 0) {
+    return await query.where(and(...conditions));
+  }
+  return await query;
+}
+
+export async function getMillCost(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(millCosts).where(eq(millCosts.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createMillCost(data: {
+  feedRange: 'premium' | 'value' | 'econo';
+  feedType: 'starter' | 'grower' | 'finisher';
+  costPerTon: string;
+  effectiveDate: string;
+  notes?: string;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const result = await db.insert(millCosts).values({
+    feedRange: data.feedRange,
+    feedType: data.feedType,
+    costPerTon: data.costPerTon,
+    effectiveDate: data.effectiveDate,
+    notes: data.notes,
+    createdBy: data.createdBy,
+  });
+  return Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
+}
+
+export async function updateMillCost(id: number, data: {
+  costPerTon?: string;
+  effectiveDate?: string;
+  notes?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const updateData: Record<string, unknown> = {};
+  if (data.costPerTon !== undefined) updateData.costPerTon = data.costPerTon;
+  if (data.effectiveDate !== undefined) updateData.effectiveDate = data.effectiveDate;
+  if (data.notes !== undefined) updateData.notes = data.notes;
+  await db.update(millCosts).set(updateData).where(eq(millCosts.id, id));
+}
+
+export async function deleteMillCost(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.delete(millCosts).where(eq(millCosts.id, id));
+}
+
+// ============================================================================
+// FEED MANAGEMENT — CUSTOMER FEED PRICES
+// ============================================================================
+
+export async function listCustomerFeedPrices(filters?: {
+  customerId?: number;
+  feedRange?: 'premium' | 'value' | 'econo';
+  feedType?: 'starter' | 'grower' | 'finisher';
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (filters?.customerId) conditions.push(eq(customerFeedPrices.customerId, filters.customerId));
+  if (filters?.feedRange) conditions.push(eq(customerFeedPrices.feedRange, filters.feedRange));
+  if (filters?.feedType) conditions.push(eq(customerFeedPrices.feedType, filters.feedType));
+  // Join with customers to get customer name
+  const query = db
+    .select({
+      id: customerFeedPrices.id,
+      customerId: customerFeedPrices.customerId,
+      customerName: customers.name,
+      feedRange: customerFeedPrices.feedRange,
+      feedType: customerFeedPrices.feedType,
+      pricePerTon: customerFeedPrices.pricePerTon,
+      effectiveDate: customerFeedPrices.effectiveDate,
+      notes: customerFeedPrices.notes,
+      createdAt: customerFeedPrices.createdAt,
+    })
+    .from(customerFeedPrices)
+    .leftJoin(customers, eq(customerFeedPrices.customerId, customers.id))
+    .orderBy(desc(customerFeedPrices.effectiveDate));
+  if (conditions.length > 0) {
+    return await query.where(and(...conditions));
+  }
+  return await query;
+}
+
+export async function getCustomerFeedPrice(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(customerFeedPrices).where(eq(customerFeedPrices.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createCustomerFeedPrice(data: {
+  customerId: number;
+  feedRange: 'premium' | 'value' | 'econo';
+  feedType: 'starter' | 'grower' | 'finisher';
+  pricePerTon: string;
+  effectiveDate: string;
+  notes?: string;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const result = await db.insert(customerFeedPrices).values({
+    customerId: data.customerId,
+    feedRange: data.feedRange,
+    feedType: data.feedType,
+    pricePerTon: data.pricePerTon,
+    effectiveDate: data.effectiveDate,
+    notes: data.notes,
+    createdBy: data.createdBy,
+  });
+  return Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
+}
+
+export async function updateCustomerFeedPrice(id: number, data: {
+  pricePerTon?: string;
+  effectiveDate?: string;
+  notes?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const updateData: Record<string, unknown> = {};
+  if (data.pricePerTon !== undefined) updateData.pricePerTon = data.pricePerTon;
+  if (data.effectiveDate !== undefined) updateData.effectiveDate = data.effectiveDate;
+  if (data.notes !== undefined) updateData.notes = data.notes;
+  await db.update(customerFeedPrices).set(updateData).where(eq(customerFeedPrices.id, id));
+}
+
+export async function deleteCustomerFeedPrice(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.delete(customerFeedPrices).where(eq(customerFeedPrices.id, id));
 }

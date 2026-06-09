@@ -1987,6 +1987,149 @@ export const appRouter = router({
         return await db.listCashFlowForecasts(opts.input.limit, opts.input.offset);
       }),
   }),
+
+  // ============================================================================
+  // FEED MANAGEMENT
+  // ============================================================================
+  feedManagement: router({
+    // --- Formulations ---
+    listFormulations: protectedProcedure
+      .input(z.object({
+        feedRange: z.enum(['premium','value','econo']).optional(),
+        feedStage: z.enum(['starter','grower','finisher']).optional(),
+        isActive: z.number().optional(),
+      }).optional())
+      .query(async (opts) => {
+        return await db.listFeedFormulations(opts.input ?? undefined);
+      }),
+
+    getFormulation: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async (opts) => {
+        return await db.getFeedFormulationById(opts.input.id);
+      }),
+
+    createFormulation: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        feedRange: z.enum(['premium','value','econo']),
+        feedStage: z.enum(['starter','grower','finisher']),
+        version: z.number().optional(),
+        description: z.string().optional(),
+        ingredients: z.string().default('{}'),
+        proteinPercentage: z.string().optional(),
+        energyContent: z.string().optional(),
+        crudeProtein: z.string().optional(),
+        crudeFiber: z.string().optional(),
+        calcium: z.string().optional(),
+        phosphorus: z.string().optional(),
+        macroKgPerTon: z.string().optional(),
+        soyaOilKgPerTon: z.string().optional(),
+        probioticKgPerTon: z.string().optional(),
+        allocationKgPerBird: z.string().optional(),
+        effectiveDate: z.string().optional(),
+        isActive: z.number().optional(),
+      }))
+      .mutation(async (opts) => {
+        const id = await db.createFeedFormulation({ ...opts.input, createdBy: opts.ctx.user.id });
+        return { id };
+      }),
+
+    deactivateFormulation: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async (opts) => {
+        await db.deactivateFeedFormulation(opts.input.id);
+        return { success: true };
+      }),
+
+    // --- Mill Costs ---
+    listMillCosts: protectedProcedure
+      .input(z.object({
+        feedRange: z.enum(['premium','value','econo']).optional(),
+        feedType: z.enum(['starter','grower','finisher']).optional(),
+      }).optional())
+      .query(async (opts) => {
+        return await db.listMillCosts(opts.input ?? undefined);
+      }),
+
+    createMillCost: protectedProcedure
+      .input(z.object({
+        feedRange: z.enum(['premium','value','econo']),
+        feedType: z.enum(['starter','grower','finisher']),
+        costPerTon: z.string(),
+        effectiveDate: z.string(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        const id = await db.createMillCost({ ...opts.input, createdBy: opts.ctx.user.id });
+        return { id };
+      }),
+
+    updateMillCost: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        costPerTon: z.string().optional(),
+        effectiveDate: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        const { id, ...data } = opts.input;
+        await db.updateMillCost(id, data);
+        return { success: true };
+      }),
+
+    deleteMillCost: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async (opts) => {
+        await db.deleteMillCost(opts.input.id);
+        return { success: true };
+      }),
+
+    // --- Customer Feed Prices ---
+    listCustomerPrices: protectedProcedure
+      .input(z.object({
+        customerId: z.number().optional(),
+        feedRange: z.enum(['premium','value','econo']).optional(),
+        feedType: z.enum(['starter','grower','finisher']).optional(),
+      }).optional())
+      .query(async (opts) => {
+        return await db.listCustomerFeedPrices(opts.input ?? undefined);
+      }),
+
+    createCustomerPrice: protectedProcedure
+      .input(z.object({
+        customerId: z.number(),
+        feedRange: z.enum(['premium','value','econo']),
+        feedType: z.enum(['starter','grower','finisher']),
+        pricePerTon: z.string(),
+        effectiveDate: z.string(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        const id = await db.createCustomerFeedPrice({ ...opts.input, createdBy: opts.ctx.user.id });
+        return { id };
+      }),
+
+    updateCustomerPrice: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        pricePerTon: z.string().optional(),
+        effectiveDate: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        const { id, ...data } = opts.input;
+        await db.updateCustomerFeedPrice(id, data);
+        return { success: true };
+      }),
+
+    deleteCustomerPrice: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async (opts) => {
+        await db.deleteCustomerFeedPrice(opts.input.id);
+        return { success: true };
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;
