@@ -188,10 +188,10 @@ export default function FeedOrders() {
     }
     createMutation.mutate({
       customerId: parseInt(form.customerId),
-      flockId: form.flockId ? parseInt(form.flockId) : undefined,
+      flockId: (form.flockId && form.flockId !== "none") ? parseInt(form.flockId) : undefined,
       feedRange: form.feedRange as any,
       feedStage: form.feedStage as any,
-      formulationId: form.formulationId ? parseInt(form.formulationId) : undefined,
+      formulationId: (form.formulationId && form.formulationId !== "none") ? parseInt(form.formulationId) : undefined,
       quantityTons: qty,
       birdCount: form.birdCount ? parseInt(form.birdCount) : undefined,
       allocationKgPerBird: form.allocationKgPerBird || undefined,
@@ -204,9 +204,9 @@ export default function FeedOrders() {
       macroKgPerTon: form.macroKgPerTon || undefined,
       soyaOilKgPerTon: form.soyaOilKgPerTon || undefined,
       probioticKgPerTon: form.probioticKgPerTon || undefined,
-      macroSupplierId: form.macroSupplierId ? parseInt(form.macroSupplierId) : undefined,
-      soyaOilSupplierId: form.soyaOilSupplierId ? parseInt(form.soyaOilSupplierId) : undefined,
-      probioticSupplierId: form.probioticSupplierId ? parseInt(form.probioticSupplierId) : undefined,
+      macroSupplierId: (form.macroSupplierId && form.macroSupplierId !== "none") ? parseInt(form.macroSupplierId) : undefined,
+      soyaOilSupplierId: (form.soyaOilSupplierId && form.soyaOilSupplierId !== "none") ? parseInt(form.soyaOilSupplierId) : undefined,
+      probioticSupplierId: (form.probioticSupplierId && form.probioticSupplierId !== "none") ? parseInt(form.probioticSupplierId) : undefined,
     });
   };
 
@@ -401,10 +401,10 @@ export default function FeedOrders() {
                 </div>
                 <div className="space-y-1">
                   <Label>Linked Flock (optional)</Label>
-                  <Select value={form.flockId} onValueChange={(v) => setForm((f) => ({ ...f, flockId: v }))}>
+                  <Select value={form.flockId || "none"} onValueChange={(v) => setForm((f) => ({ ...f, flockId: v === "none" ? "" : v }))}>
                     <SelectTrigger><SelectValue placeholder="Select flock" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None</SelectItem>
+                      <SelectItem value="none">None</SelectItem>
                       {flocks?.filter((f: any) => ["active","planned"].includes(f.status)).map((f: any) => (
                         <SelectItem key={f.id} value={String(f.id)}>{f.flockNumber}</SelectItem>
                       ))}
@@ -442,10 +442,10 @@ export default function FeedOrders() {
               {/* Formulation */}
               <div className="space-y-1">
                 <Label>Formulation (optional — auto-fills additive rates)</Label>
-                <Select value={form.formulationId} onValueChange={handleFormulationChange}>
+                <Select value={form.formulationId || "none"} onValueChange={(v) => handleFormulationChange(v === "none" ? "" : v)}>
                   <SelectTrigger><SelectValue placeholder="Select formulation" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
                     {formulations?.filter((f: any) => f.status === "active").map((f: any) => (
                       <SelectItem key={f.id} value={String(f.id)}>{f.name} ({f.feedRange} {f.feedStage})</SelectItem>
                     ))}
@@ -574,8 +574,8 @@ export default function FeedOrders() {
                       >
                         <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Supplier" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No supplier</SelectItem>
-                          {suppliers?.map((s: any) => (
+                          <SelectItem value="none">No supplier</SelectItem>
+                          {suppliers?.map(s => (
                             <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
                           ))}
                         </SelectContent>
