@@ -2130,6 +2130,153 @@ export const appRouter = router({
         return { success: true };
       }),
   }),
+
+  // ============================================================================
+  // FEED ORDER PLANNING
+  // ============================================================================
+  feedOrders: router({
+    listOrders: protectedProcedure
+      .input(z.object({
+        customerId: z.number().optional(),
+        flockId: z.number().optional(),
+        status: z.string().optional(),
+        feedRange: z.string().optional(),
+        feedStage: z.string().optional(),
+      }).optional())
+      .query(async (opts) => {
+        return await db.listFeedOrders(opts.input ?? undefined);
+      }),
+
+    getOrder: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async (opts) => {
+        return await db.getFeedOrderById(opts.input.id);
+      }),
+
+    createOrder: protectedProcedure
+      .input(z.object({
+        customerId: z.number(),
+        flockId: z.number().optional(),
+        feedRange: z.enum(['premium', 'value', 'econo']),
+        feedStage: z.enum(['starter', 'grower', 'finisher']),
+        formulationId: z.number().optional(),
+        quantityTons: z.string(),
+        birdCount: z.number().optional(),
+        allocationKgPerBird: z.string().optional(),
+        transportMode: z.enum(['afgro_delivers', 'customer_collects']),
+        transportCostPerTon: z.string().optional(),
+        orderDate: z.string(),
+        requiredByDate: z.string(),
+        pricePerTon: z.string().optional(),
+        notes: z.string().optional(),
+        macroKgPerTon: z.string().optional(),
+        soyaOilKgPerTon: z.string().optional(),
+        probioticKgPerTon: z.string().optional(),
+        macroSupplierId: z.number().optional(),
+        soyaOilSupplierId: z.number().optional(),
+        probioticSupplierId: z.number().optional(),
+      }))
+      .mutation(async (opts) => {
+        const id = await db.createFeedOrder({ ...opts.input, createdBy: opts.ctx.user.id });
+        return { id };
+      }),
+
+    updateStatus: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(['draft', 'submitted_to_mill', 'in_production', 'ready_for_collection', 'partially_delivered', 'delivered', 'invoiced', 'cancelled']),
+      }))
+      .mutation(async (opts) => {
+        await db.updateFeedOrderStatus(opts.input.id, opts.input.status);
+        return { success: true };
+      }),
+
+    recordMillInvoice: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        millInvoiceNumber: z.string(),
+        millInvoiceDate: z.string(),
+        millInvoiceAmountExcl: z.string(),
+      }))
+      .mutation(async (opts) => {
+        const { id, ...data } = opts.input;
+        await db.updateFeedOrderMillInvoice(id, data);
+        return { success: true };
+      }),
+
+    markMillInvoicePaid: protectedProcedure
+      .input(z.object({ id: z.number(), paidDate: z.string() }))
+      .mutation(async (opts) => {
+        await db.markMillInvoicePaid(opts.input.id, opts.input.paidDate);
+        return { success: true };
+      }),
+
+    addDelivery: protectedProcedure
+      .input(z.object({
+        feedOrderId: z.number(),
+        deliveryDate: z.string(),
+        quantityTons: z.string(),
+        driverName: z.string().optional(),
+        vehicleReg: z.string().optional(),
+        deliveryNoteNumber: z.string().optional(),
+        receivedBy: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        const id = await db.createFeedOrderDelivery({ ...opts.input, createdBy: opts.ctx.user.id });
+        return { id };
+      }),
+
+    updateDeliveryStatus: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(['scheduled', 'in_transit', 'delivered', 'invoiced']),
+        customerInvoiceId: z.number().optional(),
+      }))
+      .mutation(async (opts) => {
+        await db.updateDeliveryStatus(opts.input.id, opts.input.status, opts.input.customerInvoiceId);
+        return { success: true };
+      }),
+
+    listAdditivePOs: protectedProcedure
+      .input(z.object({
+        feedOrderId: z.number().optional(),
+        status: z.string().optional(),
+        additiveType: z.string().optional(),
+        overdueOnly: z.boolean().optional(),
+      }).optional())
+      .query(async (opts) => {
+        return await db.listAdditivePOs(opts.input ?? undefined);
+      }),
+
+    updateAdditivePO: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(['pending', 'ordered', 'confirmed', 'delivered', 'cancelled']).optional(),
+        supplierId: z.number().optional(),
+        unitPricePerKg: z.string().optional(),
+        totalAmountExcl: z.string().optional(),
+        vatAmount: z.string().optional(),
+        totalAmountIncl: z.string().optional(),
+        orderPlacedDate: z.string().optional(),
+        expectedDeliveryDate: z.string().optional(),
+        actualDeliveryDate: z.string().optional(),
+        supplierInvoiceNumber: z.string().optional(),
+        supplierInvoiceDate: z.string().optional(),
+        supplierInvoicePaid: z.number().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        const { id, ...data } = opts.input;
+        await db.updateAdditivePO(id, data);
+        return { success: true };
+      }),
+
+    getAlerts: protectedProcedure
+      .query(async () => {
+        return await db.getFeedOrderAlerts();
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

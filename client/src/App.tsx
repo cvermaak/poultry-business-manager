@@ -36,6 +36,8 @@ import CashFlow from "./pages/CashFlow";
 import FeedFormulations from "./pages/FeedFormulations";
 import MillCosts from "./pages/MillCosts";
 import CustomerFeedPrices from "./pages/CustomerFeedPrices";
+import FeedOrders from "./pages/FeedOrders";
+import FeedOrderDetail from "./pages/FeedOrderDetail";
 
 function Router() {
   return (
@@ -201,6 +203,14 @@ function Router() {
         <DashboardLayout>
           <CustomerFeedPrices />
         </DashboardLayout>
+      </Route>
+
+      <Route path="/feed-orders/:id">
+        <FeedOrderDetail />
+      </Route>
+
+      <Route path="/feed-orders">
+        <FeedOrders />
       </Route>
 
       <Route path="/change-password">

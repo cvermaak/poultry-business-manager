@@ -1165,3 +1165,114 @@ export const cashFlowItems = mysqlTable("cash_flow_items", {
 	index("idx_cash_flow_items_item_type").on(table.itemType),
 	index("idx_cash_flow_items_house_id").on(table.houseId),
 ]);
+
+// ============================================================================
+// FEED ORDER PLANNING
+// ============================================================================
+
+export const feedOrders = mysqlTable("feed_orders", {
+	id: int().autoincrement().notNull(),
+	orderNumber: varchar({ length: 50 }).notNull(),
+	customerId: int().notNull().references(() => customers.id),
+	flockId: int().references(() => flocks.id),
+	feedRange: mysqlEnum(['premium','value','econo']).notNull(),
+	feedStage: mysqlEnum(['starter','grower','finisher']).notNull(),
+	formulationId: int().references(() => feedFormulations.id),
+	// Quantities
+	quantityTons: decimal({ precision: 10, scale: 3 }).notNull(),
+	birdCount: int(),                                    // bird count at time of order (after mortality)
+	allocationKgPerBird: decimal({ precision: 6, scale: 3 }), // snapshot of allocation at order time
+	// Transport
+	transportMode: mysqlEnum(['afgro_delivers','customer_collects']).notNull().default('afgro_delivers'),
+	transportCostPerTon: decimal({ precision: 10, scale: 2 }).default('0.00'),
+	transportCostTotal: decimal({ precision: 10, scale: 2 }).default('0.00'),
+	// Dates
+	orderDate: varchar({ length: 20 }).notNull(),        // date order is placed
+	requiredByDate: varchar({ length: 20 }).notNull(),   // date feed is needed on farm
+	macroOrderDeadline: varchar({ length: 20 }),         // orderDate - 14 days (MACRO lead time)
+	millProductionDeadline: varchar({ length: 20 }),     // orderDate - 7 days (mill production)
+	// Status workflow
+	status: mysqlEnum(['draft','submitted_to_mill','in_production','ready_for_collection','partially_delivered','delivered','invoiced','cancelled']).default('draft').notNull(),
+	// Mill invoice (mill bills AFGRO)
+	millInvoiceNumber: varchar({ length: 100 }),
+	millInvoiceDate: varchar({ length: 20 }),
+	millInvoiceAmountExcl: decimal({ precision: 12, scale: 2 }),
+	millInvoiceDueDate: varchar({ length: 20 }),         // millInvoiceDate + 14 days credit
+	millInvoicePaid: tinyint().default(0),
+	millInvoicePaidDate: varchar({ length: 20 }),
+	// Pricing
+	pricePerTon: decimal({ precision: 10, scale: 2 }),   // customer selling price per ton
+	// Notes
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("feed_orders_orderNumber_unique").on(table.orderNumber),
+	index("idx_feed_orders_customer").on(table.customerId),
+	index("idx_feed_orders_flock").on(table.flockId),
+	index("idx_feed_orders_status").on(table.status),
+	index("idx_feed_orders_required_by").on(table.requiredByDate),
+]);
+
+export const feedOrderDeliveries = mysqlTable("feed_order_deliveries", {
+	id: int().autoincrement().notNull(),
+	feedOrderId: int().notNull().references(() => feedOrders.id, { onDelete: 'cascade' }),
+	deliveryNumber: varchar({ length: 50 }).notNull(),
+	deliveryDate: varchar({ length: 20 }).notNull(),
+	quantityTons: decimal({ precision: 10, scale: 3 }).notNull(),
+	driverName: varchar({ length: 200 }),
+	vehicleReg: varchar({ length: 50 }),
+	deliveryNoteNumber: varchar({ length: 100 }),
+	receivedBy: varchar({ length: 200 }),
+	// Customer invoice for this delivery
+	customerInvoiceId: int(),                            // FK to invoices table (set when invoice created)
+	status: mysqlEnum(['scheduled','in_transit','delivered','invoiced']).default('scheduled').notNull(),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("feed_order_deliveries_deliveryNumber_unique").on(table.deliveryNumber),
+	index("idx_feed_order_deliveries_order").on(table.feedOrderId),
+	index("idx_feed_order_deliveries_date").on(table.deliveryDate),
+]);
+
+export const additivePurchaseOrders = mysqlTable("additive_purchase_orders", {
+	id: int().autoincrement().notNull(),
+	poNumber: varchar({ length: 50 }).notNull(),
+	feedOrderId: int().notNull().references(() => feedOrders.id, { onDelete: 'cascade' }),
+	supplierId: int().references(() => suppliers.id),
+	additiveType: mysqlEnum(['macro','soya_oil','probiotic']).notNull(),
+	quantityKg: decimal({ precision: 10, scale: 3 }).notNull(),
+	unitPricePerKg: decimal({ precision: 10, scale: 4 }),
+	totalAmountExcl: decimal({ precision: 12, scale: 2 }),
+	vatAmount: decimal({ precision: 12, scale: 2 }),
+	totalAmountIncl: decimal({ precision: 12, scale: 2 }),
+	// Lead time tracking
+	leadTimeDays: int().notNull(),                       // 14 for MACRO, 7 for others
+	orderDeadlineDate: varchar({ length: 20 }).notNull(), // date by which PO must be placed
+	orderPlacedDate: varchar({ length: 20 }),
+	expectedDeliveryDate: varchar({ length: 20 }),
+	actualDeliveryDate: varchar({ length: 20 }),
+	isCriticalPath: tinyint().default(0).notNull(),      // 1 for MACRO (14-day lead time)
+	// Status
+	status: mysqlEnum(['pending','ordered','confirmed','delivered','cancelled']).default('pending').notNull(),
+	supplierInvoiceNumber: varchar({ length: 100 }),
+	supplierInvoiceDate: varchar({ length: 20 }),
+	supplierInvoicePaid: tinyint().default(0),
+	notes: text(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	index("additive_purchase_orders_poNumber_unique").on(table.poNumber),
+	index("idx_additive_pos_feed_order").on(table.feedOrderId),
+	index("idx_additive_pos_supplier").on(table.supplierId),
+	index("idx_additive_pos_additive_type").on(table.additiveType),
+	index("idx_additive_pos_status").on(table.status),
+	index("idx_additive_pos_deadline").on(table.orderDeadlineDate),
+]);

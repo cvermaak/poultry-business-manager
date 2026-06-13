@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Activity, TrendingUp, Users, DollarSign, Bell, AlertCircle, Clock, CheckCircle2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import RemindersWidget from "@/components/RemindersWidget";
+import FeedAlertsWidget from "@/components/FeedAlertsWidget";
 
 export default function Home() {
   const { data: analytics, isLoading } = trpc.analytics.dashboard.useQuery();
@@ -157,6 +158,9 @@ export default function Home() {
           <CardContent>
             <RemindersWidget />
           </CardContent>
+        </Card>
+        <Card className="col-span-full">
+          <FeedAlertsWidget />
         </Card>
       </div>
     </div>

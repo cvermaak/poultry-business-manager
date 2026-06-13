@@ -52,6 +52,9 @@ import {
   cashFlowItems,
   millCosts,
   customerFeedPrices,
+  feedOrders,
+  feedOrderDeliveries,
+  additivePurchaseOrders,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -115,6 +118,9 @@ export async function getDb() {
           cashFlowItems,
           millCosts,
           customerFeedPrices,
+          feedOrders,
+          feedOrderDeliveries,
+          additivePurchaseOrders,
         },
       });
     } catch (error) {
@@ -3608,4 +3614,507 @@ export async function deleteCustomerFeedPrice(id: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
   await db.delete(customerFeedPrices).where(eq(customerFeedPrices.id, id));
+}
+
+// ============================================================================
+// FEED ORDER PLANNING
+// ============================================================================
+
+function generateOrderNumber(prefix: string): string {
+  const now = new Date();
+  const y = now.getFullYear().toString().slice(-2);
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const rand = Math.floor(Math.random() * 9000) + 1000;
+  return `${prefix}-${y}${m}${d}-${rand}`;
+}
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// ---- Feed Orders ----
+
+export async function listFeedOrders(filters?: {
+  customerId?: number;
+  flockId?: number;
+  status?: string;
+  feedRange?: string;
+  feedStage?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions = [];
+  if (filters?.customerId) conditions.push(eq(feedOrders.customerId, filters.customerId));
+  if (filters?.flockId) conditions.push(eq(feedOrders.flockId, filters.flockId));
+  if (filters?.status) conditions.push(eq(feedOrders.status, filters.status as any));
+  if (filters?.feedRange) conditions.push(eq(feedOrders.feedRange, filters.feedRange as any));
+  if (filters?.feedStage) conditions.push(eq(feedOrders.feedStage, filters.feedStage as any));
+
+  const rows = await db
+    .select({
+      order: feedOrders,
+      customerName: customers.name,
+      customerCompany: customers.companyName,
+    })
+    .from(feedOrders)
+    .leftJoin(customers, eq(feedOrders.customerId, customers.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(feedOrders.createdAt));
+
+  return rows;
+}
+
+export async function getFeedOrderById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const rows = await db
+    .select({
+      order: feedOrders,
+      customerName: customers.name,
+      customerCompany: customers.companyName,
+    })
+    .from(feedOrders)
+    .leftJoin(customers, eq(feedOrders.customerId, customers.id))
+    .where(eq(feedOrders.id, id))
+    .limit(1);
+
+  if (rows.length === 0) return null;
+
+  // Load deliveries
+  const deliveries = await db
+    .select()
+    .from(feedOrderDeliveries)
+    .where(eq(feedOrderDeliveries.feedOrderId, id))
+    .orderBy(asc(feedOrderDeliveries.deliveryDate));
+
+  // Load additive POs
+  const additivePOs = await db
+    .select({
+      po: additivePurchaseOrders,
+      supplierName: suppliers.name,
+    })
+    .from(additivePurchaseOrders)
+    .leftJoin(suppliers, eq(additivePurchaseOrders.supplierId, suppliers.id))
+    .where(eq(additivePurchaseOrders.feedOrderId, id))
+    .orderBy(asc(additivePurchaseOrders.additiveType));
+
+  return { ...rows[0], deliveries, additivePOs };
+}
+
+export async function createFeedOrder(data: {
+  customerId: number;
+  flockId?: number;
+  feedRange: 'premium' | 'value' | 'econo';
+  feedStage: 'starter' | 'grower' | 'finisher';
+  formulationId?: number;
+  quantityTons: string;
+  birdCount?: number;
+  allocationKgPerBird?: string;
+  transportMode: 'afgro_delivers' | 'customer_collects';
+  transportCostPerTon?: string;
+  orderDate: string;
+  requiredByDate: string;
+  pricePerTon?: string;
+  notes?: string;
+  createdBy: number;
+  // Additive inclusion rates from formulation (kg per ton)
+  macroKgPerTon?: string;
+  soyaOilKgPerTon?: string;
+  probioticKgPerTon?: string;
+  // Supplier IDs for additive POs
+  macroSupplierId?: number;
+  soyaOilSupplierId?: number;
+  probioticSupplierId?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  const orderNumber = generateOrderNumber('FO');
+  const qtyTons = parseFloat(data.quantityTons);
+
+  // Calculate transport cost total
+  const transportCostPerTon = parseFloat(data.transportCostPerTon || '0');
+  const transportCostTotal = (transportCostPerTon * qtyTons).toFixed(2);
+
+  // Lead time deadlines
+  const macroOrderDeadline = addDays(data.orderDate, -14);
+  const millProductionDeadline = addDays(data.orderDate, -7);
+  const millInvoiceDueDate = addDays(data.orderDate, 14);
+
+  const result = await db.insert(feedOrders).values({
+    orderNumber,
+    customerId: data.customerId,
+    flockId: data.flockId,
+    feedRange: data.feedRange,
+    feedStage: data.feedStage,
+    formulationId: data.formulationId,
+    quantityTons: data.quantityTons,
+    birdCount: data.birdCount,
+    allocationKgPerBird: data.allocationKgPerBird,
+    transportMode: data.transportMode,
+    transportCostPerTon: data.transportCostPerTon || '0',
+    transportCostTotal,
+    orderDate: data.orderDate,
+    requiredByDate: data.requiredByDate,
+    macroOrderDeadline,
+    millProductionDeadline,
+    millInvoiceDueDate,
+    pricePerTon: data.pricePerTon,
+    notes: data.notes,
+    createdBy: data.createdBy,
+    status: 'draft',
+  });
+
+  const orderId = result[0].insertId;
+
+  // Auto-generate additive purchase orders
+  const additiveDefs: Array<{
+    type: 'macro' | 'soya_oil' | 'probiotic';
+    kgPerTon: number;
+    leadDays: number;
+    supplierId?: number;
+    isCritical: number;
+  }> = [
+    {
+      type: 'macro',
+      kgPerTon: parseFloat(data.macroKgPerTon || '0'),
+      leadDays: 14,
+      supplierId: data.macroSupplierId,
+      isCritical: 1,
+    },
+    {
+      type: 'soya_oil',
+      kgPerTon: parseFloat(data.soyaOilKgPerTon || '0'),
+      leadDays: 7,
+      supplierId: data.soyaOilSupplierId,
+      isCritical: 0,
+    },
+    {
+      type: 'probiotic',
+      kgPerTon: parseFloat(data.probioticKgPerTon || '0'),
+      leadDays: 7,
+      supplierId: data.probioticSupplierId,
+      isCritical: 0,
+    },
+  ];
+
+  for (const additive of additiveDefs) {
+    if (additive.kgPerTon <= 0) continue;
+    const quantityKg = (additive.kgPerTon * qtyTons).toFixed(3);
+    const orderDeadlineDate = addDays(data.orderDate, -additive.leadDays);
+    const poNumber = generateOrderNumber(`APO-${additive.type.toUpperCase().slice(0, 3)}`);
+
+    await db.insert(additivePurchaseOrders).values({
+      poNumber,
+      feedOrderId: orderId,
+      supplierId: additive.supplierId,
+      additiveType: additive.type,
+      quantityKg,
+      leadTimeDays: additive.leadDays,
+      orderDeadlineDate,
+      isCriticalPath: additive.isCritical,
+      status: 'pending',
+      createdBy: data.createdBy,
+    });
+  }
+
+  return orderId;
+}
+
+export async function updateFeedOrderStatus(
+  id: number,
+  status: 'draft' | 'submitted_to_mill' | 'in_production' | 'ready_for_collection' | 'partially_delivered' | 'delivered' | 'invoiced' | 'cancelled'
+) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.update(feedOrders).set({ status }).where(eq(feedOrders.id, id));
+}
+
+export async function updateFeedOrderMillInvoice(id: number, data: {
+  millInvoiceNumber: string;
+  millInvoiceDate: string;
+  millInvoiceAmountExcl: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const dueDate = addDays(data.millInvoiceDate, 14);
+  await db.update(feedOrders).set({
+    millInvoiceNumber: data.millInvoiceNumber,
+    millInvoiceDate: data.millInvoiceDate,
+    millInvoiceAmountExcl: data.millInvoiceAmountExcl,
+    millInvoiceDueDate: dueDate,
+    status: 'in_production',
+  }).where(eq(feedOrders.id, id));
+}
+
+export async function markMillInvoicePaid(id: number, paidDate: string) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.update(feedOrders).set({ millInvoicePaid: 1, millInvoicePaidDate: paidDate }).where(eq(feedOrders.id, id));
+}
+
+// ---- Feed Order Deliveries ----
+
+export async function createFeedOrderDelivery(data: {
+  feedOrderId: number;
+  deliveryDate: string;
+  quantityTons: string;
+  driverName?: string;
+  vehicleReg?: string;
+  deliveryNoteNumber?: string;
+  receivedBy?: string;
+  notes?: string;
+  createdBy: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  const deliveryNumber = generateOrderNumber('DEL');
+
+  const result = await db.insert(feedOrderDeliveries).values({
+    feedOrderId: data.feedOrderId,
+    deliveryNumber,
+    deliveryDate: data.deliveryDate,
+    quantityTons: data.quantityTons,
+    driverName: data.driverName,
+    vehicleReg: data.vehicleReg,
+    deliveryNoteNumber: data.deliveryNoteNumber,
+    receivedBy: data.receivedBy,
+    notes: data.notes,
+    status: 'scheduled',
+    createdBy: data.createdBy,
+  });
+
+  // Update parent order status to partially_delivered if not all delivered
+  const order = await db.select().from(feedOrders).where(eq(feedOrders.id, data.feedOrderId)).limit(1);
+  if (order.length > 0 && order[0].status !== 'delivered') {
+    const allDeliveries = await db.select().from(feedOrderDeliveries).where(eq(feedOrderDeliveries.feedOrderId, data.feedOrderId));
+    const totalDelivered = allDeliveries.reduce((sum, d) => sum + parseFloat(d.quantityTons), 0);
+    const ordered = parseFloat(order[0].quantityTons);
+    const newStatus = totalDelivered >= ordered ? 'delivered' : 'partially_delivered';
+    await db.update(feedOrders).set({ status: newStatus as any }).where(eq(feedOrders.id, data.feedOrderId));
+  }
+
+  return result[0].insertId;
+}
+
+export async function updateDeliveryStatus(
+  id: number,
+  status: 'scheduled' | 'in_transit' | 'delivered' | 'invoiced',
+  customerInvoiceId?: number
+) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const updateData: any = { status };
+  if (customerInvoiceId) updateData.customerInvoiceId = customerInvoiceId;
+  await db.update(feedOrderDeliveries).set(updateData).where(eq(feedOrderDeliveries.id, id));
+}
+
+// ---- Additive Purchase Orders ----
+
+export async function listAdditivePOs(filters?: {
+  feedOrderId?: number;
+  status?: string;
+  additiveType?: string;
+  overdueOnly?: boolean;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions = [];
+  if (filters?.feedOrderId) conditions.push(eq(additivePurchaseOrders.feedOrderId, filters.feedOrderId));
+  if (filters?.status) conditions.push(eq(additivePurchaseOrders.status, filters.status as any));
+  if (filters?.additiveType) conditions.push(eq(additivePurchaseOrders.additiveType, filters.additiveType as any));
+  if (filters?.overdueOnly) {
+    const today = new Date().toISOString().slice(0, 10);
+    conditions.push(lte(additivePurchaseOrders.orderDeadlineDate, today));
+    conditions.push(eq(additivePurchaseOrders.status, 'pending'));
+  }
+
+  return await db
+    .select({
+      po: additivePurchaseOrders,
+      supplierName: suppliers.name,
+      orderNumber: feedOrders.orderNumber,
+      feedRange: feedOrders.feedRange,
+      feedStage: feedOrders.feedStage,
+    })
+    .from(additivePurchaseOrders)
+    .leftJoin(suppliers, eq(additivePurchaseOrders.supplierId, suppliers.id))
+    .leftJoin(feedOrders, eq(additivePurchaseOrders.feedOrderId, feedOrders.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(asc(additivePurchaseOrders.orderDeadlineDate));
+}
+
+export async function updateAdditivePO(id: number, data: {
+  status?: 'pending' | 'ordered' | 'confirmed' | 'delivered' | 'cancelled';
+  supplierId?: number;
+  unitPricePerKg?: string;
+  totalAmountExcl?: string;
+  vatAmount?: string;
+  totalAmountIncl?: string;
+  orderPlacedDate?: string;
+  expectedDeliveryDate?: string;
+  actualDeliveryDate?: string;
+  supplierInvoiceNumber?: string;
+  supplierInvoiceDate?: string;
+  supplierInvoicePaid?: number;
+  notes?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.update(additivePurchaseOrders).set(data as any).where(eq(additivePurchaseOrders.id, id));
+}
+
+// ---- Feed Order Alerts (for dashboard) ----
+
+export async function getFeedOrderAlerts() {
+  const db = await getDb();
+  if (!db) return [];
+
+  const today = new Date().toISOString().slice(0, 10);
+  const alertWindow = addDays(today, 14); // look 14 days ahead
+
+  // Active flocks approaching feed stage transitions
+  const activeFlocks = await db
+    .select()
+    .from(flocks)
+    .where(and(
+      eq(flocks.status, 'active'),
+    ));
+
+  const alerts: Array<{
+    type: 'feed_stage_transition' | 'additive_po_overdue' | 'additive_po_due_soon' | 'mill_invoice_due';
+    severity: 'critical' | 'warning' | 'info';
+    flockId?: number;
+    flockNumber?: string;
+    message: string;
+    dueDate?: string;
+    feedOrderId?: number;
+    additivePOId?: number;
+  }> = [];
+
+  for (const flock of activeFlocks) {
+    if (!flock.placementDate) continue;
+    const placedDate = new Date(flock.placementDate);
+    const todayDate = new Date(today);
+    const currentDay = Math.floor((todayDate.getTime() - placedDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Check if approaching grower stage (need to order grower feed)
+    if (flock.growerFromDay !== null && flock.growerFromDay !== undefined) {
+      const daysUntilGrower = flock.growerFromDay - currentDay;
+      if (daysUntilGrower > 0 && daysUntilGrower <= 14) {
+        const severity = daysUntilGrower <= 7 ? 'critical' : 'warning';
+        alerts.push({
+          type: 'feed_stage_transition',
+          severity,
+          flockId: flock.id,
+          flockNumber: flock.flockNumber,
+          message: `Flock ${flock.flockNumber}: Grower feed needed in ${daysUntilGrower} day(s) (Day ${flock.growerFromDay}). Order grower feed now.`,
+          dueDate: addDays(today, daysUntilGrower),
+        });
+      }
+    }
+
+    // Check if approaching finisher stage
+    if (flock.finisherFromDay !== null && flock.finisherFromDay !== undefined) {
+      const daysUntilFinisher = flock.finisherFromDay - currentDay;
+      if (daysUntilFinisher > 0 && daysUntilFinisher <= 14) {
+        const severity = daysUntilFinisher <= 7 ? 'critical' : 'warning';
+        alerts.push({
+          type: 'feed_stage_transition',
+          severity,
+          flockId: flock.id,
+          flockNumber: flock.flockNumber,
+          message: `Flock ${flock.flockNumber}: Finisher feed needed in ${daysUntilFinisher} day(s) (Day ${flock.finisherFromDay}). Order finisher feed now.`,
+          dueDate: addDays(today, daysUntilFinisher),
+        });
+      }
+    }
+  }
+
+  // Overdue additive POs
+  const overduePOs = await db
+    .select({
+      po: additivePurchaseOrders,
+      orderNumber: feedOrders.orderNumber,
+    })
+    .from(additivePurchaseOrders)
+    .leftJoin(feedOrders, eq(additivePurchaseOrders.feedOrderId, feedOrders.id))
+    .where(and(
+      eq(additivePurchaseOrders.status, 'pending'),
+      lte(additivePurchaseOrders.orderDeadlineDate, today),
+    ));
+
+  for (const { po, orderNumber } of overduePOs) {
+    alerts.push({
+      type: 'additive_po_overdue',
+      severity: 'critical',
+      message: `OVERDUE: ${po.additiveType.toUpperCase()} additive PO for order ${orderNumber} was due ${po.orderDeadlineDate}. Place order immediately.`,
+      dueDate: po.orderDeadlineDate,
+      feedOrderId: po.feedOrderId,
+      additivePOId: po.id,
+    });
+  }
+
+  // Additive POs due within 3 days
+  const dueSoonDate = addDays(today, 3);
+  const dueSoonPOs = await db
+    .select({
+      po: additivePurchaseOrders,
+      orderNumber: feedOrders.orderNumber,
+    })
+    .from(additivePurchaseOrders)
+    .leftJoin(feedOrders, eq(additivePurchaseOrders.feedOrderId, feedOrders.id))
+    .where(and(
+      eq(additivePurchaseOrders.status, 'pending'),
+      gte(additivePurchaseOrders.orderDeadlineDate, today),
+      lte(additivePurchaseOrders.orderDeadlineDate, dueSoonDate),
+    ));
+
+  for (const { po, orderNumber } of dueSoonPOs) {
+    alerts.push({
+      type: 'additive_po_due_soon',
+      severity: 'warning',
+      message: `${po.additiveType.toUpperCase()} additive PO for order ${orderNumber} must be placed by ${po.orderDeadlineDate}.`,
+      dueDate: po.orderDeadlineDate,
+      feedOrderId: po.feedOrderId,
+      additivePOId: po.id,
+    });
+  }
+
+  // Mill invoices due within 3 days
+  const dueSoonMillInvoices = await db
+    .select()
+    .from(feedOrders)
+    .where(and(
+      eq(feedOrders.millInvoicePaid, 0),
+      isNotNull(feedOrders.millInvoiceDueDate),
+      lte(feedOrders.millInvoiceDueDate, dueSoonDate),
+      gte(feedOrders.millInvoiceDueDate, today),
+    ));
+
+  for (const order of dueSoonMillInvoices) {
+    alerts.push({
+      type: 'mill_invoice_due',
+      severity: 'warning',
+      message: `Mill invoice ${order.millInvoiceNumber} for order ${order.orderNumber} is due on ${order.millInvoiceDueDate}.`,
+      dueDate: order.millInvoiceDueDate ?? undefined,
+      feedOrderId: order.id,
+    });
+  }
+
+  // Sort: critical first, then by dueDate
+  alerts.sort((a, b) => {
+    if (a.severity === 'critical' && b.severity !== 'critical') return -1;
+    if (a.severity !== 'critical' && b.severity === 'critical') return 1;
+    return (a.dueDate || '').localeCompare(b.dueDate || '');
+  });
+
+  return alerts;
 }

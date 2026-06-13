@@ -66,6 +66,7 @@ const menuItems: MenuItem[] = [
   { icon: FlaskConical, label: "Formulations", path: "/feed-management/formulations", roles: ["admin", "farm_manager"], indent: true },
   { icon: Factory, label: "Mill Costs", path: "/feed-management/mill-costs", roles: ["admin", "farm_manager"], indent: true },
   { icon: Tag, label: "Customer Prices", path: "/feed-management/customer-pricing", roles: ["admin", "farm_manager"], indent: true },
+  { icon: ShoppingCart, label: "Feed Orders", path: "/feed-orders", roles: ["admin", "farm_manager", "accountant"], indent: true },
 ];
 
 const canAccessMenuItem = (item: MenuItem, userRole: string | undefined): boolean => {
