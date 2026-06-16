@@ -1276,3 +1276,20 @@ export const additivePurchaseOrders = mysqlTable("additive_purchase_orders", {
 	index("idx_additive_pos_status").on(table.status),
 	index("idx_additive_pos_deadline").on(table.orderDeadlineDate),
 ]);
+
+// ─── Additive Inventory Mappings ───────────────────────────────────────────
+// Maps each additive type (macro, soya_oil, probiotic) to its corresponding
+// inventory item so the feed order flow can check stock and reserve quantities.
+export const additiveInventoryMappings = mysqlTable("additive_inventory_mappings", {
+  id: int().autoincrement().notNull().primaryKey(),
+  additiveType: mysqlEnum("additive_type", ['macro','soya_oil','probiotic']).notNull(),
+  inventoryItemId: int("inventory_item_id").notNull().references(() => inventoryItems.id),
+  notes: text(),
+  createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+  updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+  updatedBy: int("updated_by").references(() => users.id),
+},
+(table) => [
+  index("additive_inventory_mappings_type_unique").on(table.additiveType),
+  index("idx_aim_inventory_item").on(table.inventoryItemId),
+]);

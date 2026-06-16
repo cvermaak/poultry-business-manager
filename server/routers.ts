@@ -2178,6 +2178,19 @@ export const appRouter = router({
       }))
       .mutation(async (opts) => {
         const id = await db.createFeedOrder({ ...opts.input, createdBy: opts.ctx.user.id });
+        // After creating the order, reserve available additive stock and generate POs for shortfall
+        const order = await db.getFeedOrderById(id);
+        if (order) {
+          await db.reserveAdditiveStock({
+            feedOrderId: id,
+            feedOrderNumber: order.order.orderNumber,
+            macroKgPerTon: opts.input.macroKgPerTon ? parseFloat(opts.input.macroKgPerTon) : undefined,
+            soyaOilKgPerTon: opts.input.soyaOilKgPerTon ? parseFloat(opts.input.soyaOilKgPerTon) : undefined,
+            probioticKgPerTon: opts.input.probioticKgPerTon ? parseFloat(opts.input.probioticKgPerTon) : undefined,
+            quantityTons: parseFloat(opts.input.quantityTons),
+            createdBy: opts.ctx.user.id,
+          });
+        }
         return { id };
       }),
 
@@ -2275,6 +2288,39 @@ export const appRouter = router({
     getAlerts: protectedProcedure
       .query(async () => {
         return await db.getFeedOrderAlerts();
+      }),
+
+    // ── Additive Inventory Settings ──────────────────────────────────────────
+    getAdditiveMappings: protectedProcedure
+      .query(async () => {
+        return await db.getAdditiveMappings();
+      }),
+
+    setAdditiveMapping: protectedProcedure
+      .input(z.object({
+        additiveType: z.enum(['macro', 'soya_oil', 'probiotic']),
+        inventoryItemId: z.number(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async (opts) => {
+        await db.setAdditiveMapping(
+          opts.input.additiveType,
+          opts.input.inventoryItemId,
+          opts.input.notes,
+          opts.ctx.user.id
+        );
+        return { success: true };
+      }),
+
+    checkAdditiveStock: protectedProcedure
+      .input(z.object({
+        macroKgPerTon: z.number().optional(),
+        soyaOilKgPerTon: z.number().optional(),
+        probioticKgPerTon: z.number().optional(),
+        quantityTons: z.number(),
+      }))
+      .query(async (opts) => {
+        return await db.checkAdditiveStockForOrder(opts.input);
       }),
   }),
 });

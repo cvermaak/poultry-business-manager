@@ -67,6 +67,7 @@ const menuItems: MenuItem[] = [
   { icon: Factory, label: "Mill Costs", path: "/feed-management/mill-costs", roles: ["admin", "farm_manager"], indent: true },
   { icon: Tag, label: "Customer Prices", path: "/feed-management/customer-pricing", roles: ["admin", "farm_manager"], indent: true },
   { icon: ShoppingCart, label: "Feed Orders", path: "/feed-orders", roles: ["admin", "farm_manager", "accountant"], indent: true },
+  { icon: Package, label: "Additive Inventory", path: "/feed-management/additive-inventory", roles: ["admin", "farm_manager"], indent: true },
 ];
 
 const canAccessMenuItem = (item: MenuItem, userRole: string | undefined): boolean => {

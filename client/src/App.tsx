@@ -38,6 +38,7 @@ import MillCosts from "./pages/MillCosts";
 import CustomerFeedPrices from "./pages/CustomerFeedPrices";
 import FeedOrders from "./pages/FeedOrders";
 import FeedOrderDetail from "./pages/FeedOrderDetail";
+import AdditiveInventorySettings from "./pages/AdditiveInventorySettings";
 
 function Router() {
   return (
@@ -211,6 +212,10 @@ function Router() {
 
       <Route path="/feed-orders">
         <FeedOrders />
+      </Route>
+
+      <Route path="/feed-management/additive-inventory">
+        <AdditiveInventorySettings />
       </Route>
 
       <Route path="/change-password">

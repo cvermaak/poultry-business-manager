@@ -55,6 +55,8 @@ import {
   feedOrders,
   feedOrderDeliveries,
   additivePurchaseOrders,
+  additiveInventoryMappings,
+  inventoryStock,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -121,6 +123,8 @@ export async function getDb() {
           feedOrders,
           feedOrderDeliveries,
           additivePurchaseOrders,
+          additiveInventoryMappings,
+          inventoryStock,
         },
       });
     } catch (error) {
@@ -4117,4 +4121,254 @@ export async function getFeedOrderAlerts() {
   });
 
   return alerts;
+}
+
+// ============================================================================
+// ADDITIVE INVENTORY MAPPINGS
+// ============================================================================
+
+export async function getAdditiveMappings() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db
+    .select({
+      id: additiveInventoryMappings.id,
+      additiveType: additiveInventoryMappings.additiveType,
+      inventoryItemId: additiveInventoryMappings.inventoryItemId,
+      notes: additiveInventoryMappings.notes,
+      updatedAt: additiveInventoryMappings.updatedAt,
+      itemName: inventoryItems.name,
+      itemNumber: inventoryItems.itemNumber,
+      unit: inventoryItems.unit,
+      currentStock: inventoryItems.currentStock,
+    })
+    .from(additiveInventoryMappings)
+    .leftJoin(inventoryItems, eq(additiveInventoryMappings.inventoryItemId, inventoryItems.id));
+}
+
+export async function setAdditiveMapping(
+  additiveType: 'macro' | 'soya_oil' | 'probiotic',
+  inventoryItemId: number,
+  notes: string | undefined,
+  updatedBy: number
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  // Upsert: if mapping exists for this additiveType, update it; otherwise insert
+  const existing = await db
+    .select({ id: additiveInventoryMappings.id })
+    .from(additiveInventoryMappings)
+    .where(eq(additiveInventoryMappings.additiveType, additiveType))
+    .limit(1);
+  if (existing.length > 0) {
+    await db
+      .update(additiveInventoryMappings)
+      .set({ inventoryItemId, notes, updatedBy })
+      .where(eq(additiveInventoryMappings.additiveType, additiveType));
+  } else {
+    await db.insert(additiveInventoryMappings).values({
+      additiveType,
+      inventoryItemId,
+      notes,
+      updatedBy,
+    });
+  }
+  return true;
+}
+
+/** Returns available stock (on-hand across all locations) for a given inventory item */
+export async function getInventoryItemStock(inventoryItemId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ qty: inventoryStock.quantity })
+    .from(inventoryStock)
+    .where(eq(inventoryStock.itemId, inventoryItemId));
+  return rows.reduce((sum, r) => sum + parseFloat(r.qty ?? '0'), 0);
+}
+
+/**
+ * Check additive stock for a feed order before creation.
+ * Returns for each additive: required kg, on-hand kg, reserved kg (pending orders),
+ * available kg, shortfall kg, and whether a PO will be needed.
+ */
+export async function checkAdditiveStockForOrder(params: {
+  macroKgPerTon?: number;
+  soyaOilKgPerTon?: number;
+  probioticKgPerTon?: number;
+  quantityTons: number;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const mappings = await getAdditiveMappings();
+  const mappingByType = Object.fromEntries(mappings.map(m => [m.additiveType, m]));
+
+  const results: Record<string, {
+    additiveType: string;
+    inventoryItemId: number | null;
+    itemName: string | null;
+    unit: string | null;
+    requiredKg: number;
+    onHandKg: number;
+    reservedKg: number;
+    availableKg: number;
+    shortfallKg: number;
+    willGeneratePO: boolean;
+    poQuantityKg: number;
+  }> = {};
+
+  const additives = [
+    { type: 'macro', kgPerTon: params.macroKgPerTon ?? 0 },
+    { type: 'soya_oil', kgPerTon: params.soyaOilKgPerTon ?? 0 },
+    { type: 'probiotic', kgPerTon: params.probioticKgPerTon ?? 0 },
+  ] as const;
+
+  for (const additive of additives) {
+    const requiredKg = additive.kgPerTon * params.quantityTons;
+    const mapping = mappingByType[additive.type];
+
+    if (!mapping || !mapping.inventoryItemId) {
+      results[additive.type] = {
+        additiveType: additive.type,
+        inventoryItemId: null,
+        itemName: null,
+        unit: null,
+        requiredKg,
+        onHandKg: 0,
+        reservedKg: 0,
+        availableKg: 0,
+        shortfallKg: requiredKg,
+        willGeneratePO: requiredKg > 0,
+        poQuantityKg: requiredKg,
+      };
+      continue;
+    }
+
+    // Sum all stock across locations
+    const stockRows = await db
+      .select({ qty: inventoryStock.quantity })
+      .from(inventoryStock)
+      .where(eq(inventoryStock.itemId, mapping.inventoryItemId));
+    const onHandKg = stockRows.reduce((sum, r) => sum + parseFloat(r.qty ?? '0'), 0);
+
+    // Sum reserved stock from pending/ordered additive POs for this item
+    const reservedRows = await db
+      .select({ qty: additivePurchaseOrders.quantityKg })
+      .from(additivePurchaseOrders)
+      .where(
+        and(
+          eq(additivePurchaseOrders.additiveType, additive.type),
+          // Only count POs that haven't been delivered/cancelled
+          inArray(additivePurchaseOrders.status, ['pending', 'ordered', 'confirmed'])
+        )
+      );
+    // Reserved = stock already committed to existing pending orders
+    // We track this via inventory_transactions with referenceType='feed_order'
+    const reservedTxRows = await db
+      .select({ qty: inventoryTransactions.quantity })
+      .from(inventoryTransactions)
+      .where(
+        and(
+          eq(inventoryTransactions.itemId, mapping.inventoryItemId),
+          eq(inventoryTransactions.transactionType, 'issue'),
+          eq(inventoryTransactions.referenceType, 'feed_order')
+        )
+      );
+    const reservedKg = reservedTxRows.reduce((sum, r) => sum + Math.abs(parseFloat(r.qty ?? '0')), 0);
+    const availableKg = Math.max(0, onHandKg - reservedKg);
+    const shortfallKg = Math.max(0, requiredKg - availableKg);
+
+    results[additive.type] = {
+      additiveType: additive.type,
+      inventoryItemId: mapping.inventoryItemId,
+      itemName: mapping.itemName ?? null,
+      unit: mapping.unit ?? null,
+      requiredKg,
+      onHandKg,
+      reservedKg,
+      availableKg,
+      shortfallKg,
+      willGeneratePO: shortfallKg > 0,
+      poQuantityKg: shortfallKg,
+    };
+  }
+
+  return results;
+}
+
+/**
+ * Reserve available additive stock against a feed order.
+ * Creates inventory 'issue' transactions for the available quantity (up to required).
+ * Returns the quantity actually reserved for each additive.
+ */
+export async function reserveAdditiveStock(params: {
+  feedOrderId: number;
+  feedOrderNumber: string;
+  macroKgPerTon?: number;
+  soyaOilKgPerTon?: number;
+  probioticKgPerTon?: number;
+  quantityTons: number;
+  createdBy: number;
+}) {
+  const db = await getDb();
+  if (!db) return;
+
+  const mappings = await getAdditiveMappings();
+  const mappingByType = Object.fromEntries(mappings.map(m => [m.additiveType, m]));
+
+  const additives = [
+    { type: 'macro' as const, kgPerTon: params.macroKgPerTon ?? 0 },
+    { type: 'soya_oil' as const, kgPerTon: params.soyaOilKgPerTon ?? 0 },
+    { type: 'probiotic' as const, kgPerTon: params.probioticKgPerTon ?? 0 },
+  ];
+
+  for (const additive of additives) {
+    const requiredKg = additive.kgPerTon * params.quantityTons;
+    if (requiredKg <= 0) continue;
+
+    const mapping = mappingByType[additive.type];
+    if (!mapping || !mapping.inventoryItemId) continue;
+
+    // Get available stock
+    const stockRows = await db
+      .select({ id: inventoryStock.id, locationId: inventoryStock.locationId, qty: inventoryStock.quantity })
+      .from(inventoryStock)
+      .where(and(eq(inventoryStock.itemId, mapping.inventoryItemId), sql`${inventoryStock.quantity} > 0`));
+
+    let remaining = requiredKg;
+    for (const stockRow of stockRows) {
+      if (remaining <= 0) break;
+      const available = parseFloat(stockRow.qty ?? '0');
+      const toReserve = Math.min(remaining, available);
+      if (toReserve <= 0) continue;
+
+      // Create issue transaction to reserve stock
+      await db.insert(inventoryTransactions).values({
+        itemId: mapping.inventoryItemId,
+        locationId: stockRow.locationId,
+        transactionType: 'issue',
+        quantity: String(-toReserve), // negative = stock leaving
+        referenceType: 'feed_order',
+        referenceId: params.feedOrderId,
+        notes: `Reserved for feed order ${params.feedOrderNumber}`,
+        transactionDate: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        createdBy: params.createdBy,
+      });
+
+      // Reduce stock level
+      await db
+        .update(inventoryStock)
+        .set({ quantity: String(available - toReserve) })
+        .where(eq(inventoryStock.id, stockRow.id));
+
+      // Update currentStock on inventory item
+      await db
+        .update(inventoryItems)
+        .set({ currentStock: sql`${inventoryItems.currentStock} - ${toReserve}` })
+        .where(eq(inventoryItems.id, mapping.inventoryItemId));
+
+      remaining -= toReserve;
+    }
+  }
 }

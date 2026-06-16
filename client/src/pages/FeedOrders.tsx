@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Plus, ShoppingCart, AlertTriangle, Truck, Package } from "lucide-react";
+import { Plus, ShoppingCart, AlertTriangle, Truck, Package, CheckCircle2, XCircle, Info } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -117,6 +117,22 @@ export default function FeedOrders() {
   const { data: suppliers } = trpc.suppliers.list.useQuery();
   const { data: formulations } = trpc.feedManagement.listFormulations.useQuery({});
   const { data: alerts } = trpc.feedOrders.getAlerts.useQuery();
+
+  // Stock check — runs whenever additive rates or quantity changes
+  const stockCheckQty = useMemo(() => {
+    const qty = form.quantityTons || calculatedQty;
+    return parseFloat(qty) || 0;
+  }, [form.quantityTons, calculatedQty]);
+
+  const { data: stockCheck, isLoading: stockCheckLoading } = trpc.feedOrders.checkAdditiveStock.useQuery(
+    {
+      macroKgPerTon: parseFloat(form.macroKgPerTon) || undefined,
+      soyaOilKgPerTon: parseFloat(form.soyaOilKgPerTon) || undefined,
+      probioticKgPerTon: parseFloat(form.probioticKgPerTon) || undefined,
+      quantityTons: stockCheckQty,
+    },
+    { enabled: createOpen && stockCheckQty > 0 }
+  );
 
   const createMutation = trpc.feedOrders.createOrder.useMutation({
     onSuccess: () => {
@@ -584,6 +600,65 @@ export default function FeedOrders() {
                   ))}
                 </div>
               </div>
+
+              {/* Stock Check Panel */}
+              {createOpen && stockCheckQty > 0 && (
+                <div className="p-3 border rounded-lg space-y-3 bg-slate-50">
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Additive Stock Check
+                    {stockCheckLoading && <span className="text-xs text-muted-foreground">(checking…)</span>}
+                  </p>
+                  {stockCheck && (
+                    <div className="space-y-2">
+                      {([
+                        { key: 'macro', label: 'MACRO', critical: true },
+                        { key: 'soya_oil', label: 'Soya Oil', critical: false },
+                        { key: 'probiotic', label: 'Probiotic', critical: false },
+                      ] as const).map(({ key, label, critical }) => {
+                        const s = (stockCheck as any)[key];
+                        if (!s || s.requiredKg <= 0) return null;
+                        const sufficient = s.shortfallKg <= 0;
+                        return (
+                          <div key={key} className={`flex items-start gap-2 p-2 rounded text-xs ${
+                            sufficient ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+                          }`}>
+                            {sufficient
+                              ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600 mt-0.5 shrink-0" />
+                              : <XCircle className="h-3.5 w-3.5 text-red-600 mt-0.5 shrink-0" />}
+                            <div className="flex-1">
+                              <span className="font-medium">{label}</span>
+                              {critical && <span className="ml-1 text-red-600">(14d lead)</span>}
+                              <span className="text-muted-foreground ml-2">
+                                Required: <strong>{s.requiredKg.toFixed(2)} kg</strong>
+                                {' · '}On hand: <strong>{s.onHandKg.toFixed(2)} kg</strong>
+                                {' · '}Available: <strong>{s.availableKg.toFixed(2)} kg</strong>
+                              </span>
+                              {!sufficient && (
+                                <span className="ml-2 text-red-700 font-medium">
+                                  → PO will be generated for {s.shortfallKg.toFixed(2)} kg shortfall
+                                </span>
+                              )}
+                              {sufficient && (
+                                <span className="ml-2 text-green-700">→ Stock will be reserved from inventory</span>
+                              )}
+                              {!s.inventoryItemId && (
+                                <span className="ml-2 text-amber-700">(no inventory mapping — PO will be generated for full quantity)</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {!stockCheck && !stockCheckLoading && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Info className="h-3.5 w-3.5" />
+                      Enter additive rates above to see stock availability.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Notes */}
               <div className="space-y-1">
