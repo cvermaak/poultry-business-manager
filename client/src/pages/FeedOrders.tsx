@@ -118,6 +118,16 @@ export default function FeedOrders() {
   const { data: formulations } = trpc.feedManagement.listFormulations.useQuery({});
   const { data: alerts } = trpc.feedOrders.getAlerts.useQuery();
 
+  // Auto-calculate quantity from bird count × allocation
+  const calculatedQty = useMemo(() => {
+    const birds = parseFloat(form.birdCount);
+    const alloc = parseFloat(form.allocationKgPerBird);
+    if (!isNaN(birds) && !isNaN(alloc) && birds > 0 && alloc > 0) {
+      return ((birds * alloc) / 1000).toFixed(3);
+    }
+    return "";
+  }, [form.birdCount, form.allocationKgPerBird]);
+
   // Stock check — runs whenever additive rates or quantity changes
   const stockCheckQty = useMemo(() => {
     const qty = form.quantityTons || calculatedQty;
@@ -143,16 +153,6 @@ export default function FeedOrders() {
     },
     onError: (err) => toast.error(err.message),
   });
-
-  // Auto-calculate quantity from bird count × allocation
-  const calculatedQty = useMemo(() => {
-    const birds = parseFloat(form.birdCount);
-    const alloc = parseFloat(form.allocationKgPerBird);
-    if (!isNaN(birds) && !isNaN(alloc) && birds > 0 && alloc > 0) {
-      return ((birds * alloc) / 1000).toFixed(3);
-    }
-    return "";
-  }, [form.birdCount, form.allocationKgPerBird]);
 
   // Auto-set allocation based on stage
   const handleStageChange = (stage: string) => {
