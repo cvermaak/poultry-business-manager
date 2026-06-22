@@ -1293,3 +1293,33 @@ export const additiveInventoryMappings = mysqlTable("additive_inventory_mappings
   index("additive_inventory_mappings_type_unique").on(table.additiveType),
   index("idx_aim_inventory_item").on(table.inventoryItemId),
 ]);
+
+// ─── Mill Invoices ─────────────────────────────────────────────────────────
+// Tracks invoices issued by the mill to AFGRO for feed orders.
+// Separate from the inline millInvoice* fields on feed_orders (which remain
+// for quick reference); this table is the authoritative record for aging and
+// payment tracking.
+export const millInvoices = mysqlTable("mill_invoices", {
+  id: int().autoincrement().notNull().primaryKey(),
+  feedOrderId: int("feed_order_id").notNull().references(() => feedOrders.id),
+  invoiceNumber: varchar({ length: 100 }).notNull(),
+  invoiceDate: varchar({ length: 20 }).notNull(),         // ISO date string YYYY-MM-DD
+  dueDate: varchar({ length: 20 }).notNull(),             // invoiceDate + 14 days
+  amountExcl: decimal({ precision: 12, scale: 2 }).notNull(),
+  vatAmount: decimal({ precision: 12, scale: 2 }).default('0.00').notNull(),
+  amountIncl: decimal({ precision: 12, scale: 2 }).notNull(),
+  status: mysqlEnum("mill_invoice_status", ['outstanding','paid','overdue','disputed']).default('outstanding').notNull(),
+  paidDate: varchar({ length: 20 }),
+  paidAmount: decimal({ precision: 12, scale: 2 }),
+  paymentReference: varchar({ length: 200 }),
+  notes: text(),
+  createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+  updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+  createdBy: int("created_by").references(() => users.id),
+},
+(table) => [
+  index("mill_invoices_number_unique").on(table.invoiceNumber),
+  index("idx_mill_invoices_feed_order").on(table.feedOrderId),
+  index("idx_mill_invoices_status").on(table.status),
+  index("idx_mill_invoices_due_date").on(table.dueDate),
+]);

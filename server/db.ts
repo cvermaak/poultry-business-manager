@@ -57,6 +57,7 @@ import {
   additivePurchaseOrders,
   additiveInventoryMappings,
   inventoryStock,
+  millInvoices,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -125,6 +126,7 @@ export async function getDb() {
           additivePurchaseOrders,
           additiveInventoryMappings,
           inventoryStock,
+          millInvoices,
         },
       });
     } catch (error) {
@@ -4371,4 +4373,334 @@ export async function reserveAdditiveStock(params: {
       remaining -= toReserve;
     }
   }
+}
+
+// ============================================================================
+// MILL INVOICES
+// ============================================================================
+
+export async function listMillInvoices(filters?: {
+  status?: string;
+  feedOrderId?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions = [];
+  if (filters?.status) conditions.push(eq(millInvoices.status, filters.status as any));
+  if (filters?.feedOrderId) conditions.push(eq(millInvoices.feedOrderId, filters.feedOrderId));
+
+  const rows = await db
+    .select({
+      id: millInvoices.id,
+      feedOrderId: millInvoices.feedOrderId,
+      invoiceNumber: millInvoices.invoiceNumber,
+      invoiceDate: millInvoices.invoiceDate,
+      dueDate: millInvoices.dueDate,
+      amountExcl: millInvoices.amountExcl,
+      vatAmount: millInvoices.vatAmount,
+      amountIncl: millInvoices.amountIncl,
+      status: millInvoices.status,
+      paidDate: millInvoices.paidDate,
+      paidAmount: millInvoices.paidAmount,
+      paymentReference: millInvoices.paymentReference,
+      notes: millInvoices.notes,
+      createdAt: millInvoices.createdAt,
+      // Join feed order for context
+      orderNumber: feedOrders.orderNumber,
+      feedRange: feedOrders.feedRange,
+      feedStage: feedOrders.feedStage,
+      quantityTons: feedOrders.quantityTons,
+      customerName: customers.name,
+    })
+    .from(millInvoices)
+    .leftJoin(feedOrders, eq(millInvoices.feedOrderId, feedOrders.id))
+    .leftJoin(customers, eq(feedOrders.customerId, customers.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(millInvoices.invoiceDate));
+
+  return rows;
+}
+
+export async function getMillInvoiceById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const rows = await db
+    .select()
+    .from(millInvoices)
+    .where(eq(millInvoices.id, id))
+    .limit(1);
+
+  return rows[0] ?? undefined;
+}
+
+export async function createMillInvoice(data: {
+  feedOrderId: number;
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  amountExcl: number;
+  vatAmount?: number;
+  amountIncl: number;
+  notes?: string;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.insert(millInvoices).values({
+    feedOrderId: data.feedOrderId,
+    invoiceNumber: data.invoiceNumber,
+    invoiceDate: data.invoiceDate,
+    dueDate: data.dueDate,
+    amountExcl: String(data.amountExcl),
+    vatAmount: String(data.vatAmount ?? 0),
+    amountIncl: String(data.amountIncl),
+    status: 'outstanding',
+    notes: data.notes,
+    createdBy: data.createdBy,
+  });
+
+  // Also update the inline fields on feed_orders for quick reference
+  await db.update(feedOrders).set({
+    millInvoiceNumber: data.invoiceNumber,
+    millInvoiceDate: data.invoiceDate,
+    millInvoiceAmountExcl: String(data.amountExcl),
+    millInvoiceDueDate: data.dueDate,
+    millInvoicePaid: 0,
+  }).where(eq(feedOrders.id, data.feedOrderId));
+
+  return true;
+}
+
+export async function recordMillInvoicePayment(id: number, data: {
+  paidDate: string;
+  paidAmount: number;
+  paymentReference?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.update(millInvoices).set({
+    status: 'paid',
+    paidDate: data.paidDate,
+    paidAmount: String(data.paidAmount),
+    paymentReference: data.paymentReference,
+  }).where(eq(millInvoices.id, id));
+
+  // Sync the inline field on feed_orders
+  const inv = await getMillInvoiceById(id);
+  if (inv) {
+    await db.update(feedOrders).set({
+      millInvoicePaid: 1,
+      millInvoicePaidDate: data.paidDate,
+    }).where(eq(feedOrders.id, inv.feedOrderId));
+  }
+
+  return true;
+}
+
+export async function getMillInvoiceAgingSummary() {
+  const db = await getDb();
+  if (!db) return { outstanding: 0, overdue: 0, paid: 0, totalOutstandingAmount: 0, totalOverdueAmount: 0 };
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const rows = await db
+    .select({
+      status: millInvoices.status,
+      dueDate: millInvoices.dueDate,
+      amountIncl: millInvoices.amountIncl,
+    })
+    .from(millInvoices);
+
+  let outstanding = 0, overdue = 0, paid = 0;
+  let totalOutstandingAmount = 0, totalOverdueAmount = 0;
+
+  for (const row of rows) {
+    const amount = parseFloat(String(row.amountIncl) || '0');
+    if (row.status === 'paid') {
+      paid++;
+    } else if (row.dueDate && row.dueDate < today) {
+      overdue++;
+      totalOverdueAmount += amount;
+    } else {
+      outstanding++;
+      totalOutstandingAmount += amount;
+    }
+  }
+
+  return { outstanding, overdue, paid, totalOutstandingAmount, totalOverdueAmount };
+}
+
+// ============================================================================
+// FEED DELIVERY INVOICES (customer invoices linked to feed_order_deliveries)
+// ============================================================================
+
+export async function createFeedDeliveryInvoice(data: {
+  customerId: number;
+  deliveryId: number;
+  feedOrderId: number;
+  invoiceDate: string;
+  dueDate: string;
+  lineItems: Array<{
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    discountPercent?: number;
+    vatPercent?: number;
+  }>;
+  notes?: string;
+  createdBy?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const invoiceNumber = `FEED-${Date.now()}`;
+  const vatPct = 15;
+
+  let exclusiveTotal = 0;
+  let vatAmount = 0;
+
+  for (const item of data.lineItems) {
+    const subtotal = item.quantity * item.unitPrice;
+    const discount = subtotal * ((item.discountPercent ?? 0) / 100);
+    const excl = subtotal - discount;
+    const vat = excl * ((item.vatPercent ?? vatPct) / 100);
+    exclusiveTotal += excl;
+    vatAmount += vat;
+  }
+  const inclusiveTotal = exclusiveTotal + vatAmount;
+
+  const invDate = new Date(data.invoiceDate);
+  const dueDate = new Date(data.dueDate);
+
+  await db.insert(invoices).values({
+    invoiceNumber,
+    customerId: data.customerId,
+    invoiceDate: invDate,
+    dueDate: dueDate,
+    subtotal: Math.round(exclusiveTotal),
+    taxAmount: Math.round(vatAmount),
+    totalAmount: Math.round(inclusiveTotal),
+    paidAmount: 0,
+    balanceDue: Math.round(inclusiveTotal),
+    status: 'draft',
+    notes: data.notes,
+    createdBy: data.createdBy,
+    exclusiveTotal: String(exclusiveTotal.toFixed(2)),
+    vatAmount: String(vatAmount.toFixed(2)),
+    inclusiveTotal: String(inclusiveTotal.toFixed(2)),
+    vatPercentage: String(vatPct),
+  });
+
+  // Retrieve the saved invoice
+  const saved = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1);
+  const invoiceId = saved[0]?.id;
+
+  if (invoiceId) {
+    // Save line items
+    for (const item of data.lineItems) {
+      const subtotal = item.quantity * item.unitPrice;
+      const discount = subtotal * ((item.discountPercent ?? 0) / 100);
+      const excl = subtotal - discount;
+      const vat = excl * ((item.vatPercent ?? vatPct) / 100);
+      await db.insert(invoiceLineItems).values({
+        invoiceId,
+        description: item.description,
+        quantity: String(item.quantity),
+        pricePerUnit: String(item.unitPrice),
+        discount: String(item.discountPercent ?? 0),
+        discountAmount: String((subtotal * ((item.discountPercent ?? 0) / 100)).toFixed(2)),
+        vatPercentage: String(item.vatPercent ?? vatPct),
+        amount: String((excl + vat).toFixed(2)),
+      });
+    }
+
+    // Link the invoice to the delivery
+    await db.update(feedOrderDeliveries).set({
+      customerInvoiceId: invoiceId,
+      status: 'invoiced',
+    }).where(eq(feedOrderDeliveries.id, data.deliveryId));
+  }
+
+  return { invoiceId, invoiceNumber };
+}
+
+export async function listFeedDeliveryInvoices(filters?: {
+  customerId?: number;
+  status?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  // Feed delivery invoices are identified by invoiceNumber starting with 'FEED-'
+  const conditions = [like(invoices.invoiceNumber, 'FEED-%')];
+  if (filters?.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
+  if (filters?.status) conditions.push(eq(invoices.status, filters.status as any));
+
+  const rows = await db
+    .select({
+      id: invoices.id,
+      invoiceNumber: invoices.invoiceNumber,
+      customerId: invoices.customerId,
+      customerName: customers.name,
+      invoiceDate: invoices.invoiceDate,
+      dueDate: invoices.dueDate,
+      exclusiveTotal: invoices.exclusiveTotal,
+      vatAmount: invoices.vatAmount,
+      inclusiveTotal: invoices.inclusiveTotal,
+      paidAmount: invoices.paidAmount,
+      balanceDue: invoices.balanceDue,
+      status: invoices.status,
+      notes: invoices.notes,
+      createdAt: invoices.createdAt,
+    })
+    .from(invoices)
+    .leftJoin(customers, eq(invoices.customerId, customers.id))
+    .where(and(...conditions))
+    .orderBy(desc(invoices.invoiceDate));
+
+  return rows;
+}
+
+export async function getCustomerInvoiceAgingSummary() {
+  const db = await getDb();
+  if (!db) return { draft: 0, sent: 0, overdue: 0, paid: 0, totalOutstanding: 0, totalOverdue: 0 };
+
+  const today = new Date();
+
+  const rows = await db
+    .select({
+      status: invoices.status,
+      dueDate: invoices.dueDate,
+      balanceDue: invoices.balanceDue,
+      inclusiveTotal: invoices.inclusiveTotal,
+    })
+    .from(invoices);
+
+  let draft = 0, sent = 0, overdue = 0, paid = 0;
+  let totalOutstanding = 0, totalOverdue = 0;
+
+  for (const row of rows) {
+    const balance = parseFloat(String(row.balanceDue) || '0');
+    const due = row.dueDate ? new Date(row.dueDate) : null;
+    if (row.status === 'paid') {
+      paid++;
+    } else if (row.status === 'cancelled') {
+      // skip
+    } else if (due && due < today && row.status !== 'paid') {
+      overdue++;
+      totalOverdue += balance;
+    } else if (row.status === 'draft') {
+      draft++;
+      totalOutstanding += balance;
+    } else {
+      sent++;
+      totalOutstanding += balance;
+    }
+  }
+
+  return { draft, sent, overdue, paid, totalOutstanding, totalOverdue };
 }

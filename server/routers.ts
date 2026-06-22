@@ -1840,10 +1840,88 @@ export const appRouter = router({
       .mutation(async ({ input: invoiceId }) => {
         return await db.cancelInvoice(invoiceId);
       }),
-  }),
 
+    // Feed Delivery Invoices
+    createFeedDeliveryInvoice: protectedProcedure
+      .input(z.object({
+        customerId: z.number(),
+        deliveryId: z.number(),
+        feedOrderId: z.number(),
+        invoiceDate: z.string(),
+        dueDate: z.string(),
+        lineItems: z.array(z.object({
+          description: z.string(),
+          quantity: z.number().nonnegative(),
+          unitPrice: z.number().nonnegative(),
+          discountPercent: z.number().nonnegative().default(0),
+          vatPercent: z.number().nonnegative().default(15),
+        })),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        return await db.createFeedDeliveryInvoice({ ...input, createdBy: ctx.user.id });
+      }),
+
+    listFeedDeliveryInvoices: protectedProcedure
+      .input(z.object({
+        customerId: z.number().optional(),
+        status: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return await db.listFeedDeliveryInvoices(input ?? {});
+      }),
+
+    // Mill Invoices (mill bills AFGRO)
+    listMillInvoices: protectedProcedure
+      .input(z.object({
+        status: z.string().optional(),
+        feedOrderId: z.number().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return await db.listMillInvoices(input ?? {});
+      }),
+
+    createMillInvoice: protectedProcedure
+      .input(z.object({
+        feedOrderId: z.number(),
+        invoiceNumber: z.string(),
+        invoiceDate: z.string(),
+        dueDate: z.string(),
+        amountExcl: z.number().nonnegative(),
+        vatAmount: z.number().nonnegative().default(0),
+        amountIncl: z.number().nonnegative(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        return await db.createMillInvoice({ ...input, createdBy: ctx.user.id });
+      }),
+
+    recordMillInvoicePayment: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        paidDate: z.string(),
+        paidAmount: z.number().nonnegative(),
+        paymentReference: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return await db.recordMillInvoicePayment(input.id, {
+          paidDate: input.paidDate,
+          paidAmount: input.paidAmount,
+          paymentReference: input.paymentReference,
+        });
+      }),
+
+    getInvoiceAgingSummary: protectedProcedure
+      .query(async () => {
+        const [customer, mill] = await Promise.all([
+          db.getCustomerInvoiceAgingSummary(),
+          db.getMillInvoiceAgingSummary(),
+        ]);
+        return { customer, mill };
+      }),
+  }),
   // ============================================================================
-  // ANALYTICS & DASHBOARD
+  // ANALYTICS & DASHBOARDD
   // ============================================================================
   analytics: router({
     dashboard: protectedProcedure.query(async () => {

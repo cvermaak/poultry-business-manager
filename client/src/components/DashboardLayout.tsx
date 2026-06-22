@@ -55,6 +55,8 @@ const menuItems: MenuItem[] = [
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
   { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"], indent: true },
+  { icon: FileText, label: "Feed Invoices", path: "/invoicing/feed-invoices", roles: ["admin", "accountant", "sales_staff"], indent: true },
+  { icon: Factory, label: "Mill Invoices", path: "/invoicing/mill-invoices", roles: ["admin", "accountant"], indent: true },
   { icon: DollarSign, label: "Finance", path: "/finance", roles: ["admin", "accountant"] },
   { icon: TrendingDown, label: "Expenses", path: "/finance/expenses", roles: ["admin", "accountant"], indent: true },
   { icon: TrendingUp, label: "Cash Flow", path: "/finance/cash-flow", roles: ["admin", "accountant"], indent: true },
