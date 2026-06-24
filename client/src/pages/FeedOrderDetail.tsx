@@ -78,6 +78,9 @@ export default function FeedOrderDetail() {
   const [deliveryForm, setDeliveryForm] = useState({ deliveryDate: new Date().toISOString().slice(0, 10), quantityTons: "", driverName: "", vehicleReg: "", deliveryNoteNumber: "", receivedBy: "", notes: "" });
   const [poOpen, setPoOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState<any>(null);
+  const [deliveryStatusOpen, setDeliveryStatusOpen] = useState(false);
+  const [selectedDelivery, setSelectedDelivery] = useState<any>(null);
+  const [newDeliveryStatus, setNewDeliveryStatus] = useState("");
   const [poForm, setPoForm] = useState({ status: "", orderPlacedDate: "", expectedDeliveryDate: "", actualDeliveryDate: "", unitPricePerKg: "", supplierInvoiceNumber: "", supplierInvoiceDate: "", supplierInvoicePaid: "0", notes: "" });
 
   const { data: suppliers } = trpc.suppliers.list.useQuery();
@@ -99,6 +102,11 @@ export default function FeedOrderDetail() {
 
   const addDelivery = trpc.feedOrders.addDelivery.useMutation({
     onSuccess: () => { toast.success("Delivery recorded"); setDeliveryOpen(false); setDeliveryForm({ deliveryDate: new Date().toISOString().slice(0, 10), quantityTons: "", driverName: "", vehicleReg: "", deliveryNoteNumber: "", receivedBy: "", notes: "" }); refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateDeliveryStatus = trpc.feedOrders.updateDeliveryStatus.useMutation({
+    onSuccess: () => { toast.success("Delivery status updated"); setDeliveryStatusOpen(false); refetch(); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -345,6 +353,7 @@ export default function FeedOrderDetail() {
                     <th className="text-left p-3 font-medium">Delivery Note</th>
                     <th className="text-left p-3 font-medium">Received By</th>
                     <th className="text-left p-3 font-medium">Status</th>
+                    <th className="p-3"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -366,6 +375,15 @@ export default function FeedOrderDetail() {
                         }`}>
                           {d.status.charAt(0).toUpperCase() + d.status.slice(1).replace("_", " ")}
                         </span>
+                      </td>
+                      <td className="p-3">
+                        {d.status !== "invoiced" && (
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            setSelectedDelivery(d);
+                            setNewDeliveryStatus(d.status);
+                            setDeliveryStatusOpen(true);
+                          }}>Update</Button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -499,6 +517,41 @@ export default function FeedOrderDetail() {
               disabled={addDelivery.isPending || !deliveryForm.quantityTons}
             >
               {addDelivery.isPending ? "Saving..." : "Record Delivery"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Update Delivery Status Dialog */}
+      <Dialog open={deliveryStatusOpen} onOpenChange={setDeliveryStatusOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Update Delivery Status</DialogTitle></DialogHeader>
+          {selectedDelivery && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-muted-foreground">
+                {selectedDelivery.deliveryNumber} &middot; {selectedDelivery.deliveryDate} &middot; {parseFloat(selectedDelivery.quantityTons).toFixed(3)} tons
+              </p>
+              <div className="space-y-1">
+                <Label>Status</Label>
+                <Select value={newDeliveryStatus} onValueChange={setNewDeliveryStatus}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="in_transit">In Transit</SelectItem>
+                    <SelectItem value="delivered">Delivered</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="text-xs text-muted-foreground">Note: status changes to &ldquo;Invoiced&rdquo; automatically when a Feed Invoice is created for this delivery.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeliveryStatusOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => updateDeliveryStatus.mutate({ id: selectedDelivery.id, status: newDeliveryStatus as any })}
+              disabled={updateDeliveryStatus.isPending || !newDeliveryStatus}
+            >
+              {updateDeliveryStatus.isPending ? "Saving..." : "Update"}
             </Button>
           </DialogFooter>
         </DialogContent>

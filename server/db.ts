@@ -3007,11 +3007,11 @@ export async function createInvoice(data: {
     customerId: data.customerId,
     invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString().slice(0, 19).replace('T', ' ') : data.invoiceDate,
     dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString().slice(0, 19).replace('T', ' ') : data.dueDate,
-    subtotal: Math.round(exclusiveTotal * 100),
-    taxAmount: Math.round(vatAmount * 100),
-    totalAmount: Math.round(inclusiveTotal * 100),
-    paidAmount: 0,
-    balanceDue: Math.round(inclusiveTotal * 100),
+    subtotal: exclusiveTotal.toFixed(2),
+    taxAmount: vatAmount.toFixed(2),
+    totalAmount: inclusiveTotal.toFixed(2),
+    paidAmount: '0.00',
+    balanceDue: inclusiveTotal.toFixed(2),
     status: "draft",
     createdBy: data.createdBy,
     catchSessionId: data.catchSessionId,
@@ -3055,22 +3055,22 @@ export async function recordInvoicePayment(invoiceId: number, data: {
   const rows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
   const invoice = rows[0];
   if (!invoice) throw new Error('Invoice not found');
-  const totalAmount = invoice.totalAmount;
-  const currentPaid = invoice.paidAmount || 0;
-  const newPaid = currentPaid + Math.round(data.amount * 100);
-  const newBalance = totalAmount - newPaid;
+  const totalAmount = parseFloat(String(invoice.totalAmount));
+  const currentPaid = parseFloat(String(invoice.paidAmount || 0));
+  const newPaid = parseFloat((currentPaid + data.amount).toFixed(2));
+  const newBalance = parseFloat(Math.max(0, totalAmount - newPaid).toFixed(2));
   const newStatus = newBalance <= 0 ? 'paid' : 'partial';
   await db.update(invoices)
     .set({
-      paidAmount: newPaid,
-      balanceDue: Math.max(0, newBalance),
+      paidAmount: newPaid.toFixed(2),
+      balanceDue: newBalance.toFixed(2),
       status: newStatus as 'paid' | 'partial',
       paymentMethod: data.paymentMethod,
       paymentDate: data.paymentDate,
       updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     })
     .where(eq(invoices.id, invoiceId));
-  return { success: true, newStatus, newPaid, newBalance: Math.max(0, newBalance) };
+  return { success: true, newStatus, newPaid, newBalance };
 }
 
 export async function cancelInvoice(invoiceId: number) {
@@ -3188,8 +3188,8 @@ export async function revertPaidFromOverdue(): Promise<number> {
   
   let count = 0;
   for (const invoice of overdueInvoices) {
-    const paidAmount = invoice.paidAmount || 0;
-    const inclusiveTotal = invoice.inclusiveTotal ? parseFloat(String(invoice.inclusiveTotal)) * 100 : 0;
+    const paidAmount = parseFloat(String(invoice.paidAmount || 0));
+    const inclusiveTotal = parseFloat(String(invoice.inclusiveTotal || 0));
     
     if (paidAmount >= inclusiveTotal) {
       await db.update(invoices)
@@ -3909,6 +3909,16 @@ export async function createFeedOrderDelivery(data: {
   return result[0].insertId;
 }
 
+export async function listFeedOrderDeliveries(feedOrderId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db
+    .select()
+    .from(feedOrderDeliveries)
+    .where(eq(feedOrderDeliveries.feedOrderId, feedOrderId))
+    .orderBy(asc(feedOrderDeliveries.deliveryDate));
+}
+
 export async function updateDeliveryStatus(
   id: number,
   status: 'scheduled' | 'in_transit' | 'delivered' | 'invoiced',
@@ -4540,7 +4550,7 @@ export async function getMillInvoiceAgingSummary() {
 
 export async function createFeedDeliveryInvoice(data: {
   customerId: number;
-  deliveryId: number;
+  deliveryId?: number;
   feedOrderId: number;
   invoiceDate: string;
   dueDate: string;
@@ -4581,11 +4591,11 @@ export async function createFeedDeliveryInvoice(data: {
     customerId: data.customerId,
     invoiceDate: invDate,
     dueDate: dueDate,
-    subtotal: Math.round(exclusiveTotal),
-    taxAmount: Math.round(vatAmount),
-    totalAmount: Math.round(inclusiveTotal),
-    paidAmount: 0,
-    balanceDue: Math.round(inclusiveTotal),
+    subtotal: exclusiveTotal.toFixed(2),
+    taxAmount: vatAmount.toFixed(2),
+    totalAmount: inclusiveTotal.toFixed(2),
+    paidAmount: '0.00',
+    balanceDue: inclusiveTotal.toFixed(2),
     status: 'draft',
     notes: data.notes,
     createdBy: data.createdBy,
@@ -4618,11 +4628,13 @@ export async function createFeedDeliveryInvoice(data: {
       });
     }
 
-    // Link the invoice to the delivery
-    await db.update(feedOrderDeliveries).set({
-      customerInvoiceId: invoiceId,
-      status: 'invoiced',
-    }).where(eq(feedOrderDeliveries.id, data.deliveryId));
+    // Link the invoice to the delivery if one was provided
+    if (data.deliveryId) {
+      await db.update(feedOrderDeliveries).set({
+        customerInvoiceId: invoiceId,
+        status: 'invoiced',
+      }).where(eq(feedOrderDeliveries.id, data.deliveryId));
+    }
   }
 
   return { invoiceId, invoiceNumber };

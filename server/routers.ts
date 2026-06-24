@@ -1845,7 +1845,7 @@ export const appRouter = router({
     createFeedDeliveryInvoice: protectedProcedure
       .input(z.object({
         customerId: z.number(),
-        deliveryId: z.number(),
+        deliveryId: z.number().optional(),
         feedOrderId: z.number(),
         invoiceDate: z.string(),
         dueDate: z.string(),
@@ -2207,6 +2207,23 @@ export const appRouter = router({
         await db.deleteCustomerFeedPrice(opts.input.id);
         return { success: true };
       }),
+
+    getCustomerFeedPrice: protectedProcedure
+      .input(z.object({
+        customerId: z.number(),
+        feedRange: z.enum(['premium','value','econo']),
+        feedType: z.enum(['starter','grower','finisher']),
+      }))
+      .query(async ({ input }) => {
+        const rows = await db.listCustomerFeedPrices({
+          customerId: input.customerId,
+          feedRange: input.feedRange,
+          feedType: input.feedType,
+        });
+        // Return the most recent effective price
+        if (rows.length === 0) return null;
+        return rows.sort((a: any, b: any) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
+      }),
   }),
 
   // ============================================================================
@@ -2300,6 +2317,12 @@ export const appRouter = router({
       .mutation(async (opts) => {
         await db.markMillInvoicePaid(opts.input.id, opts.input.paidDate);
         return { success: true };
+      }),
+
+    listDeliveries: protectedProcedure
+      .input(z.number())
+      .query(async ({ input: feedOrderId }) => {
+        return await db.listFeedOrderDeliveries(feedOrderId);
       }),
 
     addDelivery: protectedProcedure

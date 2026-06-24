@@ -33,11 +33,11 @@ export default function Home() {
     );
   }
 
-  const formatCurrency = (cents: number) => {
+  const formatCurrency = (rands: number) => {
     return new Intl.NumberFormat("en-ZA", {
       style: "currency",
       currency: "ZAR",
-    }).format(cents / 100);
+    }).format(rands);
   };
 
   return (

@@ -356,11 +356,15 @@ export default function MillInvoices() {
                   <SelectValue placeholder="Select feed order" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(feedOrders as any[]).map((o) => (
-                    <SelectItem key={o.id} value={String(o.id)}>
-                      {o.orderNumber} — {o.feedRange} {o.feedStage}
-                    </SelectItem>
-                  ))}
+                  {(feedOrders as any[]).map((o) => {
+                    const ord = o.order ?? o;
+                    return (
+                      <SelectItem key={ord.id} value={String(ord.id)}>
+                        {ord.orderNumber} — {ord.feedRange} {ord.feedStage}
+                        {o.customerName ? ` (${o.customerName})` : ""}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>

@@ -127,7 +127,7 @@ export function Invoices() {
 
   const openPaymentDialog = (invoice: any) => {
     setPaymentTarget(invoice);
-    const balance = parseFloat(invoice.inclusiveTotal || "0") - (invoice.paidAmount || 0) / 100;
+    const balance = parseFloat(String(invoice.balanceDue || 0));
     setPaymentAmount(balance.toFixed(2));
     setPaymentMethod("EFT");
     setPaymentDate(new Date().toISOString().slice(0, 10));
@@ -296,7 +296,7 @@ export function Invoices() {
                         </p>
                         {invoice.status === "partial" && (
                           <p className="text-sm text-yellow-600 font-medium">
-                            Paid: {formatCurrency((invoice.paidAmount || 0) / 100)} · Balance: {formatCurrency((invoice.balanceDue || 0) / 100)}
+                            Paid: {formatCurrency(invoice.paidAmount || 0)} · Balance: {formatCurrency(invoice.balanceDue || 0)}
                           </p>
                         )}
                       </div>
@@ -591,11 +591,11 @@ export function Invoices() {
                     <>
                       <div className="flex justify-between text-sm text-yellow-600">
                         <span>Paid</span>
-                        <span>{formatCurrency((viewInvoice.paidAmount || 0) / 100)}</span>
+                        <span>{formatCurrency(viewInvoice.paidAmount || 0)}</span>
                       </div>
                       <div className="flex justify-between text-sm font-semibold text-red-600">
                         <span>Balance Due</span>
-                        <span>{formatCurrency((viewInvoice.balanceDue || 0) / 100)}</span>
+                        <span>{formatCurrency(viewInvoice.balanceDue || 0)}</span>
                       </div>
                     </>
                   )}

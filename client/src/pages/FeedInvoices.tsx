@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -16,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Plus, FileText, DollarSign, Clock, CheckCircle, Trash2 } from "lucide-react";
+import { Plus, FileText, DollarSign, Clock, Trash2, Info } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -53,6 +52,18 @@ const defaultLine = (): LineItem => ({
   vatPercent: 15,
 });
 
+const FEED_RANGE_LABELS: Record<string, string> = {
+  premium: "Premium",
+  value: "Value",
+  econo: "Econo",
+};
+
+const FEED_STAGE_LABELS: Record<string, string> = {
+  starter: "Starter",
+  grower: "Grower",
+  finisher: "Finisher",
+};
+
 export default function FeedInvoices() {
   const utils = trpc.useUtils();
 
@@ -64,13 +75,13 @@ export default function FeedInvoices() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({
     customerId: "",
-    deliveryId: "",
     feedOrderId: "",
     invoiceDate: new Date().toISOString().slice(0, 10),
     dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
     notes: "",
   });
   const [lineItems, setLineItems] = useState<LineItem[]>([defaultLine()]);
+  const [priceNotFound, setPriceNotFound] = useState(false);
 
   // Data queries
   const { data: invoices = [], isLoading } = trpc.invoices.listFeedDeliveryInvoices.useQuery({
@@ -80,10 +91,66 @@ export default function FeedInvoices() {
 
   const { data: customers = [] } = trpc.customers.list.useQuery();
   const { data: feedOrders = [] } = trpc.feedOrders.listOrders.useQuery({});
-  const { data: deliveries = [] } = trpc.feedOrders.listDeliveries.useQuery(
-    form.feedOrderId ? parseInt(form.feedOrderId) : 0,
-    { enabled: !!form.feedOrderId }
+
+  // Resolve the selected feed order object
+  const selectedOrderRow = (feedOrders as any[]).find((o) => {
+    const ord = o.order ?? o;
+    return String(ord.id) === form.feedOrderId;
+  });
+  const selectedOrder = selectedOrderRow ? (selectedOrderRow.order ?? selectedOrderRow) : null;
+
+  // Look up the customer price for the selected order's feed range + stage
+  const { data: customerPrice } = trpc.feedManagement.getCustomerFeedPrice.useQuery(
+    {
+      customerId: parseInt(form.customerId),
+      feedRange: selectedOrder?.feedRange as any,
+      feedType: selectedOrder?.feedStage as any,
+    },
+    {
+      enabled: !!(form.customerId && selectedOrder?.feedRange && selectedOrder?.feedStage),
+    }
   );
+
+  // Auto-populate line items when a feed order is selected and customer price is resolved
+  useEffect(() => {
+    if (!selectedOrder) return;
+
+    const qty = parseFloat(selectedOrder.quantityTons || "0");
+    if (qty <= 0) return;
+
+    const pricePerTon = customerPrice
+      ? parseFloat(String(customerPrice.pricePerTon))
+      : selectedOrder.pricePerTon
+      ? parseFloat(String(selectedOrder.pricePerTon))
+      : 0;
+
+    setPriceNotFound(!customerPrice && !selectedOrder.pricePerTon);
+
+    const feedLabel = `${FEED_RANGE_LABELS[selectedOrder.feedRange] ?? selectedOrder.feedRange} ${FEED_STAGE_LABELS[selectedOrder.feedStage] ?? selectedOrder.feedStage} Feed`;
+    const lines: LineItem[] = [
+      {
+        description: `${feedLabel} — ${qty.toFixed(3)} tons`,
+        quantity: qty,
+        unitPrice: pricePerTon,
+        discountPercent: 0,
+        vatPercent: 15,
+      },
+    ];
+
+    // Add transport line if AFGRO delivers and there is a transport cost
+    const transportTotal = parseFloat(selectedOrder.transportCostTotal || "0");
+    if (selectedOrder.transportMode === "afgro_delivers" && transportTotal > 0) {
+      lines.push({
+        description: `Delivery — ${qty.toFixed(3)} tons`,
+        quantity: qty,
+        unitPrice: parseFloat(selectedOrder.transportCostPerTon || "0"),
+        discountPercent: 0,
+        vatPercent: 15,
+      });
+    }
+
+    setLineItems(lines);
+  }, [selectedOrder, customerPrice]);
 
   const createMutation = trpc.invoices.createFeedDeliveryInvoice.useMutation({
     onSuccess: () => {
@@ -98,13 +165,13 @@ export default function FeedInvoices() {
   function resetForm() {
     setForm({
       customerId: "",
-      deliveryId: "",
       feedOrderId: "",
       invoiceDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
       notes: "",
     });
     setLineItems([defaultLine()]);
+    setPriceNotFound(false);
   }
 
   function updateLine(idx: number, field: keyof LineItem, value: string | number) {
@@ -132,8 +199,8 @@ export default function FeedInvoices() {
   }
 
   function handleSubmit() {
-    if (!form.customerId || !form.deliveryId || !form.feedOrderId) {
-      toast.error("Customer, Feed Order, and Delivery are required");
+    if (!form.customerId || !form.feedOrderId) {
+      toast.error("Customer and Feed Order are required");
       return;
     }
     if (lineItems.some((l) => !l.description || l.quantity <= 0)) {
@@ -142,7 +209,6 @@ export default function FeedInvoices() {
     }
     createMutation.mutate({
       customerId: parseInt(form.customerId),
-      deliveryId: parseInt(form.deliveryId),
       feedOrderId: parseInt(form.feedOrderId),
       invoiceDate: form.invoiceDate,
       dueDate: form.dueDate,
@@ -173,7 +239,7 @@ export default function FeedInvoices() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">Feed Invoices</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Customer invoices for feed deliveries
+              Customer invoices for feed — raised before delivery
             </p>
           </div>
           <Button onClick={() => setCreateOpen(true)}>
@@ -261,7 +327,7 @@ export default function FeedInvoices() {
               <div className="text-center py-12 text-muted-foreground">
                 <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
                 <p>No feed invoices found</p>
-                <p className="text-sm mt-1">Create an invoice from a feed order delivery</p>
+                <p className="text-sm mt-1">Create an invoice from a feed order — before delivery</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -280,37 +346,23 @@ export default function FeedInvoices() {
                     </tr>
                   </thead>
                   <tbody>
-                    {invoices.map((inv) => {
-                      const due = inv.dueDate ? new Date(inv.dueDate as string) : null;
-                      const isOverdue =
-                        due && due < new Date() && inv.status !== "paid" && inv.status !== "cancelled";
-                      return (
-                        <tr key={inv.id} className="border-b hover:bg-muted/30 transition-colors">
-                          <td className="py-2 pr-4 font-mono font-medium">{inv.invoiceNumber}</td>
-                          <td className="py-2 pr-4">{inv.customerName ?? "—"}</td>
-                          <td className="py-2 pr-4">{fmtDate(inv.invoiceDate)}</td>
-                          <td className={`py-2 pr-4 ${isOverdue ? "text-red-600 font-medium" : ""}`}>
-                            {fmtDate(inv.dueDate)}
-                          </td>
-                          <td className="py-2 pr-4 text-right">{fmt(inv.exclusiveTotal)}</td>
-                          <td className="py-2 pr-4 text-right">{fmt(inv.vatAmount)}</td>
-                          <td className="py-2 pr-4 text-right font-medium">{fmt(inv.inclusiveTotal)}</td>
-                          <td className="py-2 pr-4 text-right font-medium text-orange-600">
-                            {fmt(inv.balanceDue)}
-                          </td>
-                          <td className="py-2">
-                            <Badge
-                              className={
-                                STATUS_COLORS[isOverdue ? "overdue" : (inv.status as string)] ??
-                                "bg-gray-100 text-gray-700"
-                              }
-                            >
-                              {isOverdue ? "Overdue" : String(inv.status)}
-                            </Badge>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {invoices.map((inv) => (
+                      <tr key={(inv as any).id} className="border-b hover:bg-muted/30">
+                        <td className="py-2 pr-4 font-mono text-xs">{(inv as any).invoiceNumber}</td>
+                        <td className="py-2 pr-4">{(inv as any).customerName || "—"}</td>
+                        <td className="py-2 pr-4">{fmtDate((inv as any).invoiceDate)}</td>
+                        <td className="py-2 pr-4">{fmtDate((inv as any).dueDate)}</td>
+                        <td className="py-2 pr-4 text-right">{fmt((inv as any).exclusiveTotal)}</td>
+                        <td className="py-2 pr-4 text-right">{fmt((inv as any).vatAmount)}</td>
+                        <td className="py-2 pr-4 text-right font-medium">{fmt((inv as any).inclusiveTotal)}</td>
+                        <td className="py-2 pr-4 text-right font-medium">{fmt((inv as any).balanceDue)}</td>
+                        <td className="py-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[(inv as any).status] ?? "bg-gray-100 text-gray-700"}`}>
+                            {(inv as any).status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -320,18 +372,27 @@ export default function FeedInvoices() {
       </div>
 
       {/* Create Invoice Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) resetForm(); }}>
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create Feed Delivery Invoice</DialogTitle>
+            <DialogTitle>Create Feed Invoice</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* Info banner */}
+            <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg text-sm text-blue-700 dark:text-blue-300">
+              <Info className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>Invoicing occurs <strong>before delivery</strong>. Select the feed order to invoice — line items are auto-populated from the customer price table.</span>
+            </div>
+
             {/* Customer + Feed Order */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>Customer *</Label>
-                <Select value={form.customerId} onValueChange={(v) => setForm((f) => ({ ...f, customerId: v }))}>
+                <Select
+                  value={form.customerId}
+                  onValueChange={(v) => setForm((f) => ({ ...f, customerId: v, feedOrderId: "" }))}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select customer" />
                   </SelectTrigger>
@@ -348,43 +409,38 @@ export default function FeedInvoices() {
                 <Label>Feed Order *</Label>
                 <Select
                   value={form.feedOrderId}
-                  onValueChange={(v) => setForm((f) => ({ ...f, feedOrderId: v, deliveryId: "" }))}
+                  onValueChange={(v) => setForm((f) => ({ ...f, feedOrderId: v }))}
+                  disabled={!form.customerId}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select feed order" />
+                    <SelectValue placeholder={form.customerId ? "Select feed order" : "Select customer first"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {(feedOrders as any[]).map((o) => (
-                      <SelectItem key={o.id} value={String(o.id)}>
-                        {o.orderNumber} — {o.feedRange} {o.feedStage}
-                      </SelectItem>
-                    ))}
+                    {(feedOrders as any[])
+                      .filter((o) => {
+                        const ord = o.order ?? o;
+                        return !form.customerId || String(ord.customerId) === form.customerId;
+                      })
+                      .map((o) => {
+                        const ord = o.order ?? o;
+                        return (
+                          <SelectItem key={ord.id} value={String(ord.id)}>
+                            {ord.orderNumber} — {FEED_RANGE_LABELS[ord.feedRange] ?? ord.feedRange} {FEED_STAGE_LABELS[ord.feedStage] ?? ord.feedStage} — {parseFloat(ord.quantityTons).toFixed(3)} tons
+                          </SelectItem>
+                        );
+                      })}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            {/* Delivery */}
-            <div className="space-y-1">
-              <Label>Delivery *</Label>
-              <Select
-                value={form.deliveryId}
-                onValueChange={(v) => setForm((f) => ({ ...f, deliveryId: v }))}
-                disabled={!form.feedOrderId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={form.feedOrderId ? "Select delivery" : "Select feed order first"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {(deliveries as any[]).map((d) => (
-                    <SelectItem key={d.id} value={String(d.id)}>
-                      {d.deliveryDate} — {d.quantityDeliveredTons} tons
-                      {d.customerInvoiceId ? " (already invoiced)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Price not found warning */}
+            {priceNotFound && form.feedOrderId && (
+              <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg text-sm text-amber-700 dark:text-amber-300">
+                <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>No price found in the Customer Feed Price table for this customer + feed range + stage combination. Please enter the unit price manually, or add a price in the Customer Feed Prices page first.</span>
+              </div>
+            )}
 
             {/* Dates */}
             <div className="grid grid-cols-2 gap-4">
@@ -415,16 +471,16 @@ export default function FeedInvoices() {
                   Add Line
                 </Button>
               </div>
-              <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="border rounded-lg overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="text-left p-2">Description</th>
-                      <th className="text-right p-2 w-20">Qty</th>
-                      <th className="text-right p-2 w-28">Unit Price</th>
-                      <th className="text-right p-2 w-20">Disc %</th>
-                      <th className="text-right p-2 w-20">VAT %</th>
-                      <th className="text-right p-2 w-28">Amount</th>
+                      <th className="text-right p-2 w-28">Qty (tons)</th>
+                      <th className="text-right p-2 w-36">Unit Price (R/ton)</th>
+                      <th className="text-right p-2 w-24">Disc %</th>
+                      <th className="text-right p-2 w-24">VAT %</th>
+                      <th className="text-right p-2 w-32">Amount</th>
                       <th className="p-2 w-8"></th>
                     </tr>
                   </thead>
@@ -506,23 +562,17 @@ export default function FeedInvoices() {
                   </tbody>
                   <tfoot className="bg-muted/30 border-t">
                     <tr>
-                      <td colSpan={5} className="p-2 text-right text-sm text-muted-foreground">
-                        Excl. VAT
-                      </td>
+                      <td colSpan={5} className="p-2 text-right text-sm text-muted-foreground">Excl. VAT</td>
                       <td className="p-2 text-right font-medium">{fmt(totals.excl)}</td>
                       <td></td>
                     </tr>
                     <tr>
-                      <td colSpan={5} className="p-2 text-right text-sm text-muted-foreground">
-                        VAT
-                      </td>
+                      <td colSpan={5} className="p-2 text-right text-sm text-muted-foreground">VAT (15%)</td>
                       <td className="p-2 text-right font-medium">{fmt(totals.vat)}</td>
                       <td></td>
                     </tr>
                     <tr>
-                      <td colSpan={5} className="p-2 text-right font-semibold">
-                        Total Incl. VAT
-                      </td>
+                      <td colSpan={5} className="p-2 text-right font-semibold">Total Incl. VAT</td>
                       <td className="p-2 text-right font-bold text-lg">{fmt(totals.incl)}</td>
                       <td></td>
                     </tr>
@@ -544,7 +594,7 @@ export default function FeedInvoices() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button variant="outline" onClick={() => { setCreateOpen(false); resetForm(); }}>
               Cancel
             </Button>
             <Button onClick={handleSubmit} disabled={createMutation.isPending}>
