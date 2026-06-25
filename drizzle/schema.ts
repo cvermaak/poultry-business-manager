@@ -672,6 +672,7 @@ export const invoices = mysqlTable("invoices", {
 	paymentMethod: varchar("paymentMethod", { length: 50 }),
 	paymentDate: timestamp("paymentDate", { mode: 'string' }),
 	sentAt: timestamp("sentAt", { mode: 'string' }),
+	feedOrderId: int("feed_order_id").references(() => feedOrders.id),
 },
 (table) => [
 	index("invoices_invoiceNumber_unique").on(table.invoiceNumber),

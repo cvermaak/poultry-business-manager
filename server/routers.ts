@@ -1865,6 +1865,7 @@ export const appRouter = router({
     listFeedDeliveryInvoices: protectedProcedure
       .input(z.object({
         customerId: z.number().optional(),
+        feedOrderId: z.number().optional(),
         status: z.string().optional(),
       }).optional())
       .query(async ({ input }) => {

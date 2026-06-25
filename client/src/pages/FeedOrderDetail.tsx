@@ -23,7 +23,79 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { ArrowLeft, Truck, Package, AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import { ArrowLeft, Truck, Package, AlertTriangle, CheckCircle, Clock, FileText, ExternalLink } from "lucide-react";
+import { Link as WouterLink } from "wouter";
+
+function FeedInvoiceStatus({ orderId }: { orderId: number }) {
+  const { data: feedInvoices = [] } = trpc.invoices.listFeedDeliveryInvoices.useQuery(
+    { feedOrderId: orderId },
+    { enabled: orderId > 0 }
+  );
+
+  const fmt = (v: unknown) =>
+    new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(
+      parseFloat(String(v ?? 0))
+    );
+
+  const statusColors: Record<string, string> = {
+    draft: "bg-gray-100 text-gray-700",
+    sent: "bg-blue-100 text-blue-700",
+    paid: "bg-green-100 text-green-700",
+    partial: "bg-yellow-100 text-yellow-700",
+    overdue: "bg-red-100 text-red-700",
+    cancelled: "bg-red-100 text-red-700",
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-sm">Customer Invoice(s)</CardTitle>
+        <WouterLink href="/feed-invoices">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
+            <ExternalLink className="w-3 h-3" />
+            Manage Invoices
+          </Button>
+        </WouterLink>
+      </CardHeader>
+      <CardContent>
+        {(feedInvoices as any[]).length === 0 ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <FileText className="w-4 h-4" />
+            <span>No customer invoice raised for this order yet.</span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {(feedInvoices as any[]).map((inv: any) => (
+              <div key={inv.id} className="flex items-center justify-between p-2 rounded border bg-muted/20">
+                <div className="flex items-center gap-3">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="font-mono text-sm font-medium">{inv.invoiceNumber}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString("en-ZA") : ""}
+                      {inv.customerName ? ` · ${inv.customerName}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className="text-sm font-medium">{fmt(inv.inclusiveTotal)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Paid: {fmt(inv.paidAmount)} · Balance: {fmt(inv.balanceDue)}
+                    </p>
+                  </div>
+                  <Badge className={statusColors[inv.status] ?? "bg-gray-100 text-gray-700"}>
+                    {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -392,6 +464,9 @@ export default function FeedOrderDetail() {
             )}
           </CardContent>
         </Card>
+
+        {/* Feed Invoice Status */}
+        <FeedInvoiceStatus orderId={orderId} />
 
         {/* Notes */}
         {order.notes && (

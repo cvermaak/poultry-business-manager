@@ -4603,6 +4603,7 @@ export async function createFeedDeliveryInvoice(data: {
     vatAmount: String(vatAmount.toFixed(2)),
     inclusiveTotal: String(inclusiveTotal.toFixed(2)),
     vatPercentage: String(vatPct),
+    feedOrderId: data.feedOrderId,
   });
 
   // Retrieve the saved invoice
@@ -4642,6 +4643,7 @@ export async function createFeedDeliveryInvoice(data: {
 
 export async function listFeedDeliveryInvoices(filters?: {
   customerId?: number;
+  feedOrderId?: number;
   status?: string;
 }) {
   const db = await getDb();
@@ -4650,6 +4652,7 @@ export async function listFeedDeliveryInvoices(filters?: {
   // Feed delivery invoices are identified by invoiceNumber starting with 'FEED-'
   const conditions = [like(invoices.invoiceNumber, 'FEED-%')];
   if (filters?.customerId) conditions.push(eq(invoices.customerId, filters.customerId));
+  if (filters?.feedOrderId) conditions.push(eq(invoices.feedOrderId, filters.feedOrderId));
   if (filters?.status) conditions.push(eq(invoices.status, filters.status as any));
 
   const rows = await db
@@ -4666,6 +4669,7 @@ export async function listFeedDeliveryInvoices(filters?: {
       paidAmount: invoices.paidAmount,
       balanceDue: invoices.balanceDue,
       status: invoices.status,
+      feedOrderId: invoices.feedOrderId,
       notes: invoices.notes,
       createdAt: invoices.createdAt,
     })

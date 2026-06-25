@@ -15,11 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Plus, FileText, DollarSign, Clock, Trash2, Info } from "lucide-react";
+import { Plus, FileText, DollarSign, Clock, Trash2, Info, Eye, Download, Send, XCircle, CreditCard } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
   sent: "bg-blue-100 text-blue-700",
+  partial: "bg-yellow-100 text-yellow-700",
   paid: "bg-green-100 text-green-700",
   overdue: "bg-red-100 text-red-700",
   cancelled: "bg-gray-100 text-gray-500",
@@ -82,6 +83,23 @@ export default function FeedInvoices() {
   });
   const [lineItems, setLineItems] = useState<LineItem[]>([defaultLine()]);
   const [priceNotFound, setPriceNotFound] = useState(false);
+
+  // View/detail dialog
+  const [viewInvoice, setViewInvoice] = useState<any>(null);
+  const [viewOpen, setViewOpen] = useState(false);
+  const { data: viewItems = [] } = trpc.invoices.getItems.useQuery(
+    viewInvoice?.id ?? 0,
+    { enabled: !!viewInvoice?.id }
+  );
+
+  // Payment dialog
+  const [payInvoice, setPayInvoice] = useState<any>(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const [payForm, setPayForm] = useState({
+    amount: "",
+    paymentMethod: "eft",
+    paymentDate: new Date().toISOString().slice(0, 10),
+  });
 
   // Data queries
   const { data: invoices = [], isLoading } = trpc.invoices.listFeedDeliveryInvoices.useQuery({
@@ -152,6 +170,7 @@ export default function FeedInvoices() {
     setLineItems(lines);
   }, [selectedOrder, customerPrice]);
 
+  // Mutations
   const createMutation = trpc.invoices.createFeedDeliveryInvoice.useMutation({
     onSuccess: () => {
       toast.success("Feed invoice created successfully");
@@ -160,6 +179,53 @@ export default function FeedInvoices() {
       resetForm();
     },
     onError: (err) => toast.error(`Failed to create invoice: ${err.message}`),
+  });
+
+  const payMutation = trpc.invoices.recordPayment.useMutation({
+    onSuccess: () => {
+      toast.success("Payment recorded successfully");
+      utils.invoices.listFeedDeliveryInvoices.invalidate();
+      setPayOpen(false);
+      setPayInvoice(null);
+    },
+    onError: (err) => toast.error(`Failed to record payment: ${err.message}`),
+  });
+
+  const sendMutation = trpc.invoices.markAsSent.useMutation({
+    onSuccess: () => {
+      toast.success("Invoice marked as sent");
+      utils.invoices.listFeedDeliveryInvoices.invalidate();
+    },
+    onError: (err) => toast.error(`Failed to update invoice: ${err.message}`),
+  });
+
+  const cancelMutation = trpc.invoices.cancel.useMutation({
+    onSuccess: () => {
+      toast.success("Invoice cancelled");
+      utils.invoices.listFeedDeliveryInvoices.invalidate();
+    },
+    onError: (err) => toast.error(`Failed to cancel invoice: ${err.message}`),
+  });
+
+  const pdfMutation = trpc.invoices.generatePDF.useMutation({
+    onSuccess: (data) => {
+      const binaryString = atob(data.pdfBuffer);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = data.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success("Invoice downloaded");
+    },
+    onError: (err) => toast.error(`PDF generation failed: ${err.message}`),
   });
 
   function resetForm() {
@@ -186,9 +252,9 @@ export default function FeedInvoices() {
     setLineItems((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function calcTotals() {
+  function calcTotals(items: LineItem[] = lineItems) {
     let excl = 0, vat = 0;
-    for (const l of lineItems) {
+    for (const l of items) {
       const sub = l.quantity * l.unitPrice;
       const disc = sub * (l.discountPercent / 100);
       const e = sub - disc;
@@ -217,13 +283,28 @@ export default function FeedInvoices() {
     });
   }
 
+  function handlePay(inv: any) {
+    setPayInvoice(inv);
+    setPayForm({
+      amount: parseFloat(String(inv.balanceDue ?? 0)).toFixed(2),
+      paymentMethod: "eft",
+      paymentDate: new Date().toISOString().slice(0, 10),
+    });
+    setPayOpen(true);
+  }
+
+  function handleView(inv: any) {
+    setViewInvoice(inv);
+    setViewOpen(true);
+  }
+
   const totals = calcTotals();
 
   // Summary stats
-  const totalOutstanding = invoices
+  const totalOutstanding = (invoices as any[])
     .filter((i) => i.status !== "paid" && i.status !== "cancelled")
     .reduce((s, i) => s + parseFloat(String(i.balanceDue ?? 0)), 0);
-  const totalOverdue = invoices
+  const totalOverdue = (invoices as any[])
     .filter((i) => {
       if (i.status === "paid" || i.status === "cancelled") return false;
       const due = i.dueDate ? new Date(i.dueDate as string) : null;
@@ -256,7 +337,7 @@ export default function FeedInvoices() {
                 <FileText className="w-8 h-8 text-blue-500" />
                 <div>
                   <p className="text-sm text-muted-foreground">Total Invoices</p>
-                  <p className="text-2xl font-bold">{invoices.length}</p>
+                  <p className="text-2xl font-bold">{(invoices as any[]).length}</p>
                 </div>
               </div>
             </CardContent>
@@ -295,6 +376,7 @@ export default function FeedInvoices() {
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="draft">Draft</SelectItem>
               <SelectItem value="sent">Sent</SelectItem>
+              <SelectItem value="partial">Partial</SelectItem>
               <SelectItem value="paid">Paid</SelectItem>
               <SelectItem value="overdue">Overdue</SelectItem>
               <SelectItem value="cancelled">Cancelled</SelectItem>
@@ -306,7 +388,7 @@ export default function FeedInvoices() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Customers</SelectItem>
-              {customers.map((c) => (
+              {(customers as any[]).map((c) => (
                 <SelectItem key={c.id} value={String(c.id)}>
                   {c.name}
                 </SelectItem>
@@ -323,7 +405,7 @@ export default function FeedInvoices() {
           <CardContent>
             {isLoading ? (
               <div className="text-center py-8 text-muted-foreground">Loading invoices…</div>
-            ) : invoices.length === 0 ? (
+            ) : (invoices as any[]).length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
                 <p>No feed invoices found</p>
@@ -334,32 +416,97 @@ export default function FeedInvoices() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-muted-foreground">
-                      <th className="text-left py-2 pr-4">Invoice #</th>
-                      <th className="text-left py-2 pr-4">Customer</th>
-                      <th className="text-left py-2 pr-4">Invoice Date</th>
-                      <th className="text-left py-2 pr-4">Due Date</th>
-                      <th className="text-right py-2 pr-4">Excl. VAT</th>
-                      <th className="text-right py-2 pr-4">VAT</th>
-                      <th className="text-right py-2 pr-4">Total Incl.</th>
-                      <th className="text-right py-2 pr-4">Balance Due</th>
-                      <th className="text-left py-2">Status</th>
+                      <th className="text-left py-2 pr-3">Invoice #</th>
+                      <th className="text-left py-2 pr-3">Customer</th>
+                      <th className="text-left py-2 pr-3">Invoice Date</th>
+                      <th className="text-left py-2 pr-3">Due Date</th>
+                      <th className="text-right py-2 pr-3">Excl. VAT</th>
+                      <th className="text-right py-2 pr-3">VAT</th>
+                      <th className="text-right py-2 pr-3">Total Incl.</th>
+                      <th className="text-right py-2 pr-3">Paid</th>
+                      <th className="text-right py-2 pr-3">Balance Due</th>
+                      <th className="text-left py-2 pr-3">Status</th>
+                      <th className="py-2 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {invoices.map((inv) => (
-                      <tr key={(inv as any).id} className="border-b hover:bg-muted/30">
-                        <td className="py-2 pr-4 font-mono text-xs">{(inv as any).invoiceNumber}</td>
-                        <td className="py-2 pr-4">{(inv as any).customerName || "—"}</td>
-                        <td className="py-2 pr-4">{fmtDate((inv as any).invoiceDate)}</td>
-                        <td className="py-2 pr-4">{fmtDate((inv as any).dueDate)}</td>
-                        <td className="py-2 pr-4 text-right">{fmt((inv as any).exclusiveTotal)}</td>
-                        <td className="py-2 pr-4 text-right">{fmt((inv as any).vatAmount)}</td>
-                        <td className="py-2 pr-4 text-right font-medium">{fmt((inv as any).inclusiveTotal)}</td>
-                        <td className="py-2 pr-4 text-right font-medium">{fmt((inv as any).balanceDue)}</td>
-                        <td className="py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[(inv as any).status] ?? "bg-gray-100 text-gray-700"}`}>
-                            {(inv as any).status}
+                    {(invoices as any[]).map((inv) => (
+                      <tr key={inv.id} className="border-b hover:bg-muted/30">
+                        <td className="py-2 pr-3 font-mono text-xs">{inv.invoiceNumber}</td>
+                        <td className="py-2 pr-3">{inv.customerName || "—"}</td>
+                        <td className="py-2 pr-3">{fmtDate(inv.invoiceDate)}</td>
+                        <td className="py-2 pr-3">{fmtDate(inv.dueDate)}</td>
+                        <td className="py-2 pr-3 text-right">{fmt(inv.exclusiveTotal)}</td>
+                        <td className="py-2 pr-3 text-right">{fmt(inv.vatAmount)}</td>
+                        <td className="py-2 pr-3 text-right font-medium">{fmt(inv.inclusiveTotal)}</td>
+                        <td className="py-2 pr-3 text-right text-green-700">{fmt(inv.paidAmount)}</td>
+                        <td className="py-2 pr-3 text-right font-semibold">{fmt(inv.balanceDue)}</td>
+                        <td className="py-2 pr-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[inv.status] ?? "bg-gray-100 text-gray-700"}`}>
+                            {inv.status}
                           </span>
+                        </td>
+                        <td className="py-2 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {/* View */}
+                            <Button
+                              variant="ghost" size="sm"
+                              className="h-7 w-7 p-0"
+                              title="View details"
+                              onClick={() => handleView(inv)}
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </Button>
+                            {/* Download PDF */}
+                            <Button
+                              variant="ghost" size="sm"
+                              className="h-7 w-7 p-0"
+                              title="Download PDF"
+                              disabled={pdfMutation.isPending}
+                              onClick={() => pdfMutation.mutate(inv.id)}
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </Button>
+                            {/* Mark as Sent (draft only) */}
+                            {inv.status === "draft" && (
+                              <Button
+                                variant="ghost" size="sm"
+                                className="h-7 w-7 p-0 text-blue-600 hover:text-blue-800"
+                                title="Mark as sent"
+                                disabled={sendMutation.isPending}
+                                onClick={() => sendMutation.mutate({ invoiceId: inv.id, sentAt: new Date().toISOString() })}
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                            {/* Record Payment (not paid/cancelled) */}
+                            {inv.status !== "paid" && inv.status !== "cancelled" && (
+                              <Button
+                                variant="ghost" size="sm"
+                                className="h-7 w-7 p-0 text-green-600 hover:text-green-800"
+                                title="Record payment"
+                                onClick={() => handlePay(inv)}
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                            {/* Cancel (draft or sent only) */}
+                            {(inv.status === "draft" || inv.status === "sent") && (
+                              <Button
+                                variant="ghost" size="sm"
+                                className="h-7 w-7 p-0 text-red-500 hover:text-red-700"
+                                title="Cancel invoice"
+                                disabled={cancelMutation.isPending}
+                                onClick={() => {
+                                  if (confirm(`Cancel invoice ${inv.invoiceNumber}?`)) {
+                                    cancelMutation.mutate(inv.id);
+                                  }
+                                }}
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -371,7 +518,192 @@ export default function FeedInvoices() {
         </Card>
       </div>
 
-      {/* Create Invoice Dialog */}
+      {/* ── View / Detail Dialog ── */}
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Invoice {viewInvoice?.invoiceNumber}</DialogTitle>
+          </DialogHeader>
+          {viewInvoice && (
+            <div className="space-y-4 text-sm">
+              {/* Meta */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-muted-foreground text-xs">Customer</p>
+                  <p className="font-medium">{viewInvoice.customerName || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Status</p>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[viewInvoice.status] ?? "bg-gray-100 text-gray-700"}`}>
+                    {viewInvoice.status}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Invoice Date</p>
+                  <p className="font-medium">{fmtDate(viewInvoice.invoiceDate)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">Due Date</p>
+                  <p className="font-medium">{fmtDate(viewInvoice.dueDate)}</p>
+                </div>
+              </div>
+
+              {/* Line Items */}
+              <div>
+                <p className="font-semibold mb-2">Line Items</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border rounded-lg overflow-hidden">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-2">Description</th>
+                        <th className="text-right p-2">Qty</th>
+                        <th className="text-right p-2">Unit Price</th>
+                        <th className="text-right p-2">Disc %</th>
+                        <th className="text-right p-2">VAT %</th>
+                        <th className="text-right p-2">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(viewItems as any[]).length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-3 text-center text-muted-foreground">No line items stored</td>
+                        </tr>
+                      ) : (viewItems as any[]).map((item: any, idx: number) => {
+                        const qty = parseFloat(String(item.quantity || 1));
+                        const price = (item.unitPrice || 0) / 100;
+                        const disc = item.discountPercent || 0;
+                        const sub = qty * price * (1 - disc / 100);
+                        return (
+                          <tr key={idx} className="border-t">
+                            <td className="p-2">{item.description}</td>
+                            <td className="p-2 text-right">{qty}</td>
+                            <td className="p-2 text-right">{fmt(price)}</td>
+                            <td className="p-2 text-right">{disc}%</td>
+                            <td className="p-2 text-right">{item.taxRate ?? 15}%</td>
+                            <td className="p-2 text-right font-medium">{fmt(sub)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="bg-muted/30 border-t">
+                      <tr>
+                        <td colSpan={5} className="p-2 text-right text-muted-foreground">Excl. VAT</td>
+                        <td className="p-2 text-right font-medium">{fmt(viewInvoice.exclusiveTotal)}</td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="p-2 text-right text-muted-foreground">VAT</td>
+                        <td className="p-2 text-right font-medium">{fmt(viewInvoice.vatAmount)}</td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="p-2 text-right font-semibold">Total Incl. VAT</td>
+                        <td className="p-2 text-right font-bold text-lg">{fmt(viewInvoice.inclusiveTotal)}</td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="p-2 text-right text-green-700">Paid</td>
+                        <td className="p-2 text-right text-green-700 font-medium">{fmt(viewInvoice.paidAmount)}</td>
+                      </tr>
+                      <tr>
+                        <td colSpan={5} className="p-2 text-right font-semibold">Balance Due</td>
+                        <td className="p-2 text-right font-bold text-red-600">{fmt(viewInvoice.balanceDue)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              {/* Notes */}
+              {viewInvoice.notes && (
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Notes</p>
+                  <p className="text-sm bg-muted/30 rounded p-2">{viewInvoice.notes}</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
+            {viewInvoice && (
+              <Button
+                onClick={() => pdfMutation.mutate(viewInvoice.id)}
+                disabled={pdfMutation.isPending}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                {pdfMutation.isPending ? "Generating…" : "Download PDF"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Record Payment Dialog ── */}
+      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Record Payment</DialogTitle>
+          </DialogHeader>
+          {payInvoice && (
+            <div className="space-y-4 py-2">
+              <div className="text-sm text-muted-foreground">
+                <span className="font-mono font-medium text-foreground">{payInvoice.invoiceNumber}</span>
+                {" · "}{payInvoice.customerName}
+                {" · Balance: "}<span className="font-semibold text-foreground">{fmt(payInvoice.balanceDue)}</span>
+              </div>
+              <div className="space-y-1">
+                <Label>Amount (R) *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={payForm.amount}
+                  onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Payment Method *</Label>
+                <Select value={payForm.paymentMethod} onValueChange={(v) => setPayForm((f) => ({ ...f, paymentMethod: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="eft">EFT</SelectItem>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="cheque">Cheque</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Payment Date *</Label>
+                <Input
+                  type="date"
+                  value={payForm.paymentDate}
+                  onChange={(e) => setPayForm((f) => ({ ...f, paymentDate: e.target.value }))}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (!payInvoice || !payForm.amount || parseFloat(payForm.amount) <= 0) {
+                  toast.error("Enter a valid payment amount");
+                  return;
+                }
+                payMutation.mutate({
+                  invoiceId: payInvoice.id,
+                  amount: parseFloat(payForm.amount),
+                  paymentMethod: payForm.paymentMethod,
+                  paymentDate: payForm.paymentDate,
+                });
+              }}
+              disabled={payMutation.isPending}
+            >
+              {payMutation.isPending ? "Saving…" : "Record Payment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Create Invoice Dialog ── */}
       <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) resetForm(); }}>
         <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -397,7 +729,7 @@ export default function FeedInvoices() {
                     <SelectValue placeholder="Select customer" />
                   </SelectTrigger>
                   <SelectContent>
-                    {customers.map((c) => (
+                    {(customers as any[]).map((c) => (
                       <SelectItem key={c.id} value={String(c.id)}>
                         {c.name}
                       </SelectItem>
@@ -435,10 +767,10 @@ export default function FeedInvoices() {
             </div>
 
             {/* Price not found warning */}
-            {priceNotFound && form.feedOrderId && (
+            {priceNotFound && (
               <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg text-sm text-amber-700 dark:text-amber-300">
                 <Info className="w-4 h-4 mt-0.5 shrink-0" />
-                <span>No price found in the Customer Feed Price table for this customer + feed range + stage combination. Please enter the unit price manually, or add a price in the Customer Feed Prices page first.</span>
+                <span>No price found in the Customer Feed Price table for this combination. Enter the unit price manually below.</span>
               </div>
             )}
 
@@ -471,26 +803,26 @@ export default function FeedInvoices() {
                   Add Line
                 </Button>
               </div>
-              <div className="border rounded-lg overflow-x-auto">
-                <table className="w-full text-sm min-w-[640px]">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" style={{ minWidth: 640 }}>
                   <thead className="bg-muted/50">
                     <tr>
-                      <th className="text-left p-2">Description</th>
-                      <th className="text-right p-2 w-28">Qty (tons)</th>
-                      <th className="text-right p-2 w-36">Unit Price (R/ton)</th>
-                      <th className="text-right p-2 w-24">Disc %</th>
-                      <th className="text-right p-2 w-24">VAT %</th>
-                      <th className="text-right p-2 w-32">Amount</th>
-                      <th className="p-2 w-8"></th>
+                      <th className="text-left p-2 w-[35%]">Description</th>
+                      <th className="text-right p-2 w-[12%]">Qty (tons)</th>
+                      <th className="text-right p-2 w-[15%]">Unit Price (R/ton)</th>
+                      <th className="text-right p-2 w-[10%]">Disc %</th>
+                      <th className="text-right p-2 w-[10%]">VAT %</th>
+                      <th className="text-right p-2 w-[13%]">Amount</th>
+                      <th className="p-2 w-[5%]"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {lineItems.map((l, idx) => {
                       const sub = l.quantity * l.unitPrice;
                       const disc = sub * (l.discountPercent / 100);
-                      const excl = sub - disc;
-                      const vat = excl * (l.vatPercent / 100);
-                      const amount = excl + vat;
+                      const e = sub - disc;
+                      const vat = e * (l.vatPercent / 100);
+                      const total = e + vat;
                       return (
                         <tr key={idx} className="border-t">
                           <td className="p-1">
@@ -503,9 +835,7 @@ export default function FeedInvoices() {
                           </td>
                           <td className="p-1">
                             <Input
-                              type="number"
-                              min={0}
-                              step="0.001"
+                              type="number" step="0.001" min="0"
                               value={l.quantity}
                               onChange={(e) => updateLine(idx, "quantity", parseFloat(e.target.value) || 0)}
                               className="h-8 text-sm text-right"
@@ -513,9 +843,7 @@ export default function FeedInvoices() {
                           </td>
                           <td className="p-1">
                             <Input
-                              type="number"
-                              min={0}
-                              step="0.01"
+                              type="number" step="0.01" min="0"
                               value={l.unitPrice}
                               onChange={(e) => updateLine(idx, "unitPrice", parseFloat(e.target.value) || 0)}
                               className="h-8 text-sm text-right"
@@ -523,9 +851,7 @@ export default function FeedInvoices() {
                           </td>
                           <td className="p-1">
                             <Input
-                              type="number"
-                              min={0}
-                              max={100}
+                              type="number" step="1" min="0" max="100"
                               value={l.discountPercent}
                               onChange={(e) => updateLine(idx, "discountPercent", parseFloat(e.target.value) || 0)}
                               className="h-8 text-sm text-right"
@@ -533,17 +859,13 @@ export default function FeedInvoices() {
                           </td>
                           <td className="p-1">
                             <Input
-                              type="number"
-                              min={0}
-                              max={100}
+                              type="number" step="1" min="0" max="100"
                               value={l.vatPercent}
                               onChange={(e) => updateLine(idx, "vatPercent", parseFloat(e.target.value) || 0)}
                               className="h-8 text-sm text-right"
                             />
                           </td>
-                          <td className="p-1 text-right font-medium pr-2">
-                            {fmt(amount)}
-                          </td>
+                          <td className="p-1 text-right font-medium pr-2">{fmt(total)}</td>
                           <td className="p-1">
                             {lineItems.length > 1 && (
                               <Button

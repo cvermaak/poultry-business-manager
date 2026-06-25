@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Plus, Factory, AlertTriangle, CheckCircle, Clock, DollarSign } from "lucide-react";
+import { Plus, Factory, AlertTriangle, CheckCircle, Clock, DollarSign, Eye } from "lucide-react";
 
 const fmt = (v: unknown) =>
   new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(
@@ -68,6 +68,10 @@ export default function MillInvoices() {
     amountIncl: "",
     notes: "",
   });
+
+  // View dialog
+  const [viewInvoice, setViewInvoice] = useState<any>(null);
+  const [viewOpen, setViewOpen] = useState(false);
 
   // Payment dialog
   const [payOpen, setPayOpen] = useState(false);
@@ -312,22 +316,32 @@ export default function MillInvoices() {
                           <AgingBadge dueDate={inv.dueDate} status={inv.status} />
                         </td>
                         <td className="py-2">
-                          {inv.status !== "paid" && (
+                          <div className="flex items-center gap-1">
                             <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs"
-                              onClick={() => openPayDialog(inv)}
+                              size="sm" variant="ghost"
+                              className="h-7 w-7 p-0"
+                              title="View details"
+                              onClick={() => { setViewInvoice(inv); setViewOpen(true); }}
                             >
-                              <DollarSign className="w-3 h-3 mr-1" />
-                              Record Payment
+                              <Eye className="w-3.5 h-3.5" />
                             </Button>
-                          )}
-                          {inv.status === "paid" && (
-                            <span className="text-xs text-muted-foreground">
-                              Paid {fmtDate(inv.paidDate)}
-                            </span>
-                          )}
+                            {inv.status !== "paid" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => openPayDialog(inv)}
+                              >
+                                <DollarSign className="w-3 h-3 mr-1" />
+                                Record Payment
+                              </Button>
+                            )}
+                            {inv.status === "paid" && (
+                              <span className="text-xs text-muted-foreground">
+                                Paid {fmtDate(inv.paidDate)}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -338,6 +352,95 @@ export default function MillInvoices() {
           </CardContent>
         </Card>
       </div>
+
+      {/* View / Detail Dialog */}
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Mill Invoice — {viewInvoice?.invoiceNumber}</DialogTitle>
+          </DialogHeader>
+          {viewInvoice && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Feed Order</p>
+                  <p className="font-medium">{viewInvoice.orderNumber ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Customer</p>
+                  <p className="font-medium">{viewInvoice.customerName ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Invoice Date</p>
+                  <p className="font-medium">{fmtDate(viewInvoice.invoiceDate)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Due Date (14-day credit)</p>
+                  <p className="font-medium">{fmtDate(viewInvoice.dueDate)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <AgingBadge dueDate={viewInvoice.dueDate} status={viewInvoice.status} />
+                </div>
+                {viewInvoice.status === "paid" && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Paid Date</p>
+                    <p className="font-medium">{fmtDate(viewInvoice.paidDate)}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody>
+                    <tr className="border-b">
+                      <td className="p-2 text-muted-foreground">Amount Excl. VAT</td>
+                      <td className="p-2 text-right font-medium">{fmt(viewInvoice.amountExcl)}</td>
+                    </tr>
+                    <tr className="border-b">
+                      <td className="p-2 text-muted-foreground">VAT</td>
+                      <td className="p-2 text-right font-medium">{fmt(viewInvoice.vatAmount)}</td>
+                    </tr>
+                    <tr className="bg-muted/30">
+                      <td className="p-2 font-semibold">Total Incl. VAT</td>
+                      <td className="p-2 text-right font-bold text-lg">{fmt(viewInvoice.amountIncl)}</td>
+                    </tr>
+                    {viewInvoice.status === "paid" && (
+                      <tr>
+                        <td className="p-2 text-green-700">Paid Amount</td>
+                        <td className="p-2 text-right text-green-700 font-medium">{fmt(viewInvoice.paidAmount)}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {viewInvoice.paymentReference && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Payment Reference</p>
+                  <p className="font-mono text-sm">{viewInvoice.paymentReference}</p>
+                </div>
+              )}
+
+              {viewInvoice.notes && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Notes</p>
+                  <p className="bg-muted/30 rounded p-2">{viewInvoice.notes}</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewOpen(false)}>Close</Button>
+            {viewInvoice && viewInvoice.status !== "paid" && (
+              <Button onClick={() => { setViewOpen(false); openPayDialog(viewInvoice); }}>
+                <DollarSign className="w-4 h-4 mr-2" />
+                Record Payment
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

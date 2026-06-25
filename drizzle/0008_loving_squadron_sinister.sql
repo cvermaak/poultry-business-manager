@@ -1,0 +1,2 @@
+ALTER TABLE `invoices` ADD `feed_order_id` int;--> statement-breakpoint
+ALTER TABLE `invoices` ADD CONSTRAINT `invoices_feed_order_id_feed_orders_id_fk` FOREIGN KEY (`feed_order_id`) REFERENCES `feed_orders`(`id`) ON DELETE no action ON UPDATE no action;
