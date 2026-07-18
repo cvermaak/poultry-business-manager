@@ -556,6 +556,9 @@ export const inventoryItems = mysqlTable("inventory_items", {
 	primaryClass: varchar("primary_class", { length: 2 }),
 	subType: varchar("sub_type", { length: 2 }),
 	form: varchar({ length: 3 }),
+	baseUomCode: varchar("base_uom_code", { length: 20 }),
+	purchaseUomCode: varchar("purchase_uom_code", { length: 20 }),
+	issueUomCode: varchar("issue_uom_code", { length: 20 }),
 },
 (table) => [
 	index("inventory_items_itemNumber_unique").on(table.itemNumber),
@@ -597,6 +600,8 @@ export const inventoryTransactions = mysqlTable("inventory_transactions", {
 	locationId: int().references(() => inventoryLocations.id),
 	transactionType: mysqlEnum(['receipt','issue','transfer','adjustment']).notNull(),
 	quantity: decimal({ precision: 10, scale: 2 }).notNull(),
+	uomCode: varchar("uom_code", { length: 20 }),
+	quantityInBaseUnit: decimal("quantity_in_base_unit", { precision: 10, scale: 4 }),
 	unitCost: int(),
 	totalCost: int(),
 	referenceType: varchar({ length: 50 }),
@@ -1323,4 +1328,38 @@ export const millInvoices = mysqlTable("mill_invoices", {
   index("idx_mill_invoices_feed_order").on(table.feedOrderId),
   index("idx_mill_invoices_status").on(table.status),
   index("idx_mill_invoices_due_date").on(table.dueDate),
+]);
+
+// ─── Units of Measure ──────────────────────────────────────────────────────
+// Master list of units of measure used across inventory.
+export const unitOfMeasures = mysqlTable("unit_of_measures", {
+  code: varchar({ length: 20 }).notNull().primaryKey(),
+  name: varchar({ length: 100 }).notNull(),
+  symbol: varchar({ length: 20 }).notNull(),
+  uomType: mysqlEnum("uom_type", ['weight','volume','count','packaging','other']).default('other').notNull(),
+  baseUomCode: varchar("base_uom_code", { length: 20 }),
+  conversionFactor: decimal("conversion_factor", { precision: 18, scale: 8 }).default('1.00000000').notNull(),
+  isBase: tinyint("is_base").default(0).notNull(),
+  isActive: tinyint("is_active").default(1).notNull(),
+  createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
+},
+(table) => [
+  index("idx_uom_type").on(table.uomType),
+  index("idx_uom_is_active").on(table.isActive),
+]);
+
+// ─── Item Unit Conversions ─────────────────────────────────────────────────
+// Per-item unit conversion factors (e.g., 1 bag50 = 50 kg for Feed Starter).
+export const itemUnitConversions = mysqlTable("item_unit_conversions", {
+  id: int().autoincrement().notNull().primaryKey(),
+  itemId: int("item_id").notNull().references(() => inventoryItems.id),
+  fromUomCode: varchar("from_uom_code", { length: 20 }).notNull(),
+  toUomCode: varchar("to_uom_code", { length: 20 }).notNull(),
+  conversionFactor: decimal("conversion_factor", { precision: 18, scale: 8 }).notNull(),
+  notes: text(),
+  createdAt: timestamp({ mode: 'string' }).defaultNow().notNull(),
+},
+(table) => [
+  index("idx_iuc_item_id").on(table.itemId),
+  index("idx_iuc_from_to").on(table.fromUomCode, table.toUomCode),
 ]);

@@ -4,6 +4,154 @@ import { eq, and, sql, desc, gte, lte, like, gt } from "drizzle-orm";
 import { formatSKU } from "../shared/sku-constants";
 
 // ============================================================================
+// UNITS OF MEASURE HELPERS
+// ============================================================================
+
+/**
+ * List all active units of measure from the master table.
+ */
+export async function listUnitsOfMeasure() {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.execute(sql`
+    SELECT code, name, symbol, uom_type, base_uom_code, conversion_factor, is_base, is_active
+    FROM unit_of_measures
+    WHERE is_active = 1
+    ORDER BY uom_type, name
+  `);
+  return (rows[0] as any[]).map((r: any) => ({
+    code: r.code as string,
+    name: r.name as string,
+    symbol: r.symbol as string,
+    uomType: r.uom_type as string,
+    baseUomCode: r.base_uom_code as string | null,
+    conversionFactor: parseFloat(r.conversion_factor),
+    isBase: Boolean(r.is_base),
+  }));
+}
+
+/**
+ * List all unit conversions defined for a specific inventory item.
+ */
+export async function listItemUnitConversions(itemId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.execute(sql`
+    SELECT id, item_id, from_uom_code, to_uom_code, conversion_factor, notes
+    FROM item_unit_conversions
+    WHERE item_id = ${itemId}
+    ORDER BY from_uom_code
+  `);
+  return (rows[0] as any[]).map((r: any) => ({
+    id: r.id as number,
+    itemId: r.item_id as number,
+    fromUomCode: r.from_uom_code as string,
+    toUomCode: r.to_uom_code as string,
+    conversionFactor: parseFloat(r.conversion_factor),
+    notes: r.notes as string | null,
+  }));
+}
+
+/**
+ * Save (upsert) a unit conversion for an inventory item.
+ */
+export async function saveItemUnitConversion(data: {
+  itemId: number;
+  fromUomCode: string;
+  toUomCode: string;
+  conversionFactor: number;
+  notes?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.execute(sql`
+    INSERT INTO item_unit_conversions (item_id, from_uom_code, to_uom_code, conversion_factor, notes)
+    VALUES (${data.itemId}, ${data.fromUomCode}, ${data.toUomCode}, ${data.conversionFactor}, ${data.notes ?? null})
+    ON DUPLICATE KEY UPDATE
+      conversion_factor = VALUES(conversion_factor),
+      notes = VALUES(notes)
+  `);
+  return true;
+}
+
+/**
+ * Delete a unit conversion by id.
+ */
+export async function deleteItemUnitConversion(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.execute(sql`DELETE FROM item_unit_conversions WHERE id = ${id}`);
+  return true;
+}
+
+/**
+ * Convert a quantity from one unit to another for a given item.
+ * Resolves via:
+ *   1. item-specific conversion table
+ *   2. global UoM conversion_factor (both units share same base_uom_code)
+ *   3. identity (from === to)
+ * Throws if no conversion path exists.
+ */
+export async function convertQuantity(
+  itemId: number,
+  quantity: number,
+  fromUomCode: string,
+  toUomCode: string
+): Promise<number> {
+  if (fromUomCode === toUomCode) return quantity;
+
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  // 1. Check item-specific conversions (direct)
+  const itemConv = await db.execute(sql`
+    SELECT conversion_factor FROM item_unit_conversions
+    WHERE item_id = ${itemId} AND from_uom_code = ${fromUomCode} AND to_uom_code = ${toUomCode}
+    LIMIT 1
+  `);
+  const itemRows = (itemConv[0] as any[]);
+  if (itemRows.length > 0) {
+    return quantity * parseFloat(itemRows[0].conversion_factor);
+  }
+
+  // 1b. Reverse direction
+  const itemConvRev = await db.execute(sql`
+    SELECT conversion_factor FROM item_unit_conversions
+    WHERE item_id = ${itemId} AND from_uom_code = ${toUomCode} AND to_uom_code = ${fromUomCode}
+    LIMIT 1
+  `);
+  const itemRowsRev = (itemConvRev[0] as any[]);
+  if (itemRowsRev.length > 0) {
+    return quantity / parseFloat(itemRowsRev[0].conversion_factor);
+  }
+
+  // 2. Global UoM table — both must share same base_uom_code
+  const uoms = await db.execute(sql`
+    SELECT code, base_uom_code, conversion_factor FROM unit_of_measures
+    WHERE code IN (${fromUomCode}, ${toUomCode})
+  `);
+  const uomRows = (uoms[0] as any[]);
+  const fromUom = uomRows.find((r: any) => r.code === fromUomCode);
+  const toUom = uomRows.find((r: any) => r.code === toUomCode);
+
+  if (
+    fromUom && toUom &&
+    fromUom.base_uom_code && toUom.base_uom_code &&
+    fromUom.base_uom_code === toUom.base_uom_code
+  ) {
+    // Convert: quantity × fromFactor / toFactor
+    const fromFactor = parseFloat(fromUom.conversion_factor);
+    const toFactor = parseFloat(toUom.conversion_factor);
+    return (quantity * fromFactor) / toFactor;
+  }
+
+  throw new Error(
+    `No conversion path found from '${fromUomCode}' to '${toUomCode}' for item ${itemId}. ` +
+    `Please define an item-specific conversion.`
+  );
+}
+
+// ============================================================================
 // INVENTORY ITEMS
 // ============================================================================
 
@@ -25,6 +173,7 @@ export async function getNextSequentialNumber(
   // Find all SKUs matching the pattern (e.g., 'FD-ST-P-%')
   const pattern = `${primaryClass}-${subType}-${form}-%`;
   
+  // Include ALL items (active AND inactive) so deleted item SKUs are never reused
   const items = await db
     .select({ itemNumber: inventoryItems.itemNumber })
     .from(inventoryItems)
@@ -102,6 +251,10 @@ export async function createInventoryItem(data: {
   unitCost?: number;
   currentStock?: number;
   locationId?: number;
+  // UoM fields
+  baseUomCode?: string;
+  purchaseUomCode?: string;
+  issueUomCode?: string;
 }) {
   const db = await getDb();
   if (!db) return null;
@@ -164,8 +317,21 @@ export async function createInventoryItem(data: {
   if (data.currentStock !== undefined) {
     insertData.currentStock = data.currentStock.toString();
   }
+  // UoM fields — default baseUomCode to unit if not provided
+  insertData.baseUomCode = data.baseUomCode || data.unit || null;
+  if (data.purchaseUomCode) insertData.purchaseUomCode = data.purchaseUomCode;
+  if (data.issueUomCode) insertData.issueUomCode = data.issueUomCode;
 
-  const result = await db.insert(inventoryItems).values(insertData);
+  let result;
+  try {
+    result = await db.insert(inventoryItems).values(insertData);
+  } catch (err: any) {
+    // Handle duplicate itemNumber (e.g. re-creating a previously soft-deleted item)
+    if (err?.code === 'ER_DUP_ENTRY' || (err?.message && err.message.includes('Duplicate entry'))) {
+      throw new Error(`An item with item number '${itemNumber}' already exists. If you previously deleted this item, please contact an admin to restore or permanently remove it.`);
+    }
+    throw err;
+  }
   
   // Fetch the created item to get all fields including defaults
   const insertId = Number(result[0].insertId);
@@ -257,6 +423,10 @@ export async function updateInventoryItem(
     unitCost?: number;
     currentStock?: number;
     isActive?: boolean;
+    // UoM fields
+    baseUomCode?: string;
+    purchaseUomCode?: string;
+    issueUomCode?: string;
   }
 ) {
   const db = await getDb();
@@ -290,6 +460,8 @@ export async function updateInventoryItem(
   if (data.currentStock !== undefined) {
     updateData.currentStock = data.currentStock.toString();
   }
+  // UoM fields are passed through directly (they are varchar columns)
+  // baseUomCode, purchaseUomCode, issueUomCode already in updateData via spread
 
   // If no fields to update (e.g., only itemNumber was provided and was removed), return success
   if (Object.keys(updateData).length === 0) {
@@ -639,6 +811,7 @@ export async function recordTransaction(data: {
   locationId: number; // Make required
   transactionType: "receipt" | "issue" | "transfer" | "adjustment";
   quantity: number;
+  uomCode?: string;         // Unit the quantity was entered in
   unitCost?: number;
   totalCost?: number;
   referenceNumber?: string;
@@ -678,12 +851,32 @@ export async function recordTransaction(data: {
     calculatedTotalCost = Math.round(data.unitCost * data.quantity);
   }
 
+  // Resolve quantityInBaseUnit: convert from entered UoM to item's base UoM
+  let quantityInBaseUnit: number | null = null;
+  if (data.uomCode) {
+    try {
+      // Get item's base UoM
+      const [itemRow] = await db.select({ baseUomCode: inventoryItems.baseUomCode }).from(inventoryItems).where(eq(inventoryItems.id, data.itemId)).limit(1);
+      const baseUom = (itemRow as any)?.baseUomCode;
+      if (baseUom && baseUom !== data.uomCode) {
+        quantityInBaseUnit = await convertQuantity(data.itemId, data.quantity, data.uomCode, baseUom);
+      } else {
+        quantityInBaseUnit = data.quantity;
+      }
+    } catch {
+      // If conversion fails, store null — do not block the transaction
+      quantityInBaseUnit = null;
+    }
+  }
+
   // Record the transaction
   const result = await db.insert(inventoryTransactions).values({
     itemId: data.itemId,
     locationId: data.locationId,
     transactionType: data.transactionType,
     quantity: data.quantity.toString(),
+    uomCode: data.uomCode ?? null,
+    quantityInBaseUnit: quantityInBaseUnit !== null ? quantityInBaseUnit.toString() : null,
     unitCost: data.unitCost?.toString(),
     totalCost: calculatedTotalCost?.toString(),
     referenceNumber: data.referenceNumber,

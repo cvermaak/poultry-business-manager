@@ -51,6 +51,10 @@ export const inventoryRouter = router({
         reorderPoint: z.number().optional(),
         unitCost: z.number().optional(),
         locationId: z.number().optional(),
+        // UoM fields
+        baseUomCode: z.string().optional(),
+        purchaseUomCode: z.string().optional(),
+        issueUomCode: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -79,6 +83,10 @@ export const inventoryRouter = router({
         reorderPoint: z.number().optional(),
         unitCost: z.number().optional(),
         isActive: z.boolean().optional(),
+        // UoM fields
+        baseUomCode: z.string().optional(),
+        purchaseUomCode: z.string().optional(),
+        issueUomCode: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -182,6 +190,7 @@ export const inventoryRouter = router({
         locationId: z.number(), // Now required
         transactionType: z.enum(["receipt", "issue", "transfer", "adjustment"]),
         quantity: z.number().positive("Quantity must be positive"),
+        uomCode: z.string().optional(), // Unit the quantity was entered in
         unitCost: z.number().optional(),
         totalCost: z.number().optional(),
         referenceNumber: z.string().optional(),
@@ -236,4 +245,38 @@ export const inventoryRouter = router({
   getStockValuation: protectedProcedure.query(async () => {
     return await inventoryDb.getStockValuation();
   }),
+
+  // ============================================================================
+  // UNITS OF MEASURE
+  // ============================================================================
+
+  listUoms: protectedProcedure.query(async () => {
+    return await inventoryDb.listUnitsOfMeasure();
+  }),
+
+  getItemConversions: protectedProcedure
+    .input(z.object({ itemId: z.number() }))
+    .query(async ({ input }) => {
+      return await inventoryDb.listItemUnitConversions(input.itemId);
+    }),
+
+  saveItemConversion: protectedProcedure
+    .input(
+      z.object({
+        itemId: z.number(),
+        fromUomCode: z.string(),
+        toUomCode: z.string(),
+        conversionFactor: z.number().positive(),
+        notes: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      return await inventoryDb.saveItemUnitConversion(input);
+    }),
+
+  deleteItemConversion: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      return await inventoryDb.deleteItemUnitConversion(input.id);
+    }),
 });

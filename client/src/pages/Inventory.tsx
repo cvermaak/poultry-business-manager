@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Package, MapPin, TrendingDown, Edit, Trash2, AlertTriangle, History, Download, Filter, TrendingUp, PieChart } from "lucide-react";
+import { Plus, Package, MapPin, TrendingDown, Edit, Trash2, AlertTriangle, History, Download, Filter, TrendingUp, PieChart, Ruler } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Inventory() {
@@ -21,6 +21,16 @@ export default function Inventory() {
   const [editingItem, setEditingItem] = useState<any>(null);
   const [selectedStock, setSelectedStock] = useState<any>(null);
   const [transactionType, setTransactionType] = useState<"receipt" | "issue" | "transfer" | "adjustment">("receipt");
+  // Conversion management dialog state
+  const [conversionDialogOpen, setConversionDialogOpen] = useState(false);
+  const [conversionItemId, setConversionItemId] = useState<number | null>(null);
+  const [conversionItemName, setConversionItemName] = useState("");
+  const [conversionForm, setConversionForm] = useState({
+    fromUomCode: "",
+    toUomCode: "",
+    conversionFactor: "",
+    notes: "",
+  });
   const [itemForm, setItemForm] = useState({
     itemNumber: "",
     primaryClass: "",
@@ -43,6 +53,9 @@ export default function Inventory() {
     reorderPoint: "",
     unitCost: "",
     locationId: "",
+    baseUomCode: "",
+    purchaseUomCode: "",
+    issueUomCode: "",
   });
   const [locationForm, setLocationForm] = useState({
     name: "",
@@ -66,6 +79,7 @@ export default function Inventory() {
     notes: "",
     toLocationId: "", // For transfers
     flockId: "", // For issues to flocks
+    uomCode: "", // Unit of measure for this transaction
   });
 
   // Utils for invalidating queries
@@ -77,6 +91,11 @@ export default function Inventory() {
   const { data: stockLevels = [], refetch: refetchStockLevels } = trpc.inventory.getAllStockLevels.useQuery();
   const { data: reorderAlerts = [], refetch: refetchReorderAlerts } = trpc.inventory.getReorderAlerts.useQuery();
   const { data: stockValuation } = trpc.inventory.getStockValuation.useQuery();
+  const { data: uoms = [] } = trpc.inventory.listUoms.useQuery();
+  const { data: itemConversions = [], refetch: refetchConversions } = trpc.inventory.getItemConversions.useQuery(
+    { itemId: conversionItemId! },
+    { enabled: conversionItemId !== null }
+  );
   const { data: transactionHistory = [] } = trpc.inventory.getTransactionHistory.useQuery({
     itemId: historyFilters.itemId && historyFilters.itemId !== "all" ? parseInt(historyFilters.itemId) : undefined,
     locationId: historyFilters.locationId && historyFilters.locationId !== "all" ? parseInt(historyFilters.locationId) : undefined,
@@ -153,6 +172,27 @@ export default function Inventory() {
     },
   });
 
+  const saveConversionMutation = trpc.inventory.saveItemConversion.useMutation({
+    onSuccess: () => {
+      toast.success("Conversion saved");
+      setConversionForm({ fromUomCode: "", toUomCode: "", conversionFactor: "", notes: "" });
+      refetchConversions();
+    },
+    onError: (error) => {
+      toast.error(`Failed to save conversion: ${error.message}`);
+    },
+  });
+
+  const deleteConversionMutation = trpc.inventory.deleteItemConversion.useMutation({
+    onSuccess: () => {
+      toast.success("Conversion deleted");
+      refetchConversions();
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete conversion: ${error.message}`);
+    },
+  });
+
   const resetItemForm = () => {
     setItemForm({
       itemNumber: "",
@@ -176,6 +216,9 @@ export default function Inventory() {
       reorderPoint: "",
       unitCost: "",
       locationId: "",
+      baseUomCode: "",
+      purchaseUomCode: "",
+      issueUomCode: "",
     });
   };
 
@@ -196,6 +239,7 @@ export default function Inventory() {
       notes: "",
       toLocationId: "",
       flockId: "",
+      uomCode: "",
     });
   };
 
@@ -220,6 +264,7 @@ export default function Inventory() {
       locationId: selectedStock.locationId,
       transactionType,
       quantity,
+      uomCode: transactionForm.uomCode || undefined,
       unitCost: transactionForm.unitCost ? Math.round(parseFloat(transactionForm.unitCost) * 100) : undefined,
       totalCost: transactionForm.totalCost ? Math.round(parseFloat(transactionForm.totalCost) * 100) : undefined,
       referenceNumber: transactionForm.referenceNumber || undefined,
@@ -246,12 +291,15 @@ export default function Inventory() {
       brand: itemForm.brand || undefined,
       model: itemForm.model || undefined,
       category: itemForm.category,
-      unit: itemForm.unit,
+      unit: itemForm.baseUomCode || itemForm.unit, // Use baseUomCode as the unit if set
       bagSizeKg: itemForm.bagSizeKg ? parseFloat(itemForm.bagSizeKg) : undefined,
       currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : 0,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
       locationId: itemForm.locationId ? parseInt(itemForm.locationId) : undefined,
+      baseUomCode: itemForm.baseUomCode || undefined,
+      purchaseUomCode: itemForm.purchaseUomCode || undefined,
+      issueUomCode: itemForm.issueUomCode || undefined,
     });
   };
 
@@ -270,11 +318,14 @@ export default function Inventory() {
       brand: itemForm.brand || undefined,
       model: itemForm.model || undefined,
       category: itemForm.category,
-      unit: itemForm.unit,
+      unit: itemForm.baseUomCode || itemForm.unit, // Keep unit in sync with baseUomCode
       bagSizeKg: itemForm.bagSizeKg ? parseFloat(itemForm.bagSizeKg) : undefined,
       currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : undefined,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
+      baseUomCode: itemForm.baseUomCode || undefined,
+      purchaseUomCode: itemForm.purchaseUomCode || undefined,
+      issueUomCode: itemForm.issueUomCode || undefined,
     });
   };
 
@@ -301,8 +352,39 @@ export default function Inventory() {
       currentStock: item.currentStock || "",
       reorderPoint: item.reorderPoint || "",
       unitCost: item.unitCost ? (item.unitCost / 100).toFixed(2) : "",
+      locationId: "",
+      baseUomCode: item.baseUomCode || item.unit || "",
+      purchaseUomCode: item.purchaseUomCode || "",
+      issueUomCode: item.issueUomCode || "",
     });
     setItemDialogOpen(true);
+  };
+
+  const openConversionDialog = (item: any) => {
+    setConversionItemId(item.id);
+    setConversionItemName(item.name);
+    setConversionForm({ fromUomCode: "", toUomCode: "", conversionFactor: "", notes: "" });
+    setConversionDialogOpen(true);
+  };
+
+  const handleSaveConversion = () => {
+    if (!conversionItemId) return;
+    if (!conversionForm.fromUomCode || !conversionForm.toUomCode || !conversionForm.conversionFactor) {
+      toast.error("Please fill in all required conversion fields");
+      return;
+    }
+    const factor = parseFloat(conversionForm.conversionFactor);
+    if (isNaN(factor) || factor <= 0) {
+      toast.error("Conversion factor must be a positive number");
+      return;
+    }
+    saveConversionMutation.mutate({
+      itemId: conversionItemId,
+      fromUomCode: conversionForm.fromUomCode,
+      toUomCode: conversionForm.toUomCode,
+      conversionFactor: factor,
+      notes: conversionForm.notes || undefined,
+    });
   };
 
   const handleDeleteItem = (id: number) => {
@@ -348,7 +430,8 @@ export default function Inventory() {
       return false;
     }
     // Filter by search query (reference number)
-    if (historyFilters.searchQuery && !transaction.referenceNumber?.toLowerCase().includes(historyFilters.searchQuery.toLowerCase())) {
+    const refNum = (transaction as any).referenceNumber;
+    if (historyFilters.searchQuery && !refNum?.toLowerCase().includes(historyFilters.searchQuery.toLowerCase())) {
       return false;
     }
     return true;
@@ -490,6 +573,10 @@ export default function Inventory() {
             <TrendingUp className="h-4 w-4 mr-2" />
             Stock Valuation
           </TabsTrigger>
+          <TabsTrigger value="units">
+            <Ruler className="h-4 w-4 mr-2" />
+            Units
+          </TabsTrigger>
         </TabsList>
 
         {/* Items Tab */}
@@ -570,7 +657,13 @@ export default function Inventory() {
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">
-                            <span className="font-medium">{item.unit || "-"}</span>
+                            <span className="font-medium">{item.baseUomCode || item.unit || "-"}</span>
+                            {item.purchaseUomCode && item.purchaseUomCode !== (item.baseUomCode || item.unit) && (
+                              <span className="text-xs text-muted-foreground block">Buy: {item.purchaseUomCode}</span>
+                            )}
+                            {item.issueUomCode && item.issueUomCode !== (item.baseUomCode || item.unit) && (
+                              <span className="text-xs text-muted-foreground block">Issue: {item.issueUomCode}</span>
+                            )}
                             {item.bagSizeKg && (
                               <span className="text-xs text-muted-foreground block">{item.bagSizeKg} kg/bag</span>
                             )}
@@ -590,6 +683,9 @@ export default function Inventory() {
                           {item.unitCost ? formatCurrency(item.unitCost / 100) : "-"}
                         </TableCell>
                         <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" title="Manage unit conversions" onClick={() => openConversionDialog(item)}>
+                            <Ruler className="h-4 w-4" />
+                          </Button>
                           <Button variant="ghost" size="sm" onClick={() => handleEditItem(item)}>
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -873,15 +969,15 @@ export default function Inventory() {
                           </TableCell>
                           <TableCell className="text-right">
                             {transaction.unitCost
-                              ? formatCurrency(parseFloat(transaction.unitCost) / 100)
+                              ? formatCurrency(parseFloat(String(transaction.unitCost)) / 100)
                               : "-"}
                           </TableCell>
                           <TableCell className="text-right">
                             {transaction.totalCost
-                              ? formatCurrency(parseFloat(transaction.totalCost) / 100)
+                              ? formatCurrency(parseFloat(String(transaction.totalCost)) / 100)
                               : "-"}
                           </TableCell>
-                          <TableCell>{transaction.referenceNumber || "-"}</TableCell>
+                          <TableCell>{(transaction as any).referenceNumber || "-"}</TableCell>
                           <TableCell className="max-w-xs truncate">
                             {transaction.notes || "-"}
                           </TableCell>
@@ -931,7 +1027,7 @@ export default function Inventory() {
                       <p className="text-2xl font-bold">
                         {formatCurrency(
                           filteredTransactions.reduce(
-                            (sum, t) => sum + (parseFloat(t.totalCost || "0") / 100),
+                            (sum, t) => sum + (parseFloat(String(t.totalCost || "0")) / 100),
                             0
                           )
                         )}
@@ -1164,6 +1260,59 @@ export default function Inventory() {
             </Card>
           </div>
         </TabsContent>
+
+        {/* Units of Measure Tab */}
+        <TabsContent value="units">
+          <Card>
+            <CardHeader>
+              <CardTitle>Units of Measure</CardTitle>
+              <CardDescription>All units available for inventory items. Use the conversion icon on any item to manage per-item unit conversions.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Symbol</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Base Unit</TableHead>
+                    <TableHead className="text-right">Conversion Factor</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {uoms.map((uom: any) => (
+                    <TableRow key={uom.code}>
+                      <TableCell className="font-mono font-semibold">{uom.code}</TableCell>
+                      <TableCell>{uom.name}</TableCell>
+                      <TableCell className="font-mono">{uom.symbol}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="capitalize">{uom.uomType}</Badge>
+                      </TableCell>
+                      <TableCell className="font-mono">{uom.baseUomCode || <span className="text-muted-foreground">—</span>}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        {uom.isBase ? <span className="text-muted-foreground">base</span> : parseFloat(uom.conversionFactor || "1").toFixed(4)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={uom.isActive ? "default" : "secondary"}>
+                          {uom.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {uoms.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                        No units of measure found
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Add/Edit Item Dialog */}
@@ -1383,16 +1532,48 @@ export default function Inventory() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="unit">Unit *</Label>
-                  <Input
-                    id="unit"
-                    value={itemForm.unit}
-                    onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })}
-                    placeholder="kg, bags, liters"
-                  />
+                  <Label htmlFor="baseUomCode">Base Unit (Stock) *</Label>
+                  <Select value={itemForm.baseUomCode || itemForm.unit} onValueChange={(value) => setItemForm({ ...itemForm, baseUomCode: value, unit: value })}>
+                    <SelectTrigger id="baseUomCode">
+                      <SelectValue placeholder="Select base unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uoms.map((u: any) => (
+                        <SelectItem key={u.code} value={u.code}>{u.name} ({u.symbol})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                {/* Bag Size - only show when unit is bags */}
-                {itemForm.unit.toLowerCase().includes('bag') && (
+                <div className="space-y-2">
+                  <Label htmlFor="purchaseUomCode">Purchase Unit</Label>
+                  <Select value={itemForm.purchaseUomCode || "_none"} onValueChange={(value) => setItemForm({ ...itemForm, purchaseUomCode: value === "_none" ? "" : value })}>
+                    <SelectTrigger id="purchaseUomCode">
+                      <SelectValue placeholder="Same as base" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Same as base</SelectItem>
+                      {uoms.map((u: any) => (
+                        <SelectItem key={u.code} value={u.code}>{u.name} ({u.symbol})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="issueUomCode">Issue Unit</Label>
+                  <Select value={itemForm.issueUomCode || "_none"} onValueChange={(value) => setItemForm({ ...itemForm, issueUomCode: value === "_none" ? "" : value })}>
+                    <SelectTrigger id="issueUomCode">
+                      <SelectValue placeholder="Same as base" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Same as base</SelectItem>
+                      {uoms.map((u: any) => (
+                        <SelectItem key={u.code} value={u.code}>{u.name} ({u.symbol})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Bag Size - only show when base unit is a bag */}
+                {(itemForm.baseUomCode || itemForm.unit).toLowerCase().includes('bag') && (
                   <div className="space-y-2">
                     <Label htmlFor="bagSizeKg">Bag Size (kg)</Label>
                     <Input
@@ -1619,17 +1800,36 @@ export default function Inventory() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Quantity */}
-            <div>
-              <Label htmlFor="quantity">Quantity *</Label>
-              <Input
-                id="quantity"
-                type="number"
-                step="0.01"
-                placeholder="Enter quantity"
-                value={transactionForm.quantity}
-                onChange={(e) => setTransactionForm({ ...transactionForm, quantity: e.target.value })}
-              />
+            {/* Quantity + UoM */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="quantity">Quantity *</Label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  step="0.01"
+                  placeholder="Enter quantity"
+                  value={transactionForm.quantity}
+                  onChange={(e) => setTransactionForm({ ...transactionForm, quantity: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label htmlFor="txnUomCode">Unit</Label>
+                <Select
+                  value={transactionForm.uomCode || (selectedStock?.baseUomCode || selectedStock?.unit || "_none")}
+                  onValueChange={(value) => setTransactionForm({ ...transactionForm, uomCode: value === "_none" ? "" : value })}
+                >
+                  <SelectTrigger id="txnUomCode">
+                    <SelectValue placeholder="Base unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Base unit</SelectItem>
+                    {uoms.map((u: any) => (
+                      <SelectItem key={u.code} value={u.code}>{u.name} ({u.symbol})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Transfer: To Location */}
@@ -1700,6 +1900,99 @@ export default function Inventory() {
             <Button onClick={handleTransaction} disabled={recordTransactionMutation.isPending}>
               {recordTransactionMutation.isPending ? "Processing..." : "Confirm"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Item Unit Conversions Dialog */}
+      <Dialog open={conversionDialogOpen} onOpenChange={setConversionDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Unit Conversions — {conversionItemName}</DialogTitle>
+            <DialogDescription>Define how different units relate to each other for this item (e.g. 1 bag50 = 50 kg).</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6">
+            {/* Existing conversions */}
+            {itemConversions.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>From</TableHead>
+                    <TableHead>To</TableHead>
+                    <TableHead className="text-right">Factor</TableHead>
+                    <TableHead>Notes</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {itemConversions.map((conv: any) => (
+                    <TableRow key={conv.id}>
+                      <TableCell className="font-mono">{conv.fromUomCode}</TableCell>
+                      <TableCell className="font-mono">{conv.toUomCode}</TableCell>
+                      <TableCell className="text-right font-mono">{parseFloat(conv.conversionFactor).toFixed(4)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{conv.notes || "-"}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => deleteConversionMutation.mutate({ id: conv.id })}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">No conversions defined yet.</p>
+            )}
+
+            {/* Add new conversion */}
+            <div className="border-t pt-4">
+              <h4 className="text-sm font-medium mb-3">Add Conversion</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>From Unit</Label>
+                  <Select value={conversionForm.fromUomCode || "_none"} onValueChange={(v) => setConversionForm({ ...conversionForm, fromUomCode: v === "_none" ? "" : v })}>
+                    <SelectTrigger><SelectValue placeholder="Select unit" /></SelectTrigger>
+                    <SelectContent>
+                      {uoms.map((u: any) => <SelectItem key={u.code} value={u.code}>{u.name} ({u.symbol})</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>To Unit</Label>
+                  <Select value={conversionForm.toUomCode || "_none"} onValueChange={(v) => setConversionForm({ ...conversionForm, toUomCode: v === "_none" ? "" : v })}>
+                    <SelectTrigger><SelectValue placeholder="Select unit" /></SelectTrigger>
+                    <SelectContent>
+                      {uoms.map((u: any) => <SelectItem key={u.code} value={u.code}>{u.name} ({u.symbol})</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Conversion Factor</Label>
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    placeholder="e.g. 50 (1 bag50 = 50 kg)"
+                    value={conversionForm.conversionFactor}
+                    onChange={(e) => setConversionForm({ ...conversionForm, conversionFactor: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes (optional)</Label>
+                  <Input
+                    placeholder="e.g. 1 bag50 = 50 kg"
+                    value={conversionForm.notes}
+                    onChange={(e) => setConversionForm({ ...conversionForm, notes: e.target.value })}
+                  />
+                </div>
+              </div>
+              <Button className="mt-3" onClick={handleSaveConversion} disabled={saveConversionMutation.isPending}>
+                <Plus className="h-4 w-4 mr-2" />
+                {saveConversionMutation.isPending ? "Saving..." : "Add Conversion"}
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConversionDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1120,6 +1120,101 @@ export async function getSupplierById(id: number) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+export async function getNextSupplierNumber(): Promise<string> {
+  const db = await getDb();
+  if (!db) return "SUP-0001";
+  const result = await db
+    .select({ supplierNumber: suppliers.supplierNumber })
+    .from(suppliers)
+    .orderBy(desc(suppliers.id))
+    .limit(1);
+  if (result.length === 0) return "SUP-0001";
+  const last = result[0].supplierNumber;
+  const match = last.match(/(\d+)$/);
+  const next = match ? parseInt(match[1], 10) + 1 : 1;
+  return `SUP-${String(next).padStart(4, "0")}`;
+}
+
+export async function createSupplier(data: {
+  name: string;
+  contactPerson?: string;
+  email?: string;
+  phone?: string;
+  whatsapp?: string;
+  preferredContactMethod?: "email" | "whatsapp" | "phone" | "both";
+  category?: string;
+  paymentTerms?: string;
+  taxNumber?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  notes?: string;
+  address?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const supplierNumber = await getNextSupplierNumber();
+  const result = await db.insert(suppliers).values({
+    supplierNumber,
+    name: data.name,
+    contactPerson: data.contactPerson ?? null,
+    email: data.email ?? null,
+    phone: data.phone ?? null,
+    whatsapp: data.whatsapp ?? null,
+    preferredContactMethod: data.preferredContactMethod ?? "email",
+    category: data.category ?? null,
+    paymentTerms: data.paymentTerms ?? "cash",
+    taxNumber: data.taxNumber ?? null,
+    bankName: data.bankName ?? null,
+    bankAccountNumber: data.bankAccountNumber ?? null,
+    notes: data.notes ?? null,
+    isActive: 1,
+  });
+  return { id: Number(result[0].insertId), supplierNumber };
+}
+
+export async function updateSupplier(id: number, data: {
+  name?: string;
+  contactPerson?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
+  preferredContactMethod?: "email" | "whatsapp" | "phone" | "both";
+  category?: string | null;
+  paymentTerms?: string | null;
+  taxNumber?: string | null;
+  bankName?: string | null;
+  bankAccountNumber?: string | null;
+  notes?: string | null;
+  isActive?: boolean;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(suppliers).set({
+    ...(data.name !== undefined && { name: data.name }),
+    ...(data.contactPerson !== undefined && { contactPerson: data.contactPerson }),
+    ...(data.email !== undefined && { email: data.email }),
+    ...(data.phone !== undefined && { phone: data.phone }),
+    ...(data.whatsapp !== undefined && { whatsapp: data.whatsapp }),
+    ...(data.preferredContactMethod !== undefined && { preferredContactMethod: data.preferredContactMethod }),
+    ...(data.category !== undefined && { category: data.category }),
+    ...(data.paymentTerms !== undefined && { paymentTerms: data.paymentTerms }),
+    ...(data.taxNumber !== undefined && { taxNumber: data.taxNumber }),
+    ...(data.bankName !== undefined && { bankName: data.bankName }),
+    ...(data.bankAccountNumber !== undefined && { bankAccountNumber: data.bankAccountNumber }),
+    ...(data.notes !== undefined && { notes: data.notes }),
+    ...(data.isActive !== undefined && { isActive: data.isActive ? 1 : 0 }),
+  }).where(eq(suppliers.id, id));
+  return true;
+}
+
+export async function deleteSupplier(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  // Soft-delete: mark inactive
+  await db.update(suppliers).set({ isActive: 0 }).where(eq(suppliers.id, id));
+  return true;
+}
+
 export async function listItemTemplates(filters?: { category?: string; isActive?: boolean }) {
   const db = await getDb();
   if (!db) return [];
