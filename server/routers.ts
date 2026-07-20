@@ -1093,6 +1093,44 @@ export const appRouter = router({
     getAddresses: protectedProcedure.input(z.object({ customerId: z.number() })).query(async ({ input }) => {
       return await db.getCustomerAddresses(input.customerId);
     }),
+
+    getNextNumber: protectedProcedure.query(async () => {
+      return { customerNumber: await db.getNextCustomerNumber() };
+    }),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          name: z.string().min(1).optional(),
+          companyName: z.string().optional().nullable(),
+          contactPerson: z.string().optional().nullable(),
+          email: z.string().email().optional().nullable(),
+          phone: z.string().optional().nullable(),
+          whatsapp: z.string().optional().nullable(),
+          segment: z.enum(["wholesale", "retail", "contract"]).optional(),
+          creditLimit: z.number().int().optional(),
+          paymentTerms: z.string().optional(),
+          taxNumber: z.string().optional().nullable(),
+          vatNumber: z.string().optional().nullable(),
+          notes: z.string().optional().nullable(),
+          isActive: z.boolean().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...data } = input;
+        const updated = await db.updateCustomer(id, data);
+        await db.logUserActivity(ctx.user.id, "update_customer", "customer", id, `Updated customer: ${updated?.name}`);
+        return updated;
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const updated = await db.deleteCustomer(input.id);
+        await db.logUserActivity(ctx.user.id, "deactivate_customer", "customer", input.id, `Deactivated customer: ${updated?.name}`);
+        return updated;
+      }),
   }),
 
   // ============================================================================
@@ -1115,6 +1153,63 @@ export const appRouter = router({
     getById: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => {
       return await db.getSupplierById(input.id);
     }),
+
+    create: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1),
+          contactPerson: z.string().optional(),
+          email: z.string().email().optional().or(z.literal("")),
+          phone: z.string().optional(),
+          whatsapp: z.string().optional(),
+          preferredContactMethod: z.enum(["email", "whatsapp", "phone", "both"]).optional(),
+          category: z.string().optional(),
+          paymentTerms: z.string().optional(),
+          taxNumber: z.string().optional(),
+          bankName: z.string().optional(),
+          bankAccountNumber: z.string().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        return await db.createSupplier({
+          ...input,
+          email: input.email || undefined,
+        });
+      }),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          name: z.string().min(1).optional(),
+          contactPerson: z.string().nullable().optional(),
+          email: z.string().email().nullable().optional().or(z.literal("")),
+          phone: z.string().nullable().optional(),
+          whatsapp: z.string().nullable().optional(),
+          preferredContactMethod: z.enum(["email", "whatsapp", "phone", "both"]).optional(),
+          category: z.string().nullable().optional(),
+          paymentTerms: z.string().nullable().optional(),
+          taxNumber: z.string().nullable().optional(),
+          bankName: z.string().nullable().optional(),
+          bankAccountNumber: z.string().nullable().optional(),
+          notes: z.string().nullable().optional(),
+          isActive: z.boolean().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        return await db.updateSupplier(id, {
+          ...data,
+          email: data.email === "" ? null : data.email,
+        });
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await db.deleteSupplier(input.id);
+      }),
   }),
 
   // ============================================================================

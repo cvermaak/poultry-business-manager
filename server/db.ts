@@ -910,6 +910,54 @@ export async function getCustomerAddresses(customerId: number) {
   return await db.select().from(customerAddresses).where(eq(customerAddresses.customerId, customerId));
 }
 
+export async function getNextCustomerNumber(): Promise<string> {
+  const db = await getDb();
+  if (!db) return "CUST-001";
+  const result = await db
+    .select({ customerNumber: customers.customerNumber })
+    .from(customers)
+    .orderBy(desc(customers.id))
+    .limit(1);
+  if (result.length === 0) return "CUST-001";
+  const last = result[0].customerNumber;
+  const match = last.match(/(\d+)$/);
+  const next = match ? parseInt(match[1], 10) + 1 : 1;
+  return `CUST-${String(next).padStart(3, "0")}`;
+}
+
+export async function updateCustomer(
+  id: number,
+  data: {
+    name?: string;
+    companyName?: string | null;
+    contactPerson?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    whatsapp?: string | null;
+    segment?: "wholesale" | "retail" | "contract";
+    creditLimit?: number;
+    paymentTerms?: string;
+    taxNumber?: string | null;
+    vatNumber?: string | null;
+    notes?: string | null;
+    isActive?: boolean;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(customers).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(customers.id, id));
+  const updated = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
+  return updated[0];
+}
+
+export async function deleteCustomer(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(customers).set({ isActive: false, updatedAt: new Date().toISOString() }).where(eq(customers.id, id));
+  const updated = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
+  return updated[0];
+}
+
 // ============================================================================
 // SALES & INVOICING
 // ============================================================================
