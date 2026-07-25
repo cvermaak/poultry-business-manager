@@ -2520,6 +2520,134 @@ export const appRouter = router({
         return await db.checkAdditiveStockForOrder(opts.input);
       }),
   }),
+
+  // ============================================================================
+  // SALES ORDERS
+  // ============================================================================
+  salesOrders: router({
+    getNextNumber: protectedProcedure.query(async () => {
+      return db.getNextSalesOrderNumber();
+    }),
+
+    list: protectedProcedure
+      .input(z.object({
+        customerId: z.number().optional(),
+        status: z.enum(['draft','confirmed','processing','delivered','cancelled']).optional(),
+        dateFrom: z.string().optional(),
+        dateTo: z.string().optional(),
+      }).optional())
+      .query(async (opts) => {
+        return db.listSalesOrders(opts.input ?? undefined);
+      }),
+
+    getById: protectedProcedure
+      .input(z.number())
+      .query(async (opts) => {
+        return db.getSalesOrderById(opts.input);
+      }),
+
+    getItems: protectedProcedure
+      .input(z.number())
+      .query(async (opts) => {
+        return db.getSalesOrderItems(opts.input);
+      }),
+
+    getStats: protectedProcedure.query(async () => {
+      return db.getSalesOrderStats();
+    }),
+
+    create: protectedProcedure
+      .input(z.object({
+        customerId: z.number(),
+        orderDate: z.string(),
+        deliveryDate: z.string().nullable().optional(),
+        status: z.enum(['draft','confirmed','processing','delivered','cancelled']).optional(),
+        notes: z.string().nullable().optional(),
+        items: z.array(z.object({
+          itemType: z.enum(['live_birds','feed','other']),
+          description: z.string(),
+          flockId: z.number().nullable().optional(),
+          feedBatchId: z.number().nullable().optional(),
+          quantity: z.number(),
+          unit: z.string(),
+          unitPrice: z.number(),
+          subtotal: z.number(),
+          taxRate: z.number().optional(),
+          taxAmount: z.number(),
+          totalAmount: z.number(),
+        })),
+      }))
+      .mutation(async (opts) => {
+        const orderNumber = await db.getNextSalesOrderNumber();
+        const subtotal = opts.input.items.reduce((s, i) => s + i.subtotal, 0);
+        const taxAmount = opts.input.items.reduce((s, i) => s + i.taxAmount, 0);
+        const totalAmount = subtotal + taxAmount;
+        const result = await db.createSalesOrder({
+          ...opts.input,
+          orderNumber,
+          subtotal,
+          taxAmount,
+          totalAmount,
+          createdBy: opts.ctx.user.id,
+        });
+        await db.logUserActivity(opts.ctx.user.id, 'create_sales_order', 'sales_order', result.insertId);
+        return result;
+      }),
+
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        customerId: z.number().optional(),
+        orderDate: z.string().optional(),
+        deliveryDate: z.string().nullable().optional(),
+        status: z.enum(['draft','confirmed','processing','delivered','cancelled']).optional(),
+        notes: z.string().nullable().optional(),
+        items: z.array(z.object({
+          itemType: z.enum(['live_birds','feed','other']),
+          description: z.string(),
+          flockId: z.number().nullable().optional(),
+          feedBatchId: z.number().nullable().optional(),
+          quantity: z.number(),
+          unit: z.string(),
+          unitPrice: z.number(),
+          subtotal: z.number(),
+          taxRate: z.number().optional(),
+          taxAmount: z.number(),
+          totalAmount: z.number(),
+        })).optional(),
+      }))
+      .mutation(async (opts) => {
+        const { id, items, ...data } = opts.input;
+        if (items) {
+          const subtotal = items.reduce((s, i) => s + i.subtotal, 0);
+          const taxAmount = items.reduce((s, i) => s + i.taxAmount, 0);
+          const totalAmount = subtotal + taxAmount;
+          await db.replaceSalesOrderItems(id, items);
+          await db.updateSalesOrder(id, { ...data, subtotal, taxAmount, totalAmount });
+        } else {
+          await db.updateSalesOrder(id, data);
+        }
+        await db.logUserActivity(opts.ctx.user.id, 'update_sales_order', 'sales_order', id);
+        return db.getSalesOrderById(id);
+      }),
+
+    updateStatus: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(['draft','confirmed','processing','delivered','cancelled']),
+      }))
+      .mutation(async (opts) => {
+        await db.logUserActivity(opts.ctx.user.id, `sales_order_status_${opts.input.status}`, 'sales_order', opts.input.id);
+        return db.updateSalesOrderStatus(opts.input.id, opts.input.status);
+      }),
+
+    cancel: protectedProcedure
+      .input(z.number())
+      .mutation(async (opts) => {
+        await db.logUserActivity(opts.ctx.user.id, 'cancel_sales_order', 'sales_order', opts.input);
+        return db.cancelSalesOrder(opts.input);
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

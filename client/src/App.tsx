@@ -21,6 +21,7 @@ import CatchOperations from "./pages/CatchOperations";
 import SlaughterManagement from "./pages/SlaughterManagement";
 import Customers from "./pages/Customers";
 import Sales from "./pages/Sales";
+import SalesOrders from "./pages/SalesOrders";
 import Suppliers from "./pages/Suppliers";
 import Users from "./pages/Users";
 import UserManagement from "./pages/UserManagement";
@@ -115,6 +116,12 @@ function Router() {
       <Route path="/sales">
         <DashboardLayout>
           <Sales />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/sales/orders">
+        <DashboardLayout>
+          <SalesOrders />
         </DashboardLayout>
       </Route>
 

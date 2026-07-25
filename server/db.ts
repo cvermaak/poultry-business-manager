@@ -4849,7 +4849,7 @@ export async function getCustomerInvoiceAgingSummary() {
       paid++;
     } else if (row.status === 'cancelled') {
       // skip
-    } else if (due && due < today && row.status !== 'paid') {
+    } else if (due && due < today && (row.status as string) !== 'paid') {
       overdue++;
       totalOverdue += balance;
     } else if (row.status === 'draft') {
@@ -4862,4 +4862,249 @@ export async function getCustomerInvoiceAgingSummary() {
   }
 
   return { draft, sent, overdue, paid, totalOutstanding, totalOverdue };
+}
+
+
+// ============================================================================
+// SALES ORDERS
+// ============================================================================
+
+export async function getNextSalesOrderNumber(): Promise<string> {
+  const db = await getDb();
+  if (!db) return "SO-001";
+  const [last] = await db
+    .select({ orderNumber: salesOrders.orderNumber })
+    .from(salesOrders)
+    .orderBy(desc(salesOrders.id))
+    .limit(1);
+  if (!last) return "SO-001";
+  const match = last.orderNumber.match(/SO-(\d+)$/);
+  if (!match) return "SO-001";
+  const next = parseInt(match[1], 10) + 1;
+  return `SO-${String(next).padStart(3, "0")}`;
+}
+
+export async function listSalesOrders(filters?: {
+  customerId?: number;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (filters?.customerId) conditions.push(eq(salesOrders.customerId, filters.customerId));
+  if (filters?.status) conditions.push(eq(salesOrders.status, filters.status as any));
+  if (filters?.dateFrom) conditions.push(gte(salesOrders.orderDate, filters.dateFrom));
+  if (filters?.dateTo) conditions.push(lte(salesOrders.orderDate, filters.dateTo));
+
+  return db
+    .select({
+      id: salesOrders.id,
+      orderNumber: salesOrders.orderNumber,
+      customerId: salesOrders.customerId,
+      customerName: customers.name,
+      customerCompany: customers.companyName,
+      orderDate: salesOrders.orderDate,
+      deliveryDate: salesOrders.deliveryDate,
+      status: salesOrders.status,
+      subtotal: salesOrders.subtotal,
+      taxAmount: salesOrders.taxAmount,
+      totalAmount: salesOrders.totalAmount,
+      notes: salesOrders.notes,
+      createdAt: salesOrders.createdAt,
+      updatedAt: salesOrders.updatedAt,
+      createdBy: salesOrders.createdBy,
+    })
+    .from(salesOrders)
+    .leftJoin(customers, eq(salesOrders.customerId, customers.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(salesOrders.createdAt));
+}
+
+export async function getSalesOrderById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const [row] = await db
+    .select({
+      id: salesOrders.id,
+      orderNumber: salesOrders.orderNumber,
+      customerId: salesOrders.customerId,
+      customerName: customers.name,
+      customerCompany: customers.companyName,
+      orderDate: salesOrders.orderDate,
+      deliveryDate: salesOrders.deliveryDate,
+      deliveryAddressId: salesOrders.deliveryAddressId,
+      status: salesOrders.status,
+      subtotal: salesOrders.subtotal,
+      taxAmount: salesOrders.taxAmount,
+      totalAmount: salesOrders.totalAmount,
+      notes: salesOrders.notes,
+      createdAt: salesOrders.createdAt,
+      updatedAt: salesOrders.updatedAt,
+      createdBy: salesOrders.createdBy,
+    })
+    .from(salesOrders)
+    .leftJoin(customers, eq(salesOrders.customerId, customers.id))
+    .where(eq(salesOrders.id, id));
+  return row;
+}
+
+export async function getSalesOrderItems(orderId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(salesOrderItems)
+    .where(eq(salesOrderItems.orderId, orderId))
+    .orderBy(asc(salesOrderItems.id));
+}
+
+export async function createSalesOrder(data: {
+  orderNumber: string;
+  customerId: number;
+  orderDate: string;
+  deliveryDate?: string | null;
+  deliveryAddressId?: number | null;
+  status?: "draft" | "confirmed" | "processing" | "delivered" | "cancelled";
+  subtotal: number;
+  taxAmount: number;
+  totalAmount: number;
+  notes?: string | null;
+  createdBy?: number | null;
+  items: Array<{
+    itemType: "live_birds" | "feed" | "other";
+    description: string;
+    flockId?: number | null;
+    feedBatchId?: number | null;
+    quantity: number;
+    unit: string;
+    unitPrice: number;
+    subtotal: number;
+    taxRate?: number;
+    taxAmount: number;
+    totalAmount: number;
+  }>;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const { items, ...orderData } = data;
+  const result = await db.insert(salesOrders).values({
+    ...orderData,
+    status: orderData.status ?? "draft",
+  });
+  const insertId = Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
+  if (insertId && items.length > 0) {
+    await db.insert(salesOrderItems).values(
+      items.map((item) => ({
+        orderId: insertId,
+        itemType: item.itemType,
+        description: item.description,
+        flockId: item.flockId ?? null,
+        feedBatchId: item.feedBatchId ?? null,
+        quantity: String(item.quantity),
+        unit: item.unit,
+        unitPrice: Math.round(item.unitPrice),
+        subtotal: Math.round(item.subtotal),
+        taxRate: String(item.taxRate ?? 15),
+        taxAmount: Math.round(item.taxAmount),
+        totalAmount: Math.round(item.totalAmount),
+      }))
+    );
+  }
+  return { insertId };
+}
+
+export async function updateSalesOrder(
+  id: number,
+  data: {
+    customerId?: number;
+    orderDate?: string;
+    deliveryDate?: string | null;
+    deliveryAddressId?: number | null;
+    status?: "draft" | "confirmed" | "processing" | "delivered" | "cancelled";
+    subtotal?: number;
+    taxAmount?: number;
+    totalAmount?: number;
+    notes?: string | null;
+  }
+) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(salesOrders).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(salesOrders.id, id));
+  return getSalesOrderById(id);
+}
+
+export async function updateSalesOrderStatus(
+  id: number,
+  status: "draft" | "confirmed" | "processing" | "delivered" | "cancelled"
+) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(salesOrders).set({ status, updatedAt: new Date().toISOString() }).where(eq(salesOrders.id, id));
+  return getSalesOrderById(id);
+}
+
+export async function cancelSalesOrder(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(salesOrders).set({ status: "cancelled", updatedAt: new Date().toISOString() }).where(eq(salesOrders.id, id));
+  return getSalesOrderById(id);
+}
+
+export async function replaceSalesOrderItems(
+  orderId: number,
+  items: Array<{
+    itemType: "live_birds" | "feed" | "other";
+    description: string;
+    flockId?: number | null;
+    feedBatchId?: number | null;
+    quantity: number;
+    unit: string;
+    unitPrice: number;
+    subtotal: number;
+    taxRate?: number;
+    taxAmount: number;
+    totalAmount: number;
+  }>
+) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(salesOrderItems).where(eq(salesOrderItems.orderId, orderId));
+  if (items.length > 0) {
+    await db.insert(salesOrderItems).values(
+      items.map((item) => ({
+        orderId,
+        itemType: item.itemType,
+        description: item.description,
+        flockId: item.flockId ?? null,
+        feedBatchId: item.feedBatchId ?? null,
+        quantity: String(item.quantity),
+        unit: item.unit,
+        unitPrice: Math.round(item.unitPrice),
+        subtotal: Math.round(item.subtotal),
+        taxRate: String(item.taxRate ?? 15),
+        taxAmount: Math.round(item.taxAmount),
+        totalAmount: Math.round(item.totalAmount),
+      }))
+    );
+  }
+}
+
+export async function getSalesOrderStats() {
+  const db = await getDb();
+  if (!db) return { total: 0, draft: 0, confirmed: 0, processing: 0, delivered: 0, cancelled: 0, totalValue: 0 };
+  const rows = await db.select({ status: salesOrders.status, totalAmount: salesOrders.totalAmount }).from(salesOrders);
+  const stats = { total: rows.length, draft: 0, confirmed: 0, processing: 0, delivered: 0, cancelled: 0, totalValue: 0 };
+  for (const r of rows) {
+    const amt = Number(r.totalAmount) || 0;
+    if (r.status !== "cancelled") stats.totalValue += amt;
+    if (r.status === "draft") stats.draft++;
+    else if (r.status === "confirmed") stats.confirmed++;
+    else if (r.status === "processing") stats.processing++;
+    else if (r.status === "delivered") stats.delivered++;
+    else if (r.status === "cancelled") stats.cancelled++;
+    stats.total++;
+  }
+  return stats;
 }
