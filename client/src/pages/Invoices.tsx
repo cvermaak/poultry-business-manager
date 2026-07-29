@@ -288,6 +288,11 @@ export function Invoices() {
                         <p className="text-sm text-muted-foreground">
                           Customer: <span className="font-medium text-foreground">{invoice.customerName || "Unknown"}</span>
                         </p>
+                        {(invoice as any).orderNumber && (
+                          <p className="text-sm text-muted-foreground">
+                            Order: <span className="font-medium text-foreground">{(invoice as any).orderNumber}</span>
+                          </p>
+                        )}
                         <p className="text-sm text-muted-foreground">
                           Date: {format(new Date(invoice.invoiceDate), "dd MMM yyyy")}
                         </p>
@@ -494,6 +499,12 @@ export function Invoices() {
                   <p className="text-sm font-medium text-muted-foreground">Processor</p>
                   <p className="font-semibold">{viewInvoice.processorName || "—"}</p>
                 </div>
+                {(viewInvoice as any).orderNumber && (
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Sales Order</p>
+                    <p className="font-semibold text-emerald-700">{(viewInvoice as any).orderNumber}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Invoice Date</p>
                   <p className="font-semibold">{format(new Date(viewInvoice.invoiceDate), "dd MMM yyyy")}</p>

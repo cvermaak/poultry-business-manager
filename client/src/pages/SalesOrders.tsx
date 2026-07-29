@@ -19,8 +19,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   Plus, Search, Eye, Edit2, XCircle, CheckCircle, Truck, Package,
-  ShoppingCart, FileText, TrendingUp, Clock,
+  ShoppingCart, FileText, TrendingUp, Clock, Receipt,
 } from "lucide-react";
+
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type OrderStatus = "draft" | "confirmed" | "processing" | "delivered" | "cancelled";
@@ -180,6 +181,8 @@ export default function SalesOrders() {
   const [editOrder, setEditOrder] = useState<any>(null);
   const [viewOrder, setViewOrder] = useState<any>(null);
   const [confirmCancel, setConfirmCancel] = useState<number | null>(null);
+  const [genInvoiceOrder, setGenInvoiceOrder] = useState<any>(null);
+  const [genInvoiceForm, setGenInvoiceForm] = useState({ invoiceDate: today(), dueDate: "", notes: "" });
 
   // Form state
   const emptyForm = () => ({
@@ -201,6 +204,20 @@ export default function SalesOrders() {
     viewOrder?.id ?? 0,
     { enabled: !!viewOrder?.id }
   );
+
+  // Invoice generation
+  const { data: existingInvoice } = trpc.invoices.checkOrderInvoice.useQuery(
+    genInvoiceOrder?.id ?? 0,
+    { enabled: !!genInvoiceOrder?.id }
+  );
+  const genInvoiceMut = trpc.invoices.generateFromOrder.useMutation({
+    onSuccess: (data) => {
+      utils.salesOrders.list.invalidate();
+      setGenInvoiceOrder(null);
+      toast.success(`Invoice created — navigate to Invoices to view it`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   // Mutations
   const createMut = trpc.salesOrders.create.useMutation({
@@ -459,6 +476,20 @@ export default function SalesOrders() {
                               {STATUS_CONFIG[next].icon}
                             </Button>
                           )}
+                          {(order.status === "confirmed" || order.status === "processing" || order.status === "delivered") && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-emerald-600 hover:text-emerald-800"
+                              onClick={() => {
+                                setGenInvoiceOrder(order);
+                                setGenInvoiceForm({ invoiceDate: today(), dueDate: "", notes: "" });
+                              }}
+                              title="Generate Invoice"
+                            >
+                              <Receipt className="h-4 w-4" />
+                            </Button>
+                          )}
                           {order.status !== "cancelled" && order.status !== "delivered" && (
                             <Button
                               variant="ghost"
@@ -594,6 +625,77 @@ export default function SalesOrders() {
             <Button variant="outline" onClick={() => setConfirmCancel(null)}>Keep Order</Button>
             <Button variant="destructive" onClick={() => confirmCancel !== null && cancelMut.mutate(confirmCancel)} disabled={cancelMut.isPending}>
               {cancelMut.isPending ? "Cancelling..." : "Cancel Order"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Generate Invoice Dialog ── */}
+      <Dialog open={!!genInvoiceOrder} onOpenChange={(o) => !o && setGenInvoiceOrder(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5 text-emerald-600" />
+              Generate Invoice
+            </DialogTitle>
+          </DialogHeader>
+          {genInvoiceOrder && (
+            <div className="space-y-4">
+              <div className="rounded-md bg-muted/50 p-3 text-sm">
+                <div className="font-medium">{genInvoiceOrder.orderNumber}</div>
+                <div className="text-muted-foreground">{genInvoiceOrder.customerName ?? "Customer"}</div>
+                <div className="text-muted-foreground">Order Total: {formatCurrency(genInvoiceOrder.totalAmount)}</div>
+              </div>
+              {existingInvoice && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+                  ⚠️ An invoice already exists for this order ({(existingInvoice as any).invoiceNumber}). Generating a new one will create a duplicate.
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Invoice Date *</Label>
+                  <Input
+                    type="date"
+                    value={genInvoiceForm.invoiceDate}
+                    onChange={(e) => setGenInvoiceForm((f) => ({ ...f, invoiceDate: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Due Date *</Label>
+                  <Input
+                    type="date"
+                    value={genInvoiceForm.dueDate}
+                    onChange={(e) => setGenInvoiceForm((f) => ({ ...f, dueDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Notes (optional)</Label>
+                <Textarea
+                  rows={2}
+                  placeholder="Any additional notes for the invoice..."
+                  value={genInvoiceForm.notes}
+                  onChange={(e) => setGenInvoiceForm((f) => ({ ...f, notes: e.target.value }))}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGenInvoiceOrder(null)}>Cancel</Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={!genInvoiceForm.invoiceDate || !genInvoiceForm.dueDate || genInvoiceMut.isPending}
+              onClick={() => {
+                if (!genInvoiceOrder || !genInvoiceForm.invoiceDate || !genInvoiceForm.dueDate) return;
+                genInvoiceMut.mutate({
+                  orderId: genInvoiceOrder.id,
+                  invoiceDate: genInvoiceForm.invoiceDate,
+                  dueDate: genInvoiceForm.dueDate,
+                  notes: genInvoiceForm.notes || undefined,
+                });
+              }}
+            >
+              {genInvoiceMut.isPending ? "Generating..." : "Generate Invoice"}
             </Button>
           </DialogFooter>
         </DialogContent>

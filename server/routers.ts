@@ -2015,6 +2015,27 @@ export const appRouter = router({
         ]);
         return { customer, mill };
       }),
+    generateFromOrder: protectedProcedure
+      .input(z.object({
+        orderId: z.number().int().positive(),
+        invoiceDate: z.string(),
+        dueDate: z.string(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        return await db.createInvoiceFromSalesOrder({
+          orderId: input.orderId,
+          invoiceDate: input.invoiceDate,
+          dueDate: input.dueDate,
+          notes: input.notes ?? null,
+          createdBy: ctx.user.id,
+        });
+      }),
+    checkOrderInvoice: protectedProcedure
+      .input(z.number().int().positive())
+      .query(async ({ input: orderId }) => {
+        return await db.getInvoiceByOrderId(orderId);
+      }),
   }),
   // ============================================================================
   // ANALYTICS & DASHBOARDD

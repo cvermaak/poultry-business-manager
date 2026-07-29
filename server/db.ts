@@ -970,9 +970,11 @@ export async function listInvoices(filters?: { customerId?: number; status?: str
     .select({
       ...invoices,
       customerName: customers.name,
+      orderNumber: salesOrders.orderNumber,
     })
     .from(invoices)
     .leftJoin(customers, eq(invoices.customerId, customers.id))
+    .leftJoin(salesOrders, eq((invoices as any).orderId, salesOrders.id))
     .$dynamic();
 
   if (filters?.customerId) {
@@ -993,9 +995,11 @@ export async function getInvoiceById(id: number) {
     .select({
       ...invoices,
       customerName: customers.name,
+      orderNumber: salesOrders.orderNumber,
     })
     .from(invoices)
     .leftJoin(customers, eq(invoices.customerId, customers.id))
+    .leftJoin(salesOrders, eq((invoices as any).orderId, salesOrders.id))
     .where(eq(invoices.id, id))
     .limit(1);
   return result.length > 0 ? result[0] : undefined;
@@ -5107,4 +5111,127 @@ export async function getSalesOrderStats() {
     stats.total++;
   }
   return stats;
+}
+
+// ============================================================================
+// INVOICE GENERATION FROM SALES ORDERS
+// ============================================================================
+
+/**
+ * Check if an invoice already exists for a given sales order.
+ */
+export async function getInvoiceByOrderId(orderId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db
+    .select()
+    .from(invoices)
+    .where(eq(invoices.orderId, orderId))
+    .limit(1);
+  return result[0] || null;
+}
+
+/**
+ * Generate a new sequential invoice number in the format INV-YYYYMM-NNN.
+ */
+export async function getNextInvoiceNumber(): Promise<string> {
+  const db = await getDb();
+  if (!db) return `INV-${Date.now()}`;
+  const now = new Date();
+  const prefix = `INV-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-`;
+  const rows = await db
+    .select({ invoiceNumber: invoices.invoiceNumber })
+    .from(invoices)
+    .where(like(invoices.invoiceNumber, `${prefix}%`))
+    .orderBy(desc(invoices.invoiceNumber))
+    .limit(1);
+  if (rows.length === 0) return `${prefix}001`;
+  const last = rows[0].invoiceNumber;
+  const seq = parseInt(last.split('-').pop() || '0', 10);
+  return `${prefix}${String(seq + 1).padStart(3, '0')}`;
+}
+
+/**
+ * Create a draft invoice from a sales order, copying all line items.
+ * Throws if an invoice already exists for this order.
+ */
+export async function createInvoiceFromSalesOrder(data: {
+  orderId: number;
+  invoiceDate: string;
+  dueDate: string;
+  notes?: string | null;
+  createdBy?: number;
+}): Promise<{ invoiceId: number; invoiceNumber: string }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  // Guard: prevent duplicate invoices for the same order
+  const existing = await getInvoiceByOrderId(data.orderId);
+  if (existing) {
+    throw new Error(`Invoice ${existing.invoiceNumber} already exists for this order`);
+  }
+
+  // Load the sales order and its items
+  const order = await getSalesOrderById(data.orderId);
+  if (!order) throw new Error("Sales order not found");
+
+  const items = await getSalesOrderItems(data.orderId);
+
+  const subtotal = Number(order.subtotal) || 0;
+  const taxAmount = Number(order.taxAmount) || 0;
+  const totalAmount = Number(order.totalAmount) || 0;
+
+  const invoiceNumber = await getNextInvoiceNumber();
+
+  // Insert the invoice header
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const invoiceInsertValues: any = {
+    invoiceNumber,
+    customerId: order.customerId,
+    orderId: data.orderId,
+    invoiceDate: data.invoiceDate,
+    dueDate: data.dueDate,
+    subtotal: subtotal.toFixed(2),
+    taxAmount: taxAmount.toFixed(2),
+    totalAmount: totalAmount.toFixed(2),
+    paidAmount: '0.00',
+    balanceDue: totalAmount.toFixed(2),
+    exclusiveTotal: subtotal,
+    vatAmount: taxAmount,
+    inclusiveTotal: totalAmount,
+    vatPercentage: '15.00',
+    status: 'draft',
+    notes: data.notes ?? null,
+    createdBy: data.createdBy,
+  };
+  const result = await db.insert(invoices).values(invoiceInsertValues);
+
+  const invoiceId = Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
+
+  // Copy line items from the sales order into invoice_items
+  if (items.length > 0) {
+    await db.insert(invoiceItems).values(
+      items.map((item) => {
+        const qty = Number(item.quantity) || 0;
+        const price = Number(item.unitPrice) || 0;
+        const taxRate = Number(item.taxRate) || 15;
+        const sub = qty * price;
+        const tax = sub * (taxRate / 100);
+        const total = sub + tax;
+        return {
+          invoiceId,
+          description: item.description,
+          quantity: qty.toFixed(2),
+          unit: item.unit || 'each',
+          unitPrice: Math.round(price * 100),
+          subtotal: Math.round(sub * 100),
+          taxRate: taxRate.toFixed(2),
+          taxAmount: Math.round(tax * 100),
+          totalAmount: Math.round(total * 100),
+        };
+      })
+    );
+  }
+
+  return { invoiceId, invoiceNumber };
 }
