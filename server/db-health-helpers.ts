@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { flockVaccinationSchedules, flockStressPackSchedules, vaccines, stressPacks } from "../drizzle/schema";
+import { flockVaccinationSchedules, flockStressPackSchedules, vaccines, stressPacks, users } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 
 /**
@@ -161,14 +161,35 @@ export async function getFlockStressPackSchedules(flockId: number) {
         .from(stressPacks)
         .where(eq(stressPacks.id, schedule.stressPackId))
         .limit(1);
+      const administratorResult = schedule.administeredBy
+        ? await db
+            .select({ id: users.id, name: users.name, email: users.email })
+            .from(users)
+            .where(eq(users.id, schedule.administeredBy))
+            .limit(1)
+        : [];
       return {
         ...schedule,
         stressPack: stressPackResult[0] || null,
+        administrator: administratorResult[0] || null,
       };
     })
   );
 
   return enriched;
+}
+
+/** Get one stress-pack schedule for protected administration controls. */
+export async function getFlockStressPackSchedule(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db
+    .select()
+    .from(flockStressPackSchedules)
+    .where(eq(flockStressPackSchedules.id, id))
+    .limit(1);
+  return result[0] || null;
 }
 
 /**

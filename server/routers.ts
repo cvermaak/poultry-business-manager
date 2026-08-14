@@ -20,6 +20,7 @@ import { processorRouter } from "./procedures/processor";
 import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
 import { catchRouter } from "./procedures/catch";
 import { densityRouter } from "./procedures/density";
+import { validateStressPackAdministration } from "./stress-pack-administration";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -959,7 +960,7 @@ export const appRouter = router({
       .input(
         z.object({
           id: z.number(),
-          status: z.enum(["scheduled", "active", "completed", "cancelled"]).optional(),
+          status: z.enum(["scheduled", "active", "cancelled"]).optional(),
           quantityUsed: z.string().optional(),
           notes: z.string().optional(),
         })
@@ -967,16 +968,53 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         const { updateFlockStressPackSchedule } = await import("./db-health-helpers");
-        await updateFlockStressPackSchedule(id, {
-          ...data,
-          ...(data.status === "completed" ? { administeredAt: new Date().toISOString().slice(0, 19).replace("T", " "), administeredBy: ctx.user.id } : {}),
-        });
+        await updateFlockStressPackSchedule(id, data);
         await db.logUserActivity(
           ctx.user.id,
           "update_stress_pack_schedule",
           "flock_stress_pack_schedule",
           id,
           `Updated stress pack schedule: ${id}`
+        );
+        return { success: true };
+      }),
+
+    administerStressPackSchedule: protectedProcedure
+      .input(z.object({
+        id: z.number().int().positive(),
+        administeredAt: z.date(),
+        quantityUsed: z.string().trim().min(1).max(100),
+        notes: z.string().trim().max(2000).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { getFlockStressPackSchedule, updateFlockStressPackSchedule } = await import("./db-health-helpers");
+        const schedule = await getFlockStressPackSchedule(input.id);
+        if (!schedule) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Stress-pack schedule not found." });
+        }
+
+        const validation = validateStressPackAdministration({
+          status: schedule.status,
+          quantityUsed: input.quantityUsed,
+          administeredAt: input.administeredAt,
+        });
+        if (!validation.ok) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: validation.error });
+        }
+
+        await updateFlockStressPackSchedule(input.id, {
+          status: "completed",
+          quantityUsed: input.quantityUsed.trim(),
+          notes: input.notes || undefined,
+          administeredAt: input.administeredAt.toISOString().slice(0, 19).replace("T", " "),
+          administeredBy: ctx.user.id,
+        });
+        await db.logUserActivity(
+          ctx.user.id,
+          "administer_stress_pack",
+          "flock_stress_pack_schedule",
+          input.id,
+          `Recorded stress-pack administration for schedule ${input.id}`,
         );
         return { success: true };
       }),

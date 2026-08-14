@@ -163,16 +163,15 @@ export default function FlockDetail() {
     },
   });
 
-  const updateStressPackSchedule = trpc.flocks.updateStressPackSchedule.useMutation({
+  const administerStressPackSchedule = trpc.flocks.administerStressPackSchedule.useMutation({
     onSuccess: () => {
       utils.flocks.getStressPackSchedules.invalidate({ flockId });
       utils.flocks.getActivityLogs.invalidate({ flockId });
-      toast.success("Stress pack usage recorded successfully");
-      setStressPackUpdateDialog({ open: false, scheduleId: null });
-      setStressPackUpdateForm({ status: "active", quantityUsed: "", notes: "" });
+      toast.success("Stress-pack administration recorded successfully");
+      closeStressPackAdministrationDialog();
     },
     onError: (error) => {
-      toast.error(`Failed to update stress pack: ${error.message}`);
+      toast.error(`Failed to record stress-pack administration: ${error.message}`);
     },
   });
 
@@ -238,7 +237,7 @@ export default function FlockDetail() {
   const [editingHealthRecordId, setEditingHealthRecordId] = useState<number | null>(null);
   const [vaccinationDialogOpen, setVaccinationDialogOpen] = useState(false);
   const [vaccinationUpdateDialog, setVaccinationUpdateDialog] = useState<{ open: boolean; scheduleId: number | null }>({ open: false, scheduleId: null });
-  const [stressPackUpdateDialog, setStressPackUpdateDialog] = useState<{ open: boolean; scheduleId: number | null }>({ open: false, scheduleId: null });
+  const [stressPackAdministrationDialog, setStressPackAdministrationDialog] = useState<{ open: boolean; schedule: any | null }>({ open: false, schedule: null });
   const [reminderActionDialog, setReminderActionDialog] = useState<{ open: boolean; reminderId: number | null; action: "complete" | "dismiss" | null }>({ open: false, reminderId: null, action: null });
   const [reminderActionNotes, setReminderActionNotes] = useState("");
   const [manualReminderDialogOpen, setManualReminderDialogOpen] = useState(false);
@@ -314,12 +313,30 @@ export default function FlockDetail() {
     notes: "",
   });
 
-  // Form states for stress pack update
-  const [stressPackUpdateForm, setStressPackUpdateForm] = useState({
-    status: "active" as "scheduled" | "active" | "completed" | "cancelled",
+  // Form states for confirmed stress-pack administration
+  const [stressPackAdministrationForm, setStressPackAdministrationForm] = useState({
+    administeredAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
     quantityUsed: "",
     notes: "",
   });
+
+  const openStressPackAdministrationDialog = (schedule: any) => {
+    setStressPackAdministrationDialog({ open: true, schedule });
+    setStressPackAdministrationForm({
+      administeredAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+      quantityUsed: schedule.quantityUsed || "",
+      notes: schedule.notes || "",
+    });
+  };
+
+  const closeStressPackAdministrationDialog = () => {
+    setStressPackAdministrationDialog({ open: false, schedule: null });
+    setStressPackAdministrationForm({
+      administeredAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+      quantityUsed: "",
+      notes: "",
+    });
+  };
 
   // Form states for manual reminder creation
   const [manualReminderForm, setManualReminderForm] = useState({
@@ -2286,7 +2303,12 @@ export default function FlockDetail() {
                           {schedule.quantityUsed || '-'}
                         </TableCell>
                         <TableCell>
-                          {schedule.administeredAt ? format(new Date(schedule.administeredAt), "dd MMM yyyy") : '-'}
+                          {schedule.administeredAt ? (
+                            <div className="text-sm">
+                              <div>{format(new Date(schedule.administeredAt), "dd MMM yyyy HH:mm")}</div>
+                              <div className="text-muted-foreground">{schedule.administrator?.name || schedule.administrator?.email || "Recorded user"}</div>
+                            </div>
+                          ) : '-'}
                         </TableCell>
                         <TableCell className="text-right">
                           {schedule.status !== 'completed' && schedule.status !== 'cancelled' && (
@@ -2294,15 +2316,10 @@ export default function FlockDetail() {
                               variant="outline"
                               size="sm"
                               onClick={() => {
-                                setStressPackUpdateDialog({ open: true, scheduleId: schedule.id });
-                                setStressPackUpdateForm({
-                                  status: schedule.status || "active",
-                                  quantityUsed: schedule.quantityUsed || "",
-                                  notes: "",
-                                });
+                                openStressPackAdministrationDialog(schedule);
                               }}
                             >
-                              Record Usage
+                              Record Administration
                             </Button>
                           )}
                         </TableCell>
@@ -3082,69 +3099,75 @@ export default function FlockDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Stress Pack Update Dialog */}
-      <Dialog open={stressPackUpdateDialog.open} onOpenChange={(open) => setStressPackUpdateDialog({ open, scheduleId: null })}>
-        <DialogContent>
+      {/* Stress Pack Administration Dialog */}
+      <Dialog open={stressPackAdministrationDialog.open} onOpenChange={(open) => !open && closeStressPackAdministrationDialog()}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Record Stress Pack Usage</DialogTitle>
+            <DialogTitle>Record Stress-Pack Administration</DialogTitle>
             <DialogDescription>
-              Update the status and quantity used for this stress pack administration period.
+              Confirm the product, planned protocol, actual administration time, quantity, and operational notes.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <Label htmlFor="stressPackStatus">Status</Label>
-              <Select 
-                value={stressPackUpdateForm.status} 
-                onValueChange={(value) => setStressPackUpdateForm({ ...stressPackUpdateForm, status: value as "scheduled" | "active" | "completed" | "cancelled" })}
-              >
-                <SelectTrigger id="stressPackStatus">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="scheduled">Scheduled</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-1">
+              <div className="font-medium">{stressPackAdministrationDialog.schedule?.stressPack?.name || `Stress Pack #${stressPackAdministrationDialog.schedule?.stressPackId ?? ""}`}</div>
+              <div className="text-muted-foreground">Planned: Day {stressPackAdministrationDialog.schedule?.startDay} to Day {stressPackAdministrationDialog.schedule?.endDay} · {stressPackAdministrationDialog.schedule?.dosageStrength || "single"} strength</div>
             </div>
-            <div>
+            <div className="space-y-2">
+              <Label htmlFor="stressPackAdministeredAt">Administration Date and Time *</Label>
+              <Input
+                id="stressPackAdministeredAt"
+                type="datetime-local"
+                max={format(new Date(), "yyyy-MM-dd'T'HH:mm")}
+                value={stressPackAdministrationForm.administeredAt}
+                onChange={(event) => setStressPackAdministrationForm({ ...stressPackAdministrationForm, administeredAt: event.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="quantityUsed">Quantity Used</Label>
               <Input
                 id="quantityUsed"
                 placeholder="e.g., 5kg, 10 liters, 200g per 1000 birds"
-                value={stressPackUpdateForm.quantityUsed}
-                onChange={(e) => setStressPackUpdateForm({ ...stressPackUpdateForm, quantityUsed: e.target.value })}
+                value={stressPackAdministrationForm.quantityUsed}
+                onChange={(e) => setStressPackAdministrationForm({ ...stressPackAdministrationForm, quantityUsed: e.target.value })}
               />
             </div>
-            <div>
+            <div className="space-y-2">
               <Label htmlFor="stressPackNotes">Notes (optional)</Label>
               <Textarea
                 id="stressPackNotes"
                 placeholder="Any observations, issues, or additional details..."
-                value={stressPackUpdateForm.notes}
-                onChange={(e) => setStressPackUpdateForm({ ...stressPackUpdateForm, notes: e.target.value })}
+                value={stressPackAdministrationForm.notes}
+                onChange={(e) => setStressPackAdministrationForm({ ...stressPackAdministrationForm, notes: e.target.value })}
                 rows={3}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setStressPackUpdateDialog({ open: false, scheduleId: null })}>Cancel</Button>
+            <Button variant="outline" onClick={closeStressPackAdministrationDialog}>Cancel</Button>
             <Button
               onClick={() => {
-                if (stressPackUpdateDialog.scheduleId) {
-                  updateStressPackSchedule.mutate({
-                    id: stressPackUpdateDialog.scheduleId,
-                    status: stressPackUpdateForm.status,
-                    quantityUsed: stressPackUpdateForm.quantityUsed || undefined,
-                    notes: stressPackUpdateForm.notes || undefined,
-                  });
+                const schedule = stressPackAdministrationDialog.schedule;
+                const administeredAt = new Date(stressPackAdministrationForm.administeredAt);
+                if (!schedule) return;
+                if (!stressPackAdministrationForm.quantityUsed.trim()) {
+                  toast.error("Quantity used is required.");
+                  return;
                 }
+                if (Number.isNaN(administeredAt.getTime()) || administeredAt.getTime() > Date.now()) {
+                  toast.error("Administration date and time must not be in the future.");
+                  return;
+                }
+                administerStressPackSchedule.mutate({
+                  id: schedule.id,
+                  administeredAt,
+                  quantityUsed: stressPackAdministrationForm.quantityUsed.trim(),
+                  notes: stressPackAdministrationForm.notes.trim() || undefined,
+                });
               }}
-              disabled={updateStressPackSchedule.isPending}
+              disabled={administerStressPackSchedule.isPending}
             >
-              {updateStressPackSchedule.isPending ? "Saving..." : "Save Usage"}
+              {administerStressPackSchedule.isPending ? "Recording..." : "Confirm Administration"}
             </Button>
           </DialogFooter>
         </DialogContent>
