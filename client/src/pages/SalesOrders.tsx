@@ -69,29 +69,21 @@ function today() {
 
 // ── Line Item Row ─────────────────────────────────────────────────────────────
 function LineItemRow({
-  item, index, onChange, onRemove,
+  item, index, onChangeRow, onRemove,
 }: {
   item: LineItem;
   index: number;
-  onChange: (i: number, field: keyof LineItem, value: any) => void;
+  onChangeRow: (i: number, updated: LineItem) => void;
   onRemove: (i: number) => void;
 }) {
   const recalc = (field: keyof LineItem, value: any) => {
-    const updated = { ...item, [field]: value };
-    if (field === "quantity" || field === "unitPrice" || field === "taxRate") {
-      const qty = Number(field === "quantity" ? value : item.quantity) || 0;
-      const price = Number(field === "unitPrice" ? value : item.unitPrice) || 0;
-      const rate = Number(field === "taxRate" ? value : item.taxRate) || 0;
-      updated.subtotal = qty * price;
-      updated.taxAmount = updated.subtotal * (rate / 100);
-      updated.totalAmount = updated.subtotal + updated.taxAmount;
-    }
-    onChange(index, field, value);
-    if (field === "quantity" || field === "unitPrice" || field === "taxRate") {
-      onChange(index, "subtotal", updated.subtotal);
-      onChange(index, "taxAmount", updated.taxAmount);
-      onChange(index, "totalAmount", updated.totalAmount);
-    }
+    const qty   = Number(field === "quantity"  ? value : item.quantity)  || 0;
+    const price = Number(field === "unitPrice" ? value : item.unitPrice) || 0;
+    const rate  = Number(field === "taxRate"   ? value : item.taxRate)   || 0;
+    const subtotal    = qty * price;
+    const taxAmount   = subtotal * (rate / 100);
+    const totalAmount = subtotal + taxAmount;
+    onChangeRow(index, { ...item, [field]: value, subtotal, taxAmount, totalAmount });
   };
 
   return (
@@ -106,11 +98,11 @@ function LineItemRow({
           </SelectContent>
         </Select>
       </TableCell>
-      <TableCell>
+      <TableCell className="w-40">
         <Input
           className="h-8 text-xs"
           value={item.description}
-          onChange={(e) => onChange(index, "description", e.target.value)}
+          onChange={(e) => onChangeRow(index, { ...item, description: e.target.value })}
           placeholder="Description"
         />
       </TableCell>
@@ -127,7 +119,7 @@ function LineItemRow({
         <Input
           className="h-8 text-xs"
           value={item.unit}
-          onChange={(e) => onChange(index, "unit", e.target.value)}
+          onChange={(e) => onChangeRow(index, { ...item, unit: e.target.value })}
           placeholder="kg / ea"
         />
       </TableCell>
@@ -141,7 +133,7 @@ function LineItemRow({
           onChange={(e) => recalc("unitPrice", parseFloat(e.target.value) || 0)}
         />
       </TableCell>
-      <TableCell className="w-16">
+      <TableCell className="w-20">
         <Input
           className="h-8 text-xs"
           type="number"
@@ -284,9 +276,8 @@ export default function SalesOrders() {
     ]);
   };
 
-  const changeItem = (items: LineItem[], setItems: (i: LineItem[]) => void, idx: number, field: keyof LineItem, value: any) => {
-    const updated = items.map((it, i) => (i === idx ? { ...it, [field]: value } : it));
-    setItems(updated);
+  const changeItem = (items: LineItem[], setItems: (i: LineItem[]) => void, idx: number, updatedRow: LineItem) => {
+    setItems(items.map((it, i) => (i === idx ? updatedRow : it)));
   };
 
   const removeItem = (items: LineItem[], setItems: (i: LineItem[]) => void, idx: number) => {
@@ -514,7 +505,7 @@ export default function SalesOrders() {
 
       {/* ── Create Dialog ── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] overflow-y-auto" style={{ width: '95vw', maxWidth: '1100px' }}>
           <DialogHeader>
             <DialogTitle>New Sales Order {nextNumber && <span className="text-muted-foreground font-normal">({nextNumber})</span>}</DialogTitle>
           </DialogHeader>
@@ -524,7 +515,7 @@ export default function SalesOrders() {
             items={createItems}
             setItems={setCreateItems}
             customers={customers as any[]}
-            onChangeItem={(i, f, v) => changeItem(createItems, setCreateItems, i, f, v)}
+            onChangeItem={(i, row) => changeItem(createItems, setCreateItems, i, row)}
             onRemoveItem={(i) => removeItem(createItems, setCreateItems, i)}
             onAddItem={() => addItem(createItems, setCreateItems)}
           />
@@ -539,7 +530,7 @@ export default function SalesOrders() {
 
       {/* ── Edit Dialog ── */}
       <Dialog open={!!editOrder} onOpenChange={(o) => !o && setEditOrder(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] overflow-y-auto" style={{ width: '95vw', maxWidth: '1100px' }}>
           <DialogHeader>
             <DialogTitle>Edit Order {editOrder?.orderNumber}</DialogTitle>
           </DialogHeader>
@@ -549,7 +540,7 @@ export default function SalesOrders() {
             items={editItems}
             setItems={setEditItems}
             customers={customers as any[]}
-            onChangeItem={(i, f, v) => changeItem(editItems, setEditItems, i, f, v)}
+            onChangeItem={(i, row) => changeItem(editItems, setEditItems, i, row)}
             onRemoveItem={(i) => removeItem(editItems, setEditItems, i)}
             onAddItem={() => addItem(editItems, setEditItems)}
           />
@@ -713,7 +704,7 @@ function OrderForm({
   items: LineItem[];
   setItems: (i: LineItem[]) => void;
   customers: any[];
-  onChangeItem: (i: number, f: keyof LineItem, v: any) => void;
+  onChangeItem: (i: number, row: LineItem) => void;
   onRemoveItem: (i: number) => void;
   onAddItem: () => void;
 }) {
@@ -787,14 +778,14 @@ function OrderForm({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Qty</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Unit Price</TableHead>
-                  <TableHead>VAT %</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead></TableHead>
+                  <TableHead className="w-32">Type</TableHead>
+                  <TableHead className="w-40">Description</TableHead>
+                  <TableHead className="w-20">Qty</TableHead>
+                  <TableHead className="w-20">Unit</TableHead>
+                  <TableHead className="w-24">Unit Price</TableHead>
+                  <TableHead className="w-20">VAT %</TableHead>
+                  <TableHead className="w-28 text-right">Total</TableHead>
+                  <TableHead className="w-10"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -803,7 +794,7 @@ function OrderForm({
                     key={idx}
                     item={item}
                     index={idx}
-                    onChange={onChangeItem}
+                    onChangeRow={onChangeItem}
                     onRemove={onRemoveItem}
                   />
                 ))}
