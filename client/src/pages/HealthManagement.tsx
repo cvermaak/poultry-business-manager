@@ -11,6 +11,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Syringe, Droplets, Plus, Edit, Trash2, Info, FileText, Copy, Star } from "lucide-react";
 import { toast } from "sonner";
+import {
+  buildStressPackCreateInput,
+  buildVaccineCreateInput,
+  type StressPackDosageStrength,
+  type VaccineApplicationMethod,
+  type VaccineDiseaseType,
+  type VaccineType,
+} from "@/lib/health-library-inputs";
 
 export default function HealthManagement() {
   const [selectedTab, setSelectedTab] = useState("vaccines");
@@ -22,6 +30,10 @@ export default function HealthManagement() {
   const [editingProtocol, setEditingProtocol] = useState<any>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<{ type: 'vaccine' | 'stressPack' | 'protocol', id: number } | null>(null);
+  const [vaccineDiseaseType, setVaccineDiseaseType] = useState<VaccineDiseaseType | "">("");
+  const [vaccineType, setVaccineType] = useState<VaccineType>("live");
+  const [vaccineApplicationMethod, setVaccineApplicationMethod] = useState<VaccineApplicationMethod | "">("");
+  const [stressPackDosageStrength, setStressPackDosageStrength] = useState<StressPackDosageStrength>("single");
 
   // Protocol form state
   const [protocolName, setProtocolName] = useState("");
@@ -124,46 +136,35 @@ export default function HealthManagement() {
 
   const handleVaccineSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const data = {
-      name: formData.get("name") as string,
-      brand: formData.get("brand") as string,
-      manufacturer: formData.get("manufacturer") as string || undefined,
-      diseaseType: formData.get("diseaseType") as any,
-      vaccineType: formData.get("vaccineType") as any,
-      applicationMethod: formData.get("applicationMethod") as any,
-      dosagePerBird: formData.get("dosagePerBird") as string || undefined,
-      boosterIntervalDays: formData.get("boosterIntervalDays") ? Number(formData.get("boosterIntervalDays")) : undefined,
-      instructions: formData.get("instructions") as string || undefined,
-      withdrawalPeriodDays: formData.get("withdrawalPeriodDays") ? Number(formData.get("withdrawalPeriodDays")) : undefined,
-      storageTemperature: formData.get("storageTemperature") as string || undefined,
-      shelfLifeDays: formData.get("shelfLifeDays") ? Number(formData.get("shelfLifeDays")) : undefined,
-    };
+    const result = buildVaccineCreateInput(new FormData(e.currentTarget), {
+      diseaseType: vaccineDiseaseType,
+      vaccineType,
+      applicationMethod: vaccineApplicationMethod,
+    });
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
 
     if (editingVaccine) {
-      updateVaccineMutation.mutate({ id: editingVaccine.id, ...data });
+      updateVaccineMutation.mutate({ id: editingVaccine.id, ...result.data });
     } else {
-      createVaccineMutation.mutate(data);
+      createVaccineMutation.mutate(result.data);
     }
   };
 
   const handleStressPackSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const data = {
-      name: formData.get("name") as string,
-      brand: formData.get("brand") as string,
-      dosageStrength: formData.get("dosageStrength") as any || undefined,
-      recommendedDurationDays: Number(formData.get("recommendedDurationDays")),
-      instructions: formData.get("instructions") as string || undefined,
-      costPerKg: formData.get("costPerKg") as string || undefined,
-      activeIngredients: formData.get("activeIngredients") as string || undefined,
-    };
+    const result = buildStressPackCreateInput(new FormData(e.currentTarget), stressPackDosageStrength);
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
 
     if (editingStressPack) {
-      updateStressPackMutation.mutate({ id: editingStressPack.id, ...data });
+      updateStressPackMutation.mutate({ id: editingStressPack.id, ...result.data });
     } else {
-      createStressPackMutation.mutate(data);
+      createStressPackMutation.mutate(result.data);
     }
   };
 
@@ -209,6 +210,34 @@ export default function HealthManagement() {
     setProtocolVaccinations([]);
     setProtocolStressPacks([]);
     setEditingProtocol(null);
+  };
+
+  const openVaccineDialog = (vaccine?: any) => {
+    setEditingVaccine(vaccine || null);
+    setVaccineDiseaseType(vaccine?.diseaseType || "");
+    setVaccineType(vaccine?.vaccineType || "live");
+    setVaccineApplicationMethod(vaccine?.applicationMethod || "");
+    setVaccineDialogOpen(true);
+  };
+
+  const closeVaccineDialog = () => {
+    setVaccineDialogOpen(false);
+    setEditingVaccine(null);
+    setVaccineDiseaseType("");
+    setVaccineType("live");
+    setVaccineApplicationMethod("");
+  };
+
+  const openStressPackDialog = (stressPack?: any) => {
+    setEditingStressPack(stressPack || null);
+    setStressPackDosageStrength(stressPack?.dosageStrength || "single");
+    setStressPackDialogOpen(true);
+  };
+
+  const closeStressPackDialog = () => {
+    setStressPackDialogOpen(false);
+    setEditingStressPack(null);
+    setStressPackDosageStrength("single");
   };
 
   const openProtocolDialog = (protocol?: any) => {
@@ -323,7 +352,7 @@ export default function HealthManagement() {
             <p className="text-sm text-muted-foreground">
               {vaccines?.length || 0} vaccines available
             </p>
-            <Button onClick={() => { setEditingVaccine(null); setVaccineDialogOpen(true); }}>
+            <Button onClick={() => openVaccineDialog()}>
               <Plus className="w-4 h-4 mr-2" />
               Add Vaccine
             </Button>
@@ -342,7 +371,7 @@ export default function HealthManagement() {
                         <CardDescription>{vaccine.brand}</CardDescription>
                       </div>
                       <div className="flex gap-1">
-                        <Button size="icon" variant="ghost" onClick={() => { setEditingVaccine(vaccine); setVaccineDialogOpen(true); }}>
+                        <Button size="icon" variant="ghost" onClick={() => openVaccineDialog(vaccine)}>
                           <Edit className="w-4 h-4" />
                         </Button>
                         <Button size="icon" variant="ghost" onClick={() => { setItemToDelete({ type: 'vaccine', id: vaccine.id }); setDeleteConfirmOpen(true); }}>
@@ -379,7 +408,7 @@ export default function HealthManagement() {
             <p className="text-sm text-muted-foreground">
               {stressPacks?.length || 0} stress packs available
             </p>
-            <Button onClick={() => { setEditingStressPack(null); setStressPackDialogOpen(true); }}>
+            <Button onClick={() => openStressPackDialog()}>
               <Plus className="w-4 h-4 mr-2" />
               Add Stress Pack
             </Button>
@@ -398,7 +427,7 @@ export default function HealthManagement() {
                         <CardDescription>{stressPack.brand}</CardDescription>
                       </div>
                       <div className="flex gap-1">
-                        <Button size="icon" variant="ghost" onClick={() => { setEditingStressPack(stressPack); setStressPackDialogOpen(true); }}>
+                        <Button size="icon" variant="ghost" onClick={() => openStressPackDialog(stressPack)}>
                           <Edit className="w-4 h-4" />
                         </Button>
                         <Button size="icon" variant="ghost" onClick={() => { setItemToDelete({ type: 'stressPack', id: stressPack.id }); setDeleteConfirmOpen(true); }}>
@@ -498,7 +527,7 @@ export default function HealthManagement() {
       </Tabs>
 
       {/* Vaccine Form Dialog */}
-      <Dialog open={vaccineDialogOpen} onOpenChange={setVaccineDialogOpen}>
+      <Dialog open={vaccineDialogOpen} onOpenChange={(open) => open ? setVaccineDialogOpen(true) : closeVaccineDialog()}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingVaccine ? "Edit Vaccine" : "Add New Vaccine"}</DialogTitle>
@@ -522,7 +551,7 @@ export default function HealthManagement() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="diseaseType">Disease Type *</Label>
-                <Select name="diseaseType" required defaultValue={editingVaccine?.diseaseType}>
+                <Select value={vaccineDiseaseType} onValueChange={(value) => setVaccineDiseaseType(value as VaccineDiseaseType)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select disease" />
                   </SelectTrigger>
@@ -539,7 +568,7 @@ export default function HealthManagement() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="vaccineType">Vaccine Type *</Label>
-                <Select name="vaccineType" required defaultValue={editingVaccine?.vaccineType || "live"}>
+                <Select value={vaccineType} onValueChange={(value) => setVaccineType(value as VaccineType)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
@@ -552,7 +581,7 @@ export default function HealthManagement() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="applicationMethod">Application Method *</Label>
-                <Select name="applicationMethod" required defaultValue={editingVaccine?.applicationMethod}>
+                <Select value={vaccineApplicationMethod} onValueChange={(value) => setVaccineApplicationMethod(value as VaccineApplicationMethod)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select method" />
                   </SelectTrigger>
@@ -591,7 +620,7 @@ export default function HealthManagement() {
               <Textarea id="instructions" name="instructions" rows={3} defaultValue={editingVaccine?.instructions} />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => { setVaccineDialogOpen(false); setEditingVaccine(null); }}>
+              <Button type="button" variant="outline" onClick={closeVaccineDialog}>
                 Cancel
               </Button>
               <Button type="submit" disabled={createVaccineMutation.isPending || updateVaccineMutation.isPending}>
@@ -603,7 +632,7 @@ export default function HealthManagement() {
       </Dialog>
 
       {/* Stress Pack Form Dialog */}
-      <Dialog open={stressPackDialogOpen} onOpenChange={setStressPackDialogOpen}>
+      <Dialog open={stressPackDialogOpen} onOpenChange={(open) => open ? setStressPackDialogOpen(true) : closeStressPackDialog()}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingStressPack ? "Edit Stress Pack" : "Add New Stress Pack"}</DialogTitle>
@@ -623,7 +652,7 @@ export default function HealthManagement() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="dosageStrength">Dosage Strength</Label>
-                <Select name="dosageStrength" defaultValue={editingStressPack?.dosageStrength || "single"}>
+                <Select value={stressPackDosageStrength} onValueChange={(value) => setStressPackDosageStrength(value as StressPackDosageStrength)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select strength" />
                   </SelectTrigger>
@@ -652,7 +681,7 @@ export default function HealthManagement() {
               <Textarea id="sp-instructions" name="instructions" rows={3} defaultValue={editingStressPack?.instructions} />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => { setStressPackDialogOpen(false); setEditingStressPack(null); }}>
+              <Button type="button" variant="outline" onClick={closeStressPackDialog}>
                 Cancel
               </Button>
               <Button type="submit" disabled={createStressPackMutation.isPending || updateStressPackMutation.isPending}>
