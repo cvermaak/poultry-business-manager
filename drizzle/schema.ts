@@ -334,6 +334,8 @@ export const flockStressPackSchedules = mysqlTable("flock_stress_pack_schedules"
 	dosageStrength: mysqlEnum("dosage_strength", ['single','double','triple']).default('single'),
 	status: mysqlEnum(['scheduled','active','completed','cancelled']).default('scheduled'),
 	quantityUsed: varchar("quantity_used", { length: 100 }),
+	administeredAt: timestamp("administered_at", { mode: 'string' }),
+	administeredBy: int("administered_by").references(() => users.id),
 	notes: text(),
 	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
@@ -909,6 +911,25 @@ export const reminderTemplates = mysqlTable("reminder_templates", {
 	bundleConfig: json("bundle_config"),
 });
 
+export const preTransportProtocols = mysqlTable("pre_transport_protocols", {
+	id: int().autoincrement().notNull(),
+	flockId: int("flock_id").notNull().references(() => flocks.id),
+	collectionDate: varchar("collection_date", { length: 20 }).notNull(),
+	collectionTime: varchar("collection_time", { length: 10 }).notNull(),
+	travelDurationHours: decimal("travel_duration_hours", { precision: 5, scale: 2 }).default('0.00').notNull(),
+	feedWithdrawalHours: int("feed_withdrawal_hours").default(8).notNull(),
+	stressPackId: int("stress_pack_id").references(() => stressPacks.id),
+	dosageStrength: mysqlEnum("dosage_strength", ['single','double','triple']).default('single'),
+	status: mysqlEnum(['planned','completed','cancelled']).default('planned').notNull(),
+	notes: text(),
+	createdBy: int("created_by").references(() => users.id),
+	createdAt: timestamp("created_at", { mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+	index("idx_pre_transport_protocols_flock_id").on(table.flockId),
+	index("idx_pre_transport_protocols_collection_date").on(table.collectionDate),
+]);
+
 export const reminders = mysqlTable("reminders", {
 	id: int().autoincrement().notNull(),
 	flockId: int().references(() => flocks.id),
@@ -925,6 +946,7 @@ export const reminders = mysqlTable("reminders", {
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
 	actionNotes: text(),
 	templateId: int().references(() => reminderTemplates.id),
+	preTransportProtocolId: int("pre_transport_protocol_id"),
 },
 (table) => [
 	index("idx_reminders_flock_id").on(table.flockId),

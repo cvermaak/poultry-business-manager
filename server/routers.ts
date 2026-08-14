@@ -967,7 +967,10 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         const { updateFlockStressPackSchedule } = await import("./db-health-helpers");
-        await updateFlockStressPackSchedule(id, data);
+        await updateFlockStressPackSchedule(id, {
+          ...data,
+          ...(data.status === "completed" ? { administeredAt: new Date().toISOString().slice(0, 19).replace("T", " "), administeredBy: ctx.user.id } : {}),
+        });
         await db.logUserActivity(
           ctx.user.id,
           "update_stress_pack_schedule",
@@ -1213,6 +1216,78 @@ export const appRouter = router({
   }),
 
   // ============================================================================
+  // SUPPLIER PURCHASE ORDERS
+  // ============================================================================
+  purchaseOrders: router({
+    list: protectedProcedure
+      .input(z.object({
+        supplierId: z.number().optional(),
+        status: z.enum(["draft", "sent", "confirmed", "delivered", "cancelled"]).optional(),
+      }).optional())
+      .query(async ({ input }) => db.listPurchaseOrders(input ?? undefined)),
+    getNextNumber: protectedProcedure.query(async () => ({ orderNumber: await db.getNextPurchaseOrderNumber() })),
+    get: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => db.getPurchaseOrderById(input.id)),
+    getItems: protectedProcedure.input(z.object({ orderId: z.number() })).query(async ({ input }) => db.getPurchaseOrderItems(input.orderId)),
+    create: protectedProcedure
+      .input(z.object({
+        supplierId: z.number(),
+        orderDate: z.string().min(1),
+        expectedDeliveryDate: z.string().nullable().optional(),
+        notes: z.string().nullable().optional(),
+        items: z.array(z.object({
+          description: z.string().min(1),
+          quantity: z.number().positive(),
+          unit: z.string().min(1),
+          unitPriceCents: z.number().int().nonnegative(),
+          scheduleId: z.number().nullable().optional(),
+        })).min(1),
+      }))
+      .mutation(async ({ input, ctx }) => db.createPurchaseOrder({ ...input, createdBy: ctx.user.id })),
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        expectedDeliveryDate: z.string().nullable().optional(),
+        notes: z.string().nullable().optional(),
+        items: z.array(z.object({
+          description: z.string().min(1),
+          quantity: z.number().positive(),
+          unit: z.string().min(1),
+          unitPriceCents: z.number().int().nonnegative(),
+          scheduleId: z.number().nullable().optional(),
+        })).min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        await db.updatePurchaseOrder(id, data);
+        return { success: true };
+      }),
+    send: protectedProcedure
+      .input(z.object({ id: z.number(), sentVia: z.enum(["email", "whatsapp", "phone", "manual"]) }))
+      .mutation(async ({ input }) => {
+        await db.transitionPurchaseOrder(input.id, "sent", { sentVia: input.sentVia });
+        return { success: true };
+      }),
+    confirm: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+      await db.transitionPurchaseOrder(input.id, "confirmed");
+      return { success: true };
+    }),
+    receive: protectedProcedure
+      .input(z.object({ id: z.number(), actualDeliveryDate: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        await db.transitionPurchaseOrder(input.id, "delivered", { actualDeliveryDate: input.actualDeliveryDate });
+        return { success: true };
+      }),
+    cancel: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+      await db.transitionPurchaseOrder(input.id, "cancelled");
+      return { success: true };
+    }),
+    delete: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
+      await db.deletePurchaseOrder(input.id);
+      return { success: true };
+    }),
+  }),
+
+  // ============================================================================
   // REMINDERS & ALERTS
   // ============================================================================
   reminders: router({
@@ -1360,6 +1435,30 @@ export const appRouter = router({
     listStressPacks: protectedProcedure.query(async () => {
       return await db.listStressPacks();
     }),
+
+    listPreTransportProtocols: protectedProcedure
+      .input(z.object({ flockId: z.number() }))
+      .query(async ({ input }) => db.listPreTransportProtocols(input.flockId)),
+
+    createPreTransportProtocol: protectedProcedure
+      .input(z.object({
+        flockId: z.number(),
+        collectionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        collectionTime: z.string().regex(/^\d{2}:\d{2}$/),
+        travelDurationHours: z.string(),
+        feedWithdrawalHours: z.number().int().min(1).max(24),
+        stressPackId: z.number().nullable().optional(),
+        dosageStrength: z.enum(["single", "double", "triple"]).optional(),
+        notes: z.string().nullable().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => db.createPreTransportProtocol({ ...input, createdBy: ctx.user.id })),
+
+    updatePreTransportProtocolStatus: protectedProcedure
+      .input(z.object({ id: z.number(), status: z.enum(["completed", "cancelled"]) }))
+      .mutation(async ({ input }) => {
+        await db.updatePreTransportProtocolStatus(input.id, input.status);
+        return { success: true };
+      }),
 
     getVaccineById: protectedProcedure
       .input(z.object({ id: z.number() }))
@@ -2361,17 +2460,22 @@ export const appRouter = router({
         customerId: z.number(),
         feedRange: z.enum(['premium','value','econo']),
         feedType: z.enum(['starter','grower','finisher']),
+        asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates").optional(),
       }))
       .query(async ({ input }) => {
-        const rows = await db.listCustomerFeedPrices({
-          customerId: input.customerId,
-          feedRange: input.feedRange,
-          feedType: input.feedType,
+        return await db.getEffectiveCustomerFeedPrice({
+          ...input,
+          asOfDate: input.asOfDate ?? new Date().toISOString().slice(0, 10),
         });
-        // Return the most recent effective price
-        if (rows.length === 0) return null;
-        return rows.sort((a: any, b: any) => b.effectiveDate.localeCompare(a.effectiveDate))[0];
       }),
+
+    getMillCostForDate: protectedProcedure
+      .input(z.object({
+        feedRange: z.enum(['premium','value','econo']),
+        feedType: z.enum(['starter','grower','finisher']),
+        asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+      }))
+      .query(async ({ input }) => db.getEffectiveMillCost(input)),
   }),
 
   // ============================================================================

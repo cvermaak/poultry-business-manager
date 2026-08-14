@@ -180,6 +180,8 @@ export async function updateFlockStressPackSchedule(
     status?: "scheduled" | "active" | "completed" | "cancelled";
     quantityUsed?: string;
     notes?: string;
+    administeredAt?: string;
+    administeredBy?: number;
   }
 ) {
   const db = await getDb();
@@ -207,8 +209,14 @@ export async function updateFlockVaccinationSchedule(
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  const { actualDate, ...updates } = data;
+  const values = {
+    ...updates,
+    ...(actualDate ? { actualDate: actualDate.toISOString().slice(0, 19).replace("T", " ") } : {}),
+  };
+
   await db
     .update(flockVaccinationSchedules)
-    .set(data)
+    .set(values)
     .where(eq(flockVaccinationSchedules.id, id));
 }

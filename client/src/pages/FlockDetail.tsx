@@ -55,6 +55,8 @@ export default function FlockDetail() {
   });
   const { data: vaccinationSchedules } = trpc.flocks.getVaccinationSchedules.useQuery({ flockId });
   const { data: stressPackSchedules } = trpc.flocks.getStressPackSchedules.useQuery({ flockId });
+  const { data: preTransportProtocols = [] } = trpc.health.listPreTransportProtocols.useQuery({ flockId });
+  const { data: availableStressPacks = [] } = trpc.health.listStressPacks.useQuery();
   const { data: flockReminders } = trpc.reminders.list.useQuery({ flockId });
   const { data: allTemplates } = trpc.reminderTemplates.list.useQuery();
   const { data: appliedTemplates } = trpc.reminderTemplates.getAppliedTemplates.useQuery({ flockId });
@@ -174,6 +176,26 @@ export default function FlockDetail() {
     },
   });
 
+  const createPreTransportProtocol = trpc.health.createPreTransportProtocol.useMutation({
+    onSuccess: () => {
+      utils.health.listPreTransportProtocols.invalidate({ flockId });
+      utils.reminders.list.invalidate({ flockId });
+      toast.success("Pre-transport protocol and reminders created");
+      setPreTransportDialogOpen(false);
+      setPreTransportForm(defaultPreTransportForm());
+    },
+    onError: (error) => toast.error(`Failed to create protocol: ${error.message}`),
+  });
+
+  const updatePreTransportProtocolStatus = trpc.health.updatePreTransportProtocolStatus.useMutation({
+    onSuccess: () => {
+      utils.health.listPreTransportProtocols.invalidate({ flockId });
+      utils.reminders.list.invalidate({ flockId });
+      toast.success("Pre-transport protocol updated");
+    },
+    onError: (error) => toast.error(`Failed to update protocol: ${error.message}`),
+  });
+
   // Reminder update mutation
   const updateReminderStatus = trpc.reminders.updateStatus.useMutation({
     onSuccess: () => {
@@ -221,6 +243,17 @@ export default function FlockDetail() {
   const [reminderActionNotes, setReminderActionNotes] = useState("");
   const [manualReminderDialogOpen, setManualReminderDialogOpen] = useState(false);
   const [activityLogFilter, setActivityLogFilter] = useState<string>("all");
+  const defaultPreTransportForm = () => ({
+    collectionDate: format(new Date(), "yyyy-MM-dd"),
+    collectionTime: "06:00",
+    travelDurationHours: "2.00",
+    feedWithdrawalHours: "8",
+    stressPackId: "none",
+    dosageStrength: "single" as "single" | "double" | "triple",
+    notes: "",
+  });
+  const [preTransportDialogOpen, setPreTransportDialogOpen] = useState(false);
+  const [preTransportForm, setPreTransportForm] = useState(defaultPreTransportForm);
 
   // Track previous feed type to detect transitions
   const [prevFeedType, setPrevFeedType] = useState<"starter" | "grower" | "finisher" | null>(null);
@@ -2222,6 +2255,7 @@ export default function FlockDetail() {
                       <TableHead>Dosage Strength</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Quantity Used</TableHead>
+                      <TableHead>Recorded</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2251,6 +2285,9 @@ export default function FlockDetail() {
                         <TableCell>
                           {schedule.quantityUsed || '-'}
                         </TableCell>
+                        <TableCell>
+                          {schedule.administeredAt ? format(new Date(schedule.administeredAt), "dd MMM yyyy") : '-'}
+                        </TableCell>
                         <TableCell className="text-right">
                           {schedule.status !== 'completed' && schedule.status !== 'cancelled' && (
                             <Button
@@ -2278,6 +2315,37 @@ export default function FlockDetail() {
                   No stress pack schedule configured for this flock.
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <div>
+                <CardTitle>Pre-Transport Protocol</CardTitle>
+                <CardDescription>Plan stress support, feed withdrawal, and collection preparation. Saving a protocol creates linked flock reminders.</CardDescription>
+              </div>
+              <Button size="sm" onClick={() => setPreTransportDialogOpen(true)}><Plus className="mr-1 h-4 w-4" />Plan Collection</Button>
+            </CardHeader>
+            <CardContent>
+              {preTransportProtocols.length ? (
+                <Table>
+                  <TableHeader><TableRow><TableHead>Collection</TableHead><TableHead>Travel</TableHead><TableHead>Withdrawal</TableHead><TableHead>Stress Support</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {preTransportProtocols.map((protocol: any) => (
+                      <TableRow key={protocol.id}>
+                        <TableCell>{protocol.collectionDate} at {protocol.collectionTime}</TableCell>
+                        <TableCell>{protocol.travelDurationHours} h</TableCell>
+                        <TableCell>{protocol.feedWithdrawalHours} h</TableCell>
+                        <TableCell>{protocol.stressPackName || "General support"}</TableCell>
+                        <TableCell><Badge variant={protocol.status === "completed" ? "default" : protocol.status === "cancelled" ? "destructive" : "outline"}>{protocol.status}</Badge></TableCell>
+                        <TableCell className="text-right space-x-2">
+                          {protocol.status === "planned" && <><Button variant="outline" size="sm" onClick={() => updatePreTransportProtocolStatus.mutate({ id: protocol.id, status: "completed" })}>Complete</Button><Button variant="outline" size="sm" onClick={() => updatePreTransportProtocolStatus.mutate({ id: protocol.id, status: "cancelled" })}>Cancel</Button></>}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : <p className="py-4 text-center text-sm text-muted-foreground">No collection protocol has been planned for this flock.</p>}
             </CardContent>
           </Card>
         </TabsContent>
@@ -2383,10 +2451,10 @@ export default function FlockDetail() {
                         createManualReminder.mutate({
                           flockId,
                           houseId: flock.houseId,
-                          reminderType: manualReminderForm.reminderType,
+                          reminderType: manualReminderForm.reminderType as "vaccination" | "feed_transition" | "house_preparation" | "environmental_check" | "routine_task" | "milestone" | "biosecurity" | "performance_alert",
                           title: manualReminderForm.title,
                           description: manualReminderForm.description || undefined,
-                          dueDate: new Date(manualReminderForm.dueDate),
+                          dueDate: manualReminderForm.dueDate,
                           priority: manualReminderForm.priority,
                         });
                       }}
@@ -3078,6 +3146,28 @@ export default function FlockDetail() {
             >
               {updateStressPackSchedule.isPending ? "Saving..." : "Save Usage"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={preTransportDialogOpen} onOpenChange={setPreTransportDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Plan Pre-Transport Protocol</DialogTitle>
+            <DialogDescription>Uses South African operational time and creates Day -3 stress support, feed-withdrawal, and collection reminders.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2 sm:grid-cols-2">
+            <div className="space-y-1"><Label>Collection Date</Label><Input type="date" value={preTransportForm.collectionDate} onChange={(event) => setPreTransportForm({ ...preTransportForm, collectionDate: event.target.value })} /></div>
+            <div className="space-y-1"><Label>Collection Time</Label><Input type="time" value={preTransportForm.collectionTime} onChange={(event) => setPreTransportForm({ ...preTransportForm, collectionTime: event.target.value })} /></div>
+            <div className="space-y-1"><Label>Travel Duration (hours)</Label><Input type="number" min="0" step="0.5" value={preTransportForm.travelDurationHours} onChange={(event) => setPreTransportForm({ ...preTransportForm, travelDurationHours: event.target.value })} /></div>
+            <div className="space-y-1"><Label>Feed Withdrawal (hours)</Label><Input type="number" min="1" max="24" value={preTransportForm.feedWithdrawalHours} onChange={(event) => setPreTransportForm({ ...preTransportForm, feedWithdrawalHours: event.target.value })} /></div>
+            <div className="space-y-1"><Label>Stress Pack</Label><Select value={preTransportForm.stressPackId} onValueChange={(value) => setPreTransportForm({ ...preTransportForm, stressPackId: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">General support only</SelectItem>{availableStressPacks.map((pack: any) => <SelectItem key={pack.id} value={String(pack.id)}>{pack.name}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1"><Label>Dosage Strength</Label><Select value={preTransportForm.dosageStrength} onValueChange={(value: "single" | "double" | "triple") => setPreTransportForm({ ...preTransportForm, dosageStrength: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="single">Single</SelectItem><SelectItem value="double">Double</SelectItem><SelectItem value="triple">Triple</SelectItem></SelectContent></Select></div>
+            <div className="space-y-1 sm:col-span-2"><Label>Notes</Label><Textarea value={preTransportForm.notes} onChange={(event) => setPreTransportForm({ ...preTransportForm, notes: event.target.value })} placeholder="Destination, processor instructions, or handling notes" /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreTransportDialogOpen(false)}>Cancel</Button>
+            <Button disabled={createPreTransportProtocol.isPending} onClick={() => createPreTransportProtocol.mutate({ flockId, collectionDate: preTransportForm.collectionDate, collectionTime: preTransportForm.collectionTime, travelDurationHours: preTransportForm.travelDurationHours, feedWithdrawalHours: Number(preTransportForm.feedWithdrawalHours), stressPackId: preTransportForm.stressPackId === "none" ? null : Number(preTransportForm.stressPackId), dosageStrength: preTransportForm.dosageStrength, notes: preTransportForm.notes || null })}>{createPreTransportProtocol.isPending ? "Saving…" : "Save Protocol"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

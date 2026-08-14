@@ -58,6 +58,7 @@ import {
   additiveInventoryMappings,
   inventoryStock,
   millInvoices,
+  preTransportProtocols,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -66,6 +67,15 @@ import {
   calculateCashFlowStatement,
   calculateProfitAndLossReport,
 } from "./financial-reporting";
+import { selectEffectiveDatedRecord } from "./feed-pricing";
+import {
+  calculatePurchaseOrderLineTotal,
+  calculatePurchaseOrderTotal,
+  canTransitionPurchaseOrder,
+  type PurchaseOrderLineInput,
+  type PurchaseOrderStatus,
+} from "./purchase-orders";
+import { calculatePreTransportSchedule } from "./pre-transport-protocol";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -132,6 +142,7 @@ export async function getDb() {
           additiveInventoryMappings,
           inventoryStock,
           millInvoices,
+          preTransportProtocols,
         },
       });
     } catch (error) {
@@ -3802,6 +3813,15 @@ export async function getMillCost(id: number) {
   return rows[0] ?? null;
 }
 
+export async function getEffectiveMillCost(input: {
+  feedRange: 'premium' | 'value' | 'econo';
+  feedType: 'starter' | 'grower' | 'finisher';
+  asOfDate: string;
+}) {
+  const rows = await listMillCosts({ feedRange: input.feedRange, feedType: input.feedType });
+  return selectEffectiveDatedRecord(rows, input.asOfDate);
+}
+
 export async function createMillCost(data: {
   feedRange: 'premium' | 'value' | 'econo';
   feedType: 'starter' | 'grower' | 'finisher';
@@ -3885,6 +3905,20 @@ export async function getCustomerFeedPrice(id: number) {
   if (!db) return null;
   const rows = await db.select().from(customerFeedPrices).where(eq(customerFeedPrices.id, id)).limit(1);
   return rows[0] ?? null;
+}
+
+export async function getEffectiveCustomerFeedPrice(input: {
+  customerId: number;
+  feedRange: 'premium' | 'value' | 'econo';
+  feedType: 'starter' | 'grower' | 'finisher';
+  asOfDate: string;
+}) {
+  const rows = await listCustomerFeedPrices({
+    customerId: input.customerId,
+    feedRange: input.feedRange,
+    feedType: input.feedType,
+  });
+  return selectEffectiveDatedRecord(rows, input.asOfDate);
 }
 
 export async function createCustomerFeedPrice(data: {
@@ -5395,4 +5429,306 @@ export async function createInvoiceFromSalesOrder(data: {
   }
 
   return { invoiceId, invoiceNumber };
+}
+
+// ============================================================================
+// SUPPLIER PURCHASE ORDERS
+// ============================================================================
+
+type PurchaseOrderLineData = PurchaseOrderLineInput & {
+  unit: string;
+  scheduleId?: number | null;
+};
+
+function formatPurchaseOrderNumber(nextSequence: number) {
+  return `PO-${String(nextSequence).padStart(4, "0")}`;
+}
+
+export async function getNextPurchaseOrderNumber() {
+  const db = await getDb();
+  if (!db) return formatPurchaseOrderNumber(1);
+  const rows = await db.select({ orderNumber: procurementOrders.orderNumber }).from(procurementOrders);
+  const highestSequence = rows.reduce((highest, row) => {
+    const match = /^PO-(\d+)$/.exec(row.orderNumber ?? "");
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0);
+  return formatPurchaseOrderNumber(highestSequence + 1);
+}
+
+export async function listPurchaseOrders(filters?: { supplierId?: number; status?: PurchaseOrderStatus }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (filters?.supplierId) conditions.push(eq(procurementOrders.supplierId, filters.supplierId));
+  if (filters?.status) conditions.push(eq(procurementOrders.status, filters.status));
+  const query = db
+    .select({
+      id: procurementOrders.id,
+      orderNumber: procurementOrders.orderNumber,
+      supplierId: procurementOrders.supplierId,
+      supplierName: suppliers.name,
+      orderDate: procurementOrders.orderDate,
+      expectedDeliveryDate: procurementOrders.expectedDeliveryDate,
+      actualDeliveryDate: procurementOrders.actualDeliveryDate,
+      totalAmount: procurementOrders.totalAmount,
+      status: procurementOrders.status,
+      sentVia: procurementOrders.sentVia,
+      sentAt: procurementOrders.sentAt,
+      confirmedAt: procurementOrders.confirmedAt,
+      notes: procurementOrders.notes,
+      createdAt: procurementOrders.createdAt,
+    })
+    .from(procurementOrders)
+    .leftJoin(suppliers, eq(procurementOrders.supplierId, suppliers.id))
+    .orderBy(desc(procurementOrders.orderDate), desc(procurementOrders.id));
+  return conditions.length ? await query.where(and(...conditions)) : await query;
+}
+
+export async function getPurchaseOrderById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select({
+      id: procurementOrders.id,
+      orderNumber: procurementOrders.orderNumber,
+      supplierId: procurementOrders.supplierId,
+      supplierName: suppliers.name,
+      supplierEmail: suppliers.email,
+      supplierPhone: suppliers.phone,
+      orderDate: procurementOrders.orderDate,
+      expectedDeliveryDate: procurementOrders.expectedDeliveryDate,
+      actualDeliveryDate: procurementOrders.actualDeliveryDate,
+      totalAmount: procurementOrders.totalAmount,
+      status: procurementOrders.status,
+      sentVia: procurementOrders.sentVia,
+      sentAt: procurementOrders.sentAt,
+      confirmedAt: procurementOrders.confirmedAt,
+      notes: procurementOrders.notes,
+      createdAt: procurementOrders.createdAt,
+    })
+    .from(procurementOrders)
+    .leftJoin(suppliers, eq(procurementOrders.supplierId, suppliers.id))
+    .where(eq(procurementOrders.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function getPurchaseOrderItems(orderId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db
+    .select()
+    .from(procurementOrderItems)
+    .where(eq(procurementOrderItems.orderId, orderId))
+    .orderBy(asc(procurementOrderItems.id));
+}
+
+function validatePurchaseOrderItems(items: PurchaseOrderLineData[]) {
+  if (!items.length) throw new Error("A purchase order requires at least one line item");
+  for (const item of items) {
+    if (!item.description.trim()) throw new Error("Each line item needs a description");
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error("Line quantity must be greater than zero");
+    if (!Number.isInteger(item.unitPriceCents) || item.unitPriceCents < 0) throw new Error("Line unit price is invalid");
+  }
+}
+
+export async function createPurchaseOrder(data: {
+  supplierId: number;
+  orderDate: string;
+  expectedDeliveryDate?: string | null;
+  notes?: string | null;
+  createdBy: number;
+  items: PurchaseOrderLineData[];
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  validatePurchaseOrderItems(data.items);
+  const supplier = await db.select({ id: suppliers.id, isActive: suppliers.isActive }).from(suppliers).where(eq(suppliers.id, data.supplierId)).limit(1);
+  if (!supplier[0]) throw new Error("Supplier not found");
+  if (!supplier[0].isActive) throw new Error("Inactive suppliers cannot receive new purchase orders");
+
+  const orderNumber = await getNextPurchaseOrderNumber();
+  const totalAmount = calculatePurchaseOrderTotal(data.items);
+  const created = await db.insert(procurementOrders).values({
+    orderNumber,
+    supplierId: data.supplierId,
+    orderDate: data.orderDate,
+    expectedDeliveryDate: data.expectedDeliveryDate ?? null,
+    totalAmount,
+    status: "draft",
+    notes: data.notes ?? null,
+    createdBy: data.createdBy,
+  });
+  const orderId = Number((created as any)[0]?.insertId ?? (created as any).insertId ?? 0);
+  await db.insert(procurementOrderItems).values(data.items.map((item) => ({
+    orderId,
+    scheduleId: item.scheduleId ?? null,
+    description: item.description.trim(),
+    quantity: item.quantity.toFixed(2),
+    unit: item.unit.trim() || "each",
+    unitPrice: item.unitPriceCents,
+    totalAmount: calculatePurchaseOrderLineTotal(item),
+  })));
+  return { id: orderId, orderNumber };
+}
+
+export async function updatePurchaseOrder(id: number, data: {
+  expectedDeliveryDate?: string | null;
+  notes?: string | null;
+  items: PurchaseOrderLineData[];
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const order = await getPurchaseOrderById(id);
+  if (!order) throw new Error("Purchase order not found");
+  if (order.status !== "draft") throw new Error("Only draft purchase orders can be edited");
+  validatePurchaseOrderItems(data.items);
+  await db.update(procurementOrders).set({
+    expectedDeliveryDate: data.expectedDeliveryDate ?? null,
+    notes: data.notes ?? null,
+    totalAmount: calculatePurchaseOrderTotal(data.items),
+  }).where(eq(procurementOrders.id, id));
+  await db.delete(procurementOrderItems).where(eq(procurementOrderItems.orderId, id));
+  await db.insert(procurementOrderItems).values(data.items.map((item) => ({
+    orderId: id,
+    scheduleId: item.scheduleId ?? null,
+    description: item.description.trim(),
+    quantity: item.quantity.toFixed(2),
+    unit: item.unit.trim() || "each",
+    unitPrice: item.unitPriceCents,
+    totalAmount: calculatePurchaseOrderLineTotal(item),
+  })));
+}
+
+export async function transitionPurchaseOrder(id: number, targetStatus: PurchaseOrderStatus, options?: {
+  sentVia?: "email" | "whatsapp" | "phone" | "manual";
+  actualDeliveryDate?: string;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const order = await getPurchaseOrderById(id);
+  if (!order) throw new Error("Purchase order not found");
+  if (!canTransitionPurchaseOrder(order.status as PurchaseOrderStatus, targetStatus)) {
+    throw new Error(`Cannot change a ${order.status} purchase order to ${targetStatus}`);
+  }
+  const update: Record<string, unknown> = { status: targetStatus };
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+  if (targetStatus === "sent") {
+    update.sentAt = now;
+    update.sentVia = options?.sentVia ?? "manual";
+  }
+  if (targetStatus === "confirmed") update.confirmedAt = now;
+  if (targetStatus === "delivered") update.actualDeliveryDate = options?.actualDeliveryDate ?? now;
+  await db.update(procurementOrders).set(update).where(eq(procurementOrders.id, id));
+}
+
+export async function deletePurchaseOrder(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const order = await getPurchaseOrderById(id);
+  if (!order) throw new Error("Purchase order not found");
+  if (order.status !== "draft") throw new Error("Only draft purchase orders can be deleted");
+  await db.delete(procurementOrderItems).where(eq(procurementOrderItems.orderId, id));
+  await db.delete(procurementOrders).where(eq(procurementOrders.id, id));
+}
+
+// ============================================================================
+// HEALTH MANAGEMENT — PRE-TRANSPORT PROTOCOLS
+// ============================================================================
+
+export async function listPreTransportProtocols(flockId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db
+    .select({
+      id: preTransportProtocols.id,
+      flockId: preTransportProtocols.flockId,
+      collectionDate: preTransportProtocols.collectionDate,
+      collectionTime: preTransportProtocols.collectionTime,
+      travelDurationHours: preTransportProtocols.travelDurationHours,
+      feedWithdrawalHours: preTransportProtocols.feedWithdrawalHours,
+      stressPackId: preTransportProtocols.stressPackId,
+      stressPackName: stressPacks.name,
+      dosageStrength: preTransportProtocols.dosageStrength,
+      status: preTransportProtocols.status,
+      notes: preTransportProtocols.notes,
+      createdAt: preTransportProtocols.createdAt,
+    })
+    .from(preTransportProtocols)
+    .leftJoin(stressPacks, eq(preTransportProtocols.stressPackId, stressPacks.id))
+    .where(eq(preTransportProtocols.flockId, flockId))
+    .orderBy(desc(preTransportProtocols.collectionDate), desc(preTransportProtocols.id));
+}
+
+export async function createPreTransportProtocol(data: {
+  flockId: number;
+  collectionDate: string;
+  collectionTime: string;
+  travelDurationHours: string;
+  feedWithdrawalHours: number;
+  stressPackId?: number | null;
+  dosageStrength?: "single" | "double" | "triple";
+  notes?: string | null;
+  createdBy: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const flock = await getFlockById(data.flockId);
+  if (!flock) throw new Error("Flock not found");
+  const schedule = calculatePreTransportSchedule(data);
+  const created = await db.insert(preTransportProtocols).values({
+    flockId: data.flockId,
+    collectionDate: data.collectionDate,
+    collectionTime: data.collectionTime,
+    travelDurationHours: data.travelDurationHours,
+    feedWithdrawalHours: data.feedWithdrawalHours,
+    stressPackId: data.stressPackId ?? null,
+    dosageStrength: data.dosageStrength ?? "single",
+    notes: data.notes ?? null,
+    createdBy: data.createdBy,
+  });
+  const protocolId = Number((created as any)[0]?.insertId ?? (created as any).insertId ?? 0);
+  await db.insert(reminders).values([
+    {
+      flockId: data.flockId,
+      houseId: flock.houseId,
+      reminderType: "milestone",
+      title: "Begin pre-transport stress support",
+      description: data.stressPackId ? "Begin the assigned stress-pack support period before collection." : "Review pre-transport stress-support requirements before collection.",
+      dueDate: schedule.stressSupportAt,
+      priority: "high",
+      preTransportProtocolId: protocolId,
+    },
+    {
+      flockId: data.flockId,
+      houseId: flock.houseId,
+      reminderType: "milestone",
+      title: "Begin feed withdrawal",
+      description: `Begin the ${data.feedWithdrawalHours}-hour feed-withdrawal period for planned collection.`,
+      dueDate: schedule.feedWithdrawalAt,
+      priority: "urgent",
+      preTransportProtocolId: protocolId,
+    },
+    {
+      flockId: data.flockId,
+      houseId: flock.houseId,
+      reminderType: "milestone",
+      title: "Collection and transport preparation",
+      description: `Prepare flock for collection at ${data.collectionTime}; planned transport duration is ${data.travelDurationHours} hours.`,
+      dueDate: schedule.collectionAt,
+      priority: "urgent",
+      preTransportProtocolId: protocolId,
+    },
+  ]);
+  return { id: protocolId, schedule };
+}
+
+export async function updatePreTransportProtocolStatus(id: number, status: "completed" | "cancelled") {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(preTransportProtocols).set({ status }).where(eq(preTransportProtocols.id, id));
+  if (status === "cancelled") {
+    await db.update(reminders).set({ status: "dismissed", actionNotes: "Pre-transport protocol cancelled" })
+      .where(and(eq(reminders.preTransportProtocolId, id), eq(reminders.status, "pending")));
+  }
 }
