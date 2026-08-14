@@ -32,6 +32,7 @@ import LoginPage from "./pages/Login";
 import { Invoices } from "./pages/Invoices";
 import { CreateInvoice } from "./pages/CreateInvoice";
 import { CompanySettings } from "./pages/CompanySettings";
+import Finance from "./pages/Finance";
 import Expenses from "./pages/Expenses";
 import CashFlow from "./pages/CashFlow";
 import FeedFormulations from "./pages/FeedFormulations";
@@ -182,6 +183,12 @@ function Router() {
       <Route path="/settings/company">
         <DashboardLayout>
           <CompanySettings />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/finance">
+        <DashboardLayout>
+          <Finance />
         </DashboardLayout>
       </Route>
 

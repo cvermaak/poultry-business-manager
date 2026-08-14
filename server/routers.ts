@@ -2184,6 +2184,37 @@ export const appRouter = router({
   }),
 
   // ============================================================================
+  // FINANCIAL ACCOUNTING: ACTUAL REPORTING
+  // ============================================================================
+  financialReports: router({
+    profitAndLoss: protectedProcedure
+      .input(z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+      }).refine((input) => input.startDate <= input.endDate, {
+        message: "Start date must be on or before end date",
+        path: ["endDate"],
+      }))
+      .query(async (opts) => db.getProfitAndLossReport(opts.input)),
+
+    agedReceivables: protectedProcedure
+      .input(z.object({
+        asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+      }))
+      .query(async (opts) => db.getAgedReceivablesReport(opts.input)),
+
+    cashFlowStatement: protectedProcedure
+      .input(z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+      }).refine((input) => input.startDate <= input.endDate, {
+        message: "Start date must be on or before end date",
+        path: ["endDate"],
+      }))
+      .query(async (opts) => db.getCashFlowStatementReport(opts.input)),
+  }),
+
+  // ============================================================================
   // FEED MANAGEMENT
   // ============================================================================
   feedManagement: router({

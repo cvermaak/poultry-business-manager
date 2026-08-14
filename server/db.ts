@@ -61,6 +61,11 @@ import {
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
+import {
+  calculateAgedReceivablesReport,
+  calculateCashFlowStatement,
+  calculateProfitAndLossReport,
+} from "./financial-reporting";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -3356,6 +3361,162 @@ export async function revertPaidFromOverdue(): Promise<number> {
 // ============================================================================
 // FINANCIAL MANAGEMENT: EXPENSE TRACKING
 // ============================================================================
+
+function periodStart(date: string) {
+  return `${date.slice(0, 10)} 00:00:00`;
+}
+
+function periodEnd(date: string) {
+  return `${date.slice(0, 10)} 23:59:59`;
+}
+
+export async function getProfitAndLossReport(input: { startDate: string; endDate: string }) {
+  const db = await getDb();
+  if (!db) {
+    return calculateProfitAndLossReport({
+      ...input,
+      invoices: [],
+      expenses: [],
+      millInvoices: [],
+    });
+  }
+
+  const [invoiceRows, expenseRows, millInvoiceRows] = await Promise.all([
+    db.select({
+      id: invoices.id,
+      invoiceDate: invoices.invoiceDate,
+      status: invoices.status,
+      subtotal: invoices.subtotal,
+      exclusiveTotal: invoices.exclusiveTotal,
+    })
+      .from(invoices)
+      .where(and(gte(invoices.invoiceDate, periodStart(input.startDate)), lte(invoices.invoiceDate, periodEnd(input.endDate)))),
+    db.select({
+      id: expenses.id,
+      expenseDate: expenses.expenseDate,
+      status: expenses.status,
+      categoryName: expenseCategories.name,
+      amount: expenses.amount,
+    })
+      .from(expenses)
+      .innerJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
+      .where(and(gte(expenses.expenseDate, periodStart(input.startDate)), lte(expenses.expenseDate, periodEnd(input.endDate)))),
+    db.select({
+      id: millInvoices.id,
+      invoiceDate: millInvoices.invoiceDate,
+      status: millInvoices.status,
+      amountExcl: millInvoices.amountExcl,
+    })
+      .from(millInvoices)
+      .where(and(gte(millInvoices.invoiceDate, input.startDate), lte(millInvoices.invoiceDate, input.endDate))),
+  ]);
+
+  return calculateProfitAndLossReport({
+    ...input,
+    invoices: invoiceRows,
+    expenses: expenseRows,
+    millInvoices: millInvoiceRows,
+  });
+}
+
+export async function getAgedReceivablesReport(input: { asOfDate: string }) {
+  const db = await getDb();
+  if (!db) return calculateAgedReceivablesReport({ ...input, invoices: [] });
+
+  const rows = await db.select({
+    id: invoices.id,
+    invoiceNumber: invoices.invoiceNumber,
+    customerName: customers.name,
+    invoiceDate: invoices.invoiceDate,
+    dueDate: invoices.dueDate,
+    status: invoices.status,
+    balanceDue: invoices.balanceDue,
+  })
+    .from(invoices)
+    .leftJoin(customers, eq(invoices.customerId, customers.id))
+    .where(lte(invoices.invoiceDate, periodEnd(input.asOfDate)));
+
+  return calculateAgedReceivablesReport({ ...input, invoices: rows });
+}
+
+export async function getCashFlowStatementReport(input: { startDate: string; endDate: string }) {
+  const db = await getDb();
+  if (!db) return calculateCashFlowStatement({ ...input, receipts: [], payments: [] });
+
+  const [invoicePaymentRows, standalonePaymentRows, expensePaymentRows, millPaymentRows] = await Promise.all([
+    db.select({
+      id: invoices.id,
+      date: invoices.paymentDate,
+      amount: invoices.paidAmount,
+      invoiceNumber: invoices.invoiceNumber,
+    })
+      .from(invoices)
+      .where(and(gte(invoices.paymentDate, periodStart(input.startDate)), lte(invoices.paymentDate, periodEnd(input.endDate)), inArray(invoices.status, ['paid', 'partial']))),
+    db.select({
+      id: payments.id,
+      date: payments.paymentDate,
+      amount: payments.amount,
+      paymentNumber: payments.paymentNumber,
+    })
+      .from(payments)
+      .where(and(gte(payments.paymentDate, periodStart(input.startDate)), lte(payments.paymentDate, periodEnd(input.endDate)))),
+    db.select({
+      id: expenses.id,
+      date: expenses.paymentDate,
+      amount: expenses.totalAmount,
+      description: expenses.description,
+      categoryName: expenseCategories.name,
+    })
+      .from(expenses)
+      .innerJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
+      .where(and(gte(expenses.paymentDate, periodStart(input.startDate)), lte(expenses.paymentDate, periodEnd(input.endDate)), eq(expenses.status, 'paid'))),
+    db.select({
+      id: millInvoices.id,
+      date: millInvoices.paidDate,
+      paidAmount: millInvoices.paidAmount,
+      amountIncl: millInvoices.amountIncl,
+      invoiceNumber: millInvoices.invoiceNumber,
+    })
+      .from(millInvoices)
+      .where(and(gte(millInvoices.paidDate, input.startDate), lte(millInvoices.paidDate, input.endDate), eq(millInvoices.status, 'paid'))),
+  ]);
+
+  return calculateCashFlowStatement({
+    ...input,
+    receipts: [
+      ...invoicePaymentRows.map((row) => ({
+        id: `invoice-${row.id}`,
+        date: row.date!,
+        amount: Number(row.amount),
+        description: `Invoice payment — ${row.invoiceNumber}`,
+        source: 'Invoice payment' as const,
+      })),
+      ...standalonePaymentRows.map((row) => ({
+        id: `payment-${row.id}`,
+        date: row.date,
+        amount: Number(row.amount) / 100,
+        description: `Standalone payment — ${row.paymentNumber}`,
+        source: 'Standalone payment' as const,
+      })),
+    ],
+    payments: [
+      ...expensePaymentRows.map((row) => ({
+        id: `expense-${row.id}`,
+        date: row.date!,
+        amount: Number(row.amount) / 100,
+        description: `${row.categoryName}: ${row.description}`,
+        source: 'Expense payment' as const,
+      })),
+      ...millPaymentRows.map((row) => ({
+        id: `mill-${row.id}`,
+        date: row.date!,
+        amount: Number(row.paidAmount ?? row.amountIncl),
+        description: `Mill invoice payment — ${row.invoiceNumber}`,
+        source: 'Mill invoice payment' as const,
+      })),
+    ],
+  });
+}
 
 export async function getExpenseCategories() {
   const db = await getDb();
