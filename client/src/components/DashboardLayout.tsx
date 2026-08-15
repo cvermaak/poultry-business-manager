@@ -53,6 +53,7 @@ const menuItems: MenuItem[] = [
   { icon: Bell, label: "Reminder Templates", path: "/reminder-templates", roles: ["admin", "farm_manager"] },
   { icon: Users, label: "Customers", path: "/customers", roles: ["admin", "sales_staff"] },
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
+  { icon: ShoppingCart, label: "Purchase Orders", path: "/purchase-orders", roles: ["admin", "farm_manager", "accountant"], indent: true },
   { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
   { icon: ShoppingCart, label: "Sales Orders", path: "/sales/orders", roles: ["admin", "sales_staff"], indent: true },
   { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"], indent: true },

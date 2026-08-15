@@ -23,6 +23,7 @@ import Customers from "./pages/Customers";
 import Sales from "./pages/Sales";
 import SalesOrders from "./pages/SalesOrders";
 import Suppliers from "./pages/Suppliers";
+import PurchaseOrders from "./pages/PurchaseOrders";
 import Users from "./pages/Users";
 import UserManagement from "./pages/UserManagement";
 import HealthManagement from "./pages/HealthManagement";
@@ -141,6 +142,12 @@ function Router() {
       <Route path="/suppliers">
         <DashboardLayout>
           <Suppliers />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/purchase-orders">
+        <DashboardLayout>
+          <PurchaseOrders />
         </DashboardLayout>
       </Route>
 
