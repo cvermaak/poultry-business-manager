@@ -449,6 +449,21 @@ export const journalEntries = mysqlTable("journal_entries", {
 	index("idx_journal_entries_source").on(table.sourceType, table.sourceId),
 ]);
 
+export const accountingSourcePostings = mysqlTable("accounting_source_postings", {
+	id: int().autoincrement().primaryKey().notNull(),
+	sourceType: varchar({ length: 50 }).notNull(),
+	sourceId: int().notNull(),
+	journalEntryId: int('journal_entry_id').notNull(),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdBy: int(),
+},
+(table) => [
+	foreignKey({ columns: [table.journalEntryId], foreignColumns: [journalEntries.id], name: "asp_journal_entry_fk" }).onDelete("no action").onUpdate("no action"),
+	foreignKey({ columns: [table.createdBy], foreignColumns: [users.id], name: "asp_created_by_fk" }).onDelete("no action").onUpdate("no action"),
+	uniqueIndex("uq_accounting_source_postings_source").on(table.sourceType, table.sourceId),
+	uniqueIndex("uq_accounting_source_postings_journal").on(table.journalEntryId),
+]);
+
 export const harvestRecords = mysqlTable("harvest_records", {
 	id: int().autoincrement().notNull(),
 	flockId: int().notNull().references(() => flocks.id, { onDelete: "cascade" } ),

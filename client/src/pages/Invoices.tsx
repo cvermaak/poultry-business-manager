@@ -49,6 +49,10 @@ export function Invoices() {
     viewInvoice?.id ?? 0,
     { enabled: !!viewInvoice?.id }
   );
+  const { data: invoicePosting, isLoading: postingLoading } = trpc.invoices.getAccountingPosting.useQuery(
+    viewInvoice?.id ?? 0,
+    { enabled: !!viewInvoice?.id }
+  );
 
   // Generate PDF mutation
   const generatePdfMutation = trpc.invoices.generatePDF.useMutation({
@@ -76,10 +80,11 @@ export function Invoices() {
 
   // Mark as Sent mutation
   const markAsSentMutation = trpc.invoices.markAsSent.useMutation({
-    onSuccess: () => {
-      toast.success("Invoice marked as sent");
+    onSuccess: (posting) => {
+      toast.success(posting.alreadyPosted ? "Invoice is already sent and posted to the ledger" : `Invoice sent and posted to ledger as ${posting.journalNumber}`);
       setSendDialogOpen(false);
       utils.invoices.list.invalidate();
+      utils.invoices.getAccountingPosting.invalidate();
     },
     onError: (error) => {
       toast.error(`Failed to mark as sent: ${error.message}`);
@@ -366,7 +371,7 @@ export function Invoices() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              Invoice <strong>{sendTarget?.invoiceNumber}</strong> will be marked as sent.
+              Invoice <strong>{sendTarget?.invoiceNumber}</strong> will be marked as sent and posted to the general ledger as receivable, revenue, and VAT output.
             </p>
             <div className="space-y-2">
               <Label htmlFor="sentDate">Sent Date</Label>
@@ -386,7 +391,7 @@ export function Invoices() {
               disabled={markAsSentMutation.isPending}
             >
               {markAsSentMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-              Confirm Sent
+              Confirm Sent & Post
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -525,6 +530,16 @@ export function Invoices() {
                     <p className="font-semibold">{format(new Date(String(viewInvoice.paymentDate)), "dd MMM yyyy")}</p>
                   </div>
                 )}
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">General Ledger</p>
+                  {postingLoading ? (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking posting status</p>
+                  ) : invoicePosting ? (
+                    <p className="font-mono font-semibold text-emerald-700">Posted · {invoicePosting.journalNumber}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Not posted</p>
+                  )}
+                </div>
               </div>
 
               <Separator />

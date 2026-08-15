@@ -1953,6 +1953,12 @@ export const appRouter = router({
         return await db.getInvoiceById(input);
       }),
 
+    getAccountingPosting: protectedProcedure
+      .input(z.number().int().positive())
+      .query(async ({ input }) => {
+        return await db.getCustomerInvoicePosting(input);
+      }),
+
     getItems: protectedProcedure
       .input(z.number())
       .query(async ({ input }) => {
@@ -2055,8 +2061,10 @@ export const appRouter = router({
         invoiceId: z.number(),
         sentAt: z.string(),
       }))
-      .mutation(async ({ input }) => {
-        return await db.markInvoiceAsSent(input.invoiceId, input.sentAt);
+      .mutation(async ({ input, ctx }) => {
+        const posting = await db.markInvoiceAsSent(input.invoiceId, input.sentAt, ctx.user.id);
+        await db.logUserActivity(ctx.user.id, "post_customer_invoice", "invoice", input.invoiceId, `Posted invoice journal ${posting.journalNumber}`);
+        return posting;
       }),
 
     recordPayment: protectedProcedure

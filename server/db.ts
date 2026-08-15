@@ -57,9 +57,10 @@ import {
   feedOrderDeliveries,
   additivePurchaseOrders,
   additiveInventoryMappings,
-  inventoryStock,
-  millInvoices,
-  preTransportProtocols,
+	inventoryStock,
+	millInvoices,
+	preTransportProtocols,
+	accountingSourcePostings,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -78,6 +79,7 @@ import {
 } from "./purchase-orders";
 import { calculatePreTransportSchedule } from "./pre-transport-protocol";
 import { AFGRO_DEFAULT_CHART_OF_ACCOUNTS, type JournalLineInput, validateBalancedJournal } from "./accounting";
+import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -143,10 +145,11 @@ export async function getDb() {
           feedOrderDeliveries,
           additivePurchaseOrders,
           additiveInventoryMappings,
-          inventoryStock,
-          millInvoices,
-          preTransportProtocols,
-        },
+		  inventoryStock,
+		  millInvoices,
+		  preTransportProtocols,
+		  accountingSourcePostings,
+		},
       });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
@@ -1432,7 +1435,7 @@ export async function postJournalEntry(input: {
 
   const entryDate = input.entryDate.toISOString().slice(0, 19).replace("T", " ");
   const journalNumber = `JNL-${input.entryDate.toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`;
-  return await (db as any).transaction(async (tx: any) => {
+	return await (db as any).transaction(async (tx: any) => {
     const created = await tx.insert(journalEntries).values({
       journalNumber,
       entryDate,
@@ -1459,7 +1462,137 @@ export async function postJournalEntry(input: {
       createdBy: input.createdBy,
     })));
     return { id: journalEntryId, journalNumber, totalDebit: validation.totalDebit, totalCredit: validation.totalCredit };
-  });
+	});
+}
+
+export async function getCustomerInvoicePosting(invoiceId: number) {
+	const db = await getDb();
+	if (!db) return null;
+
+	const rows = await db.select({
+		id: journalEntries.id,
+		journalNumber: journalEntries.journalNumber,
+		entryDate: journalEntries.entryDate,
+		totalDebit: journalEntries.totalDebit,
+		totalCredit: journalEntries.totalCredit,
+		sourceType: accountingSourcePostings.sourceType,
+	})
+		.from(accountingSourcePostings)
+		.innerJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+		.where(and(
+			eq(accountingSourcePostings.sourceType, "customer_invoice"),
+			eq(accountingSourcePostings.sourceId, invoiceId),
+		))
+		.limit(1);
+	return rows[0] ?? null;
+}
+
+export async function markInvoiceAsSent(invoiceId: number, sentAt: string, createdBy: number) {
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+
+	const invoiceRows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+	const invoice = invoiceRows[0];
+	if (!invoice) throw new Error("Invoice not found");
+	if (invoice.status === "cancelled") throw new Error("Cancelled invoices cannot be sent or posted.");
+
+	const revenueAccountNumber = resolveCustomerInvoiceRevenueAccountNumber(invoice.feedOrderId);
+	const requiredAccountNumbers = [
+		CUSTOMER_INVOICE_POSTING_ACCOUNTS.tradeReceivables,
+		CUSTOMER_INVOICE_POSTING_ACCOUNTS.vatOutput,
+		revenueAccountNumber,
+	];
+	const accounts = await db.select({
+		id: chartOfAccounts.id,
+		accountNumber: chartOfAccounts.accountNumber,
+		isActive: chartOfAccounts.isActive,
+		isPostingAccount: chartOfAccounts.isPostingAccount,
+	})
+		.from(chartOfAccounts)
+		.where(inArray(chartOfAccounts.accountNumber, requiredAccountNumbers));
+
+	const accountsByNumber = new Map(accounts.map((account) => [account.accountNumber, account]));
+	for (const accountNumber of requiredAccountNumbers) {
+		const account = accountsByNumber.get(accountNumber);
+		if (!account || !account.isActive || !account.isPostingAccount) {
+			throw new Error(`Required posting account ${accountNumber} is missing, inactive, or not postable. Seed or correct the chart of accounts before sending this invoice.`);
+		}
+	}
+
+	const sourceDescription = `Customer invoice ${invoice.invoiceNumber}`;
+	const journalLines = buildCustomerInvoicePosting({
+		invoiceNumber: invoice.invoiceNumber,
+		exclusiveTotal: invoice.exclusiveTotal ?? invoice.subtotal,
+		vatAmount: invoice.vatAmount ?? invoice.taxAmount,
+		inclusiveTotal: invoice.inclusiveTotal ?? invoice.totalAmount,
+		feedOrderId: invoice.feedOrderId,
+		accountIds: {
+			tradeReceivables: accountsByNumber.get(CUSTOMER_INVOICE_POSTING_ACCOUNTS.tradeReceivables)!.id,
+			vatOutput: accountsByNumber.get(CUSTOMER_INVOICE_POSTING_ACCOUNTS.vatOutput)!.id,
+			revenue: accountsByNumber.get(revenueAccountNumber)!.id,
+		},
+	});
+	const validation = validateBalancedJournal(journalLines);
+	if (!validation.ok) throw new Error(validation.error);
+
+	return await (db as any).transaction(async (tx: any) => {
+		const existingLinks = await tx.select({ journalEntryId: accountingSourcePostings.journalEntryId, journalNumber: journalEntries.journalNumber })
+			.from(accountingSourcePostings)
+			.innerJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+			.where(and(
+				eq(accountingSourcePostings.sourceType, "customer_invoice"),
+				eq(accountingSourcePostings.sourceId, invoiceId),
+			))
+			.limit(1);
+		if (existingLinks[0]) {
+			return { id: existingLinks[0].journalEntryId, journalNumber: existingLinks[0].journalNumber, alreadyPosted: true };
+		}
+
+		const entryDate = new Date(invoice.invoiceDate).toISOString().slice(0, 19).replace("T", " ");
+		const journalNumber = `INV-${invoice.id}`;
+		const createdJournal = await tx.insert(journalEntries).values({
+			journalNumber,
+			entryDate,
+			description: sourceDescription,
+			sourceType: "customer_invoice",
+			sourceId: invoiceId,
+			totalDebit: validation.totalDebit,
+			totalCredit: validation.totalCredit,
+			createdBy,
+		});
+		const journalEntryId = Number(createdJournal[0]?.insertId ?? createdJournal.insertId ?? 0);
+		if (!journalEntryId) throw new Error("Invoice journal header could not be created.");
+
+		await tx.insert(generalLedgerEntries).values(validation.lines.map((line) => ({
+			entryNumber: journalNumber,
+			entryDate,
+			journalEntryId,
+			accountId: line.accountId,
+			debit: line.debit,
+			credit: line.credit,
+			description: line.description || sourceDescription,
+			referenceType: "customer_invoice",
+			referenceId: invoiceId,
+			createdBy,
+		})));
+
+		await tx.insert(accountingSourcePostings).values({
+			sourceType: "customer_invoice",
+			sourceId: invoiceId,
+			journalEntryId,
+			createdBy,
+		});
+
+		if (invoice.status === "draft") {
+			await tx.update(invoices).set({
+				status: "sent",
+				sentAt,
+				updatedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
+			}).where(eq(invoices.id, invoiceId));
+		}
+
+		return { id: journalEntryId, journalNumber, alreadyPosted: false };
+	});
 }
 
 export async function listJournalEntries(filters?: { startDate?: string; endDate?: string; limit?: number }) {
@@ -3308,15 +3441,6 @@ export async function getInvoiceByNumber(invoiceNumber: string) {
   if (!db) return null;
   const result = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1);
   return result[0] || null;
-}
-
-export async function markInvoiceAsSent(invoiceId: number, sentAt: string) {
-  const db = await getDb();
-  if (!db) return null;
-  await db.update(invoices)
-    .set({ status: 'sent', sentAt, updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' ') })
-    .where(eq(invoices.id, invoiceId));
-  return { success: true };
 }
 
 export async function recordInvoicePayment(invoiceId: number, data: {
