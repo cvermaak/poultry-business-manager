@@ -423,7 +423,7 @@ export const generalLedgerEntries = mysqlTable("general_ledger_entries", {
 	createdBy: int().references(() => users.id),
 },
 (table) => [
-	index("general_ledger_entries_entryNumber_unique").on(table.entryNumber),
+	index("idx_general_ledger_entries_entry_number").on(table.entryNumber),
 	index("idx_general_ledger_entries_journal_entry_id").on(table.journalEntryId),
 	index("idx_general_ledger_entries_account_id").on(table.accountId),
 	index("idx_general_ledger_entries_entry_date").on(table.entryDate),
