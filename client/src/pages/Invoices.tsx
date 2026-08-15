@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { BookOpenCheck, Download, Plus, Eye, Loader2, RefreshCw, Send, CreditCard, XCircle } from "lucide-react";
+import { BookOpenCheck, Download, Plus, Eye, Loader2, RefreshCw, Send, CreditCard, XCircle, Landmark } from "lucide-react";
 import { format } from "date-fns";
 
 export function Invoices() {
@@ -32,6 +32,8 @@ export function Invoices() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("EFT");
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState("");
 
   // Cancel dialog state
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
@@ -50,6 +52,10 @@ export function Invoices() {
     { enabled: !!viewInvoice?.id }
   );
   const { data: invoicePosting, isLoading: postingLoading, refetch: recheckInvoicePosting } = trpc.invoices.getAccountingPosting.useQuery(
+    viewInvoice?.id ?? 0,
+    { enabled: !!viewInvoice?.id }
+  );
+  const { data: paymentPostings, isLoading: paymentPostingsLoading } = trpc.invoices.getPaymentPostings.useQuery(
     viewInvoice?.id ?? 0,
     { enabled: !!viewInvoice?.id }
   );
@@ -94,9 +100,22 @@ export function Invoices() {
   // Record Payment mutation
   const recordPaymentMutation = trpc.invoices.recordPayment.useMutation({
     onSuccess: (data) => {
-      toast.success(data?.newStatus === "paid" ? "Invoice marked as paid" : "Partial payment recorded");
+      toast.success(
+        data.alreadyPosted
+          ? `Payment is already posted to the General Ledger as ${data.journalNumber}`
+          : `Payment recorded and posted to the General Ledger as ${data.journalNumber}`
+      );
       setPaymentDialogOpen(false);
       utils.invoices.list.invalidate();
+      utils.invoices.getPaymentPostings.invalidate();
+      setViewInvoice((current: any) => current && data.newStatus ? {
+        ...current,
+        status: data.newStatus,
+        paidAmount: data.newPaid,
+        balanceDue: data.newBalance,
+        paymentDate: paymentDate + " 00:00:00",
+        paymentMethod,
+      } : current);
     },
     onError: (error) => {
       toast.error(`Failed to record payment: ${error.message}`);
@@ -134,13 +153,13 @@ export function Invoices() {
     }
   };
 
-  const handleViewLedgerJournal = () => {
-    if (!invoicePosting?.journalNumber) {
+  const handleViewLedgerJournal = (journalNumber = invoicePosting?.journalNumber) => {
+    if (!journalNumber) {
       toast.info("No General Ledger journal is linked to this invoice yet.");
       return;
     }
     setViewModalOpen(false);
-    setLocation(`/finance?tab=journals&journal=${encodeURIComponent(invoicePosting.journalNumber)}`);
+    setLocation(`/finance?tab=journals&journal=${encodeURIComponent(journalNumber)}`);
   };
 
   const openSendDialog = (invoice: any) => {
@@ -155,6 +174,12 @@ export function Invoices() {
     setPaymentAmount(balance.toFixed(2));
     setPaymentMethod("EFT");
     setPaymentDate(new Date().toISOString().slice(0, 10));
+    setPaymentReference("");
+    setPaymentIdempotencyKey(
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `payment-${invoice.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
     setPaymentDialogOpen(true);
   };
 
@@ -178,11 +203,18 @@ export function Invoices() {
       toast.error("Please enter a valid payment amount");
       return;
     }
+    const balance = parseFloat(String(paymentTarget.balanceDue || 0));
+    if (amount > balance) {
+      toast.error("Payment amount cannot exceed the outstanding invoice balance");
+      return;
+    }
     recordPaymentMutation.mutate({
       invoiceId: paymentTarget.id,
       amount,
       paymentMethod,
       paymentDate: paymentDate + " 00:00:00",
+      paymentReference: paymentReference.trim() || undefined,
+      idempotencyKey: paymentIdempotencyKey,
     });
   };
 
@@ -424,7 +456,7 @@ export function Invoices() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              Recording payment for invoice <strong>{paymentTarget?.invoiceNumber}</strong>.
+              Recording payment for invoice <strong>{paymentTarget?.invoiceNumber}</strong>. This records a balanced journal: <strong>debit Bank/Cash</strong> and <strong>credit Trade Receivables</strong>.
             </p>
             <div className="space-y-2">
               <Label htmlFor="payAmount">Payment Amount (R)</Label>
@@ -458,6 +490,16 @@ export function Invoices() {
                 type="date"
                 value={paymentDate}
                 onChange={(e) => setPaymentDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="paymentReference">Payment Reference <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input
+                id="paymentReference"
+                value={paymentReference}
+                onChange={(e) => setPaymentReference(e.target.value)}
+                maxLength={200}
+                placeholder="EFT, bank, or receipt reference"
               />
             </div>
           </div>
@@ -559,6 +601,53 @@ export function Invoices() {
                     <p className="text-sm text-muted-foreground">Not posted</p>
                   )}
                 </div>
+              </div>
+
+              <Separator />
+
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Landmark className="h-4 w-4 text-emerald-700" />
+                  <p className="text-sm font-semibold">Customer Payment Journals</p>
+                </div>
+                {paymentPostingsLoading ? (
+                  <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading payment postings
+                  </div>
+                ) : paymentPostings && paymentPostings.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Method</TableHead>
+                        <TableHead>Reference</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead>General Ledger Journal</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paymentPostings.map((payment: any) => (
+                        <TableRow key={payment.paymentId}>
+                          <TableCell>{format(new Date(String(payment.paymentDate)), "dd MMM yyyy")}</TableCell>
+                          <TableCell>{payment.paymentMethod}</TableCell>
+                          <TableCell>{payment.paymentReference || "—"}</TableCell>
+                          <TableCell className="text-right font-medium">{formatCurrency(payment.amount)}</TableCell>
+                          <TableCell>
+                            {payment.journalNumber ? (
+                              <Button variant="link" className="h-auto p-0 font-mono text-emerald-700" onClick={() => handleViewLedgerJournal(payment.journalNumber)}>
+                                {payment.journalNumber}
+                              </Button>
+                            ) : (
+                              <span className="text-muted-foreground">Not posted</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No customer payments have been recorded for this invoice.</p>
+                )}
               </div>
 
               <Separator />
@@ -670,7 +759,7 @@ export function Invoices() {
                   Re-check posting
                 </Button>
                 {invoicePosting && (
-                  <Button variant="outline" onClick={handleViewLedgerJournal}>
+                  <Button variant="outline" onClick={() => handleViewLedgerJournal()}>
                     <BookOpenCheck className="mr-2 h-4 w-4" />
                     View General Ledger
                   </Button>

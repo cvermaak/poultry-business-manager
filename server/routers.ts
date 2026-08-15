@@ -1959,6 +1959,12 @@ export const appRouter = router({
         return await db.getCustomerInvoicePosting(input);
       }),
 
+    getPaymentPostings: protectedProcedure
+      .input(z.number().int().positive())
+      .query(async ({ input }) => {
+        return await db.getCustomerInvoicePaymentPostings(input);
+      }),
+
     getItems: protectedProcedure
       .input(z.number())
       .query(async ({ input }) => {
@@ -2071,14 +2077,19 @@ export const appRouter = router({
       .input(z.object({
         invoiceId: z.number(),
         amount: z.number().positive(),
-        paymentMethod: z.string(),
+        paymentMethod: z.string().trim().min(1).max(50),
         paymentDate: z.string(),
+        paymentReference: z.string().trim().max(200).optional(),
+        idempotencyKey: z.string().trim().min(8).max(100),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         return await db.recordInvoicePayment(input.invoiceId, {
           amount: input.amount,
           paymentMethod: input.paymentMethod,
           paymentDate: input.paymentDate,
+          paymentReference: input.paymentReference,
+          idempotencyKey: input.idempotencyKey,
+          createdBy: ctx.user.id,
         });
       }),
 

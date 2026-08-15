@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, asc, sql, or, like, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, or, like, inArray, isNotNull, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -61,6 +61,7 @@ import {
 	millInvoices,
 	preTransportProtocols,
 	accountingSourcePostings,
+	customerInvoicePayments,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -80,6 +81,7 @@ import {
 import { calculatePreTransportSchedule } from "./pre-transport-protocol";
 import { AFGRO_DEFAULT_CHART_OF_ACCOUNTS, type JournalLineInput, validateBalancedJournal } from "./accounting";
 import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCustomerInvoiceJournalNumber, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
+import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, validateCustomerPaymentAgainstBalance } from "./payment-posting";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -147,9 +149,10 @@ export async function getDb() {
           additiveInventoryMappings,
 		  inventoryStock,
 		  millInvoices,
-		  preTransportProtocols,
-		  accountingSourcePostings,
-		},
+			  preTransportProtocols,
+			  accountingSourcePostings,
+			  customerInvoicePayments,
+			},
       });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
@@ -1483,8 +1486,31 @@ export async function getCustomerInvoicePosting(invoiceId: number) {
 			eq(accountingSourcePostings.sourceType, "customer_invoice"),
 			eq(accountingSourcePostings.sourceId, invoiceId),
 		))
-		.limit(1);
-	return rows[0] ?? null;
+			.limit(1);
+		return rows[0] ?? null;
+}
+
+export async function getCustomerInvoicePaymentPostings(invoiceId: number) {
+	const db = await getDb();
+	if (!db) return [];
+
+	return await db.select({
+		paymentId: customerInvoicePayments.id,
+		amount: customerInvoicePayments.amount,
+		paymentMethod: customerInvoicePayments.paymentMethod,
+		paymentDate: customerInvoicePayments.paymentDate,
+		paymentReference: customerInvoicePayments.paymentReference,
+		journalNumber: journalEntries.journalNumber,
+		journalEntryId: journalEntries.id,
+	})
+		.from(customerInvoicePayments)
+		.leftJoin(accountingSourcePostings, and(
+			eq(accountingSourcePostings.sourceType, "customer_invoice_payment"),
+			eq(accountingSourcePostings.sourceId, customerInvoicePayments.id),
+		))
+		.leftJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+		.where(eq(customerInvoicePayments.invoiceId, invoiceId))
+		.orderBy(desc(customerInvoicePayments.paymentDate), desc(customerInvoicePayments.id));
 }
 
 export async function markInvoiceAsSent(invoiceId: number, sentAt: string, createdBy: number) {
@@ -3443,32 +3469,203 @@ export async function getInvoiceByNumber(invoiceNumber: string) {
   return result[0] || null;
 }
 
+async function getPaymentPostingByIdempotencyKey(dbConn: any, idempotencyKey: string) {
+	const rows = await dbConn.select({
+		paymentId: customerInvoicePayments.id,
+		invoiceId: customerInvoicePayments.invoiceId,
+		amount: customerInvoicePayments.amount,
+		paymentDate: customerInvoicePayments.paymentDate,
+		journalNumber: journalEntries.journalNumber,
+	})
+		.from(customerInvoicePayments)
+		.leftJoin(accountingSourcePostings, and(
+			eq(accountingSourcePostings.sourceType, "customer_invoice_payment"),
+			eq(accountingSourcePostings.sourceId, customerInvoicePayments.id),
+		))
+		.leftJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+		.where(eq(customerInvoicePayments.idempotencyKey, idempotencyKey))
+		.limit(1);
+	return rows[0] ?? null;
+}
+
 export async function recordInvoicePayment(invoiceId: number, data: {
-  amount: number;
-  paymentMethod: string;
-  paymentDate: string;
+	amount: number;
+	paymentMethod: string;
+	paymentDate: string;
+	paymentReference?: string;
+	idempotencyKey: string;
+	createdBy: number;
 }) {
-  const db = await getDb();
-  if (!db) return null;
-  const rows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
-  const invoice = rows[0];
-  if (!invoice) throw new Error('Invoice not found');
-  const totalAmount = parseFloat(String(invoice.totalAmount));
-  const currentPaid = parseFloat(String(invoice.paidAmount || 0));
-  const newPaid = parseFloat((currentPaid + data.amount).toFixed(2));
-  const newBalance = parseFloat(Math.max(0, totalAmount - newPaid).toFixed(2));
-  const newStatus = newBalance <= 0 ? 'paid' : 'partial';
-  await db.update(invoices)
-    .set({
-      paidAmount: newPaid.toFixed(2),
-      balanceDue: newBalance.toFixed(2),
-      status: newStatus as 'paid' | 'partial',
-      paymentMethod: data.paymentMethod,
-      paymentDate: data.paymentDate,
-      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
-    })
-    .where(eq(invoices.id, invoiceId));
-  return { success: true, newStatus, newPaid, newBalance };
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+
+	const payment = parseRandAmount(data.amount, "Customer payment amount");
+	const idempotencyKey = data.idempotencyKey.trim();
+	if (idempotencyKey.length < 8 || idempotencyKey.length > 100) {
+		throw new Error("A valid payment idempotency key is required.");
+	}
+
+	const existing = await getPaymentPostingByIdempotencyKey(db, idempotencyKey);
+	if (existing) {
+		if (existing.invoiceId !== invoiceId) throw new Error("This payment request key belongs to a different invoice.");
+		return {
+			success: true,
+			paymentId: existing.paymentId,
+			journalNumber: existing.journalNumber,
+			alreadyPosted: true,
+			newStatus: null,
+			newPaid: null,
+			newBalance: null,
+		};
+	}
+
+	const invoiceRows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+	const invoice = invoiceRows[0];
+	if (!invoice) throw new Error("Invoice not found");
+	if (!["sent", "partial", "overdue"].includes(invoice.status)) {
+		throw new Error("Only sent, partially paid, or overdue invoices can receive a customer payment.");
+	}
+
+	validateCustomerPaymentAgainstBalance({ amount: payment.normalized, balanceDue: invoice.balanceDue });
+
+	const invoicePosting = await db.select({ journalEntryId: accountingSourcePostings.journalEntryId })
+		.from(accountingSourcePostings)
+		.where(and(
+			eq(accountingSourcePostings.sourceType, "customer_invoice"),
+			eq(accountingSourcePostings.sourceId, invoiceId),
+		))
+		.limit(1);
+	if (!invoicePosting[0]) {
+		throw new Error("The customer invoice must be posted to Trade Receivables before recording a payment.");
+	}
+
+	const requiredAccountNumbers = [
+		CUSTOMER_PAYMENT_POSTING_ACCOUNTS.bank,
+		CUSTOMER_PAYMENT_POSTING_ACCOUNTS.tradeReceivables,
+	];
+	const accounts = await db.select({
+		id: chartOfAccounts.id,
+		accountNumber: chartOfAccounts.accountNumber,
+		isActive: chartOfAccounts.isActive,
+		isPostingAccount: chartOfAccounts.isPostingAccount,
+	})
+		.from(chartOfAccounts)
+		.where(inArray(chartOfAccounts.accountNumber, requiredAccountNumbers));
+	const accountsByNumber = new Map(accounts.map((account) => [account.accountNumber, account]));
+	for (const accountNumber of requiredAccountNumbers) {
+		const account = accountsByNumber.get(accountNumber);
+		if (!account || !account.isActive || !account.isPostingAccount) {
+			throw new Error(`Required posting account ${accountNumber} is missing, inactive, or not postable. Seed or correct the chart of accounts before recording this payment.`);
+		}
+	}
+
+	const journalLines = buildCustomerPaymentPosting({
+		invoiceNumber: invoice.invoiceNumber,
+		amount: payment.normalized,
+		accountIds: {
+			bank: accountsByNumber.get(CUSTOMER_PAYMENT_POSTING_ACCOUNTS.bank)!.id,
+			tradeReceivables: accountsByNumber.get(CUSTOMER_PAYMENT_POSTING_ACCOUNTS.tradeReceivables)!.id,
+		},
+	});
+	const validation = validateBalancedJournal(journalLines);
+	if (!validation.ok) throw new Error(validation.error);
+
+	return await (db as any).transaction(async (tx: any) => {
+		const retry = await getPaymentPostingByIdempotencyKey(tx, idempotencyKey);
+		if (retry) {
+			if (retry.invoiceId !== invoiceId) throw new Error("This payment request key belongs to a different invoice.");
+			return {
+				success: true,
+				paymentId: retry.paymentId,
+				journalNumber: retry.journalNumber,
+				alreadyPosted: true,
+				newStatus: null,
+				newPaid: null,
+				newBalance: null,
+			};
+		}
+
+		const updated = await tx.update(invoices).set({
+			paidAmount: sql`CAST(${invoices.paidAmount} + ${payment.normalized} AS DECIMAL(15,2))`,
+			balanceDue: sql`CAST(${invoices.balanceDue} - ${payment.normalized} AS DECIMAL(15,2))`,
+			status: sql`CASE WHEN ${invoices.balanceDue} - ${payment.normalized} = 0 THEN 'paid' ELSE 'partial' END`,
+			paymentMethod: data.paymentMethod,
+			paymentDate: data.paymentDate,
+			updatedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
+		}).where(and(
+			eq(invoices.id, invoiceId),
+			sql`${invoices.balanceDue} >= ${payment.normalized}`,
+		));
+		const rowsAffected = Number((updated as any).rowsAffected ?? (updated as any)[0]?.affectedRows ?? 0);
+		if (rowsAffected !== 1) {
+			throw new Error("Payment amount cannot exceed the current outstanding invoice balance.");
+		}
+
+		const createdPayment = await tx.insert(customerInvoicePayments).values({
+			invoiceId,
+			amount: payment.normalized,
+			paymentMethod: data.paymentMethod,
+			paymentDate: data.paymentDate,
+			paymentReference: data.paymentReference?.trim() || null,
+			idempotencyKey,
+			createdBy: data.createdBy,
+		});
+		const paymentId = Number(createdPayment[0]?.insertId ?? createdPayment.insertId ?? 0);
+		if (!paymentId) throw new Error("Customer payment receipt could not be created.");
+
+		const journalNumber = getCustomerPaymentJournalNumber(paymentId);
+		const sourceDescription = `Customer payment for ${invoice.invoiceNumber}`;
+		const createdJournal = await tx.insert(journalEntries).values({
+			journalNumber,
+			entryDate: data.paymentDate,
+			description: sourceDescription,
+			sourceType: "customer_invoice_payment",
+			sourceId: paymentId,
+			totalDebit: validation.totalDebit,
+			totalCredit: validation.totalCredit,
+			createdBy: data.createdBy,
+		});
+		const journalEntryId = Number(createdJournal[0]?.insertId ?? createdJournal.insertId ?? 0);
+		if (!journalEntryId) throw new Error("Customer payment journal header could not be created.");
+
+		await tx.insert(generalLedgerEntries).values(validation.lines.map((line) => ({
+			entryNumber: journalNumber,
+			entryDate: data.paymentDate,
+			journalEntryId,
+			accountId: line.accountId,
+			debit: line.debit,
+			credit: line.credit,
+			description: line.description || sourceDescription,
+			referenceType: "customer_invoice_payment",
+			referenceId: paymentId,
+			createdBy: data.createdBy,
+		})));
+
+		await tx.insert(accountingSourcePostings).values({
+			sourceType: "customer_invoice_payment",
+			sourceId: paymentId,
+			journalEntryId,
+			createdBy: data.createdBy,
+		});
+
+		const updatedInvoiceRows = await tx.select({
+			status: invoices.status,
+			paidAmount: invoices.paidAmount,
+			balanceDue: invoices.balanceDue,
+		}).from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+		const updatedInvoice = updatedInvoiceRows[0];
+		if (!updatedInvoice) throw new Error("Invoice could not be reloaded after payment posting.");
+
+		return {
+			success: true,
+			paymentId,
+			journalNumber,
+			alreadyPosted: false,
+			newStatus: updatedInvoice.status,
+			newPaid: updatedInvoice.paidAmount,
+			newBalance: updatedInvoice.balanceDue,
+		};
+	});
 }
 
 export async function cancelInvoice(invoiceId: number) {
@@ -3689,15 +3886,25 @@ export async function getCashFlowStatementReport(input: { startDate: string; end
   const db = await getDb();
   if (!db) return calculateCashFlowStatement({ ...input, receipts: [], payments: [] });
 
-  const [invoicePaymentRows, standalonePaymentRows, expensePaymentRows, millPaymentRows] = await Promise.all([
-    db.select({
-      id: invoices.id,
-      date: invoices.paymentDate,
+	const [customerInvoicePaymentRows, historicalInvoicePaymentRows, standalonePaymentRows, expensePaymentRows, millPaymentRows] = await Promise.all([
+		db.select({
+			id: customerInvoicePayments.id,
+			date: customerInvoicePayments.paymentDate,
+			amount: customerInvoicePayments.amount,
+			invoiceNumber: invoices.invoiceNumber,
+		})
+			.from(customerInvoicePayments)
+			.innerJoin(invoices, eq(customerInvoicePayments.invoiceId, invoices.id))
+			.where(and(gte(customerInvoicePayments.paymentDate, periodStart(input.startDate)), lte(customerInvoicePayments.paymentDate, periodEnd(input.endDate)))),
+		db.select({
+			id: invoices.id,
+			date: invoices.paymentDate,
       amount: invoices.paidAmount,
       invoiceNumber: invoices.invoiceNumber,
     })
-      .from(invoices)
-      .where(and(gte(invoices.paymentDate, periodStart(input.startDate)), lte(invoices.paymentDate, periodEnd(input.endDate)), inArray(invoices.status, ['paid', 'partial']))),
+		.from(invoices)
+		.leftJoin(customerInvoicePayments, eq(customerInvoicePayments.invoiceId, invoices.id))
+		.where(and(gte(invoices.paymentDate, periodStart(input.startDate)), lte(invoices.paymentDate, periodEnd(input.endDate)), inArray(invoices.status, ['paid', 'partial']), isNull(customerInvoicePayments.id))),
     db.select({
       id: payments.id,
       date: payments.paymentDate,
@@ -3727,12 +3934,19 @@ export async function getCashFlowStatementReport(input: { startDate: string; end
       .where(and(gte(millInvoices.paidDate, input.startDate), lte(millInvoices.paidDate, input.endDate), eq(millInvoices.status, 'paid'))),
   ]);
 
-  return calculateCashFlowStatement({
-    ...input,
-    receipts: [
-      ...invoicePaymentRows.map((row) => ({
-        id: `invoice-${row.id}`,
-        date: row.date!,
+	return calculateCashFlowStatement({
+		...input,
+		receipts: [
+			...customerInvoicePaymentRows.map((row) => ({
+				id: `customer-invoice-payment-${row.id}`,
+			date: row.date,
+			amount: Number(row.amount),
+			description: `Invoice payment — ${row.invoiceNumber}`,
+			source: 'Invoice payment' as const,
+		})),
+		...historicalInvoicePaymentRows.map((row) => ({
+			id: `invoice-${row.id}`,
+			date: row.date!,
         amount: Number(row.amount),
         description: `Invoice payment — ${row.invoiceNumber}`,
         source: 'Invoice payment' as const,

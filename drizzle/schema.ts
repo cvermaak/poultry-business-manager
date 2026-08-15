@@ -303,6 +303,23 @@ export const customerFeedPrices = mysqlTable("customer_feed_prices", {
 	index("idx_customer_feed_prices_customer").on(table.customerId),
 	index("idx_customer_feed_prices_range_type").on(table.feedRange, table.feedType),
 	index("idx_customer_feed_prices_effective_date").on(table.effectiveDate),
+	]);
+
+export const customerInvoicePayments = mysqlTable("customer_invoice_payments", {
+	id: int().autoincrement().primaryKey().notNull(),
+	invoiceId: int("invoice_id").notNull().references(() => invoices.id),
+	amount: decimal({ precision: 15, scale: 2 }).notNull(),
+	paymentMethod: varchar("payment_method", { length: 50 }).notNull(),
+	paymentDate: timestamp("payment_date", { mode: "string" }).notNull(),
+	paymentReference: varchar("payment_reference", { length: 200 }),
+	idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+	createdAt: timestamp("created_at", { mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
+	createdBy: int("created_by").references(() => users.id),
+},
+(table) => [
+	uniqueIndex("uq_cip_idempotency_key").on(table.idempotencyKey),
+	index("idx_cip_invoice_id").on(table.invoiceId),
+	index("idx_cip_payment_date").on(table.paymentDate),
 ]);
 
 export const flockDailyRecords = mysqlTable("flock_daily_records", {
