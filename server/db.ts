@@ -82,6 +82,7 @@ import { calculatePreTransportSchedule } from "./pre-transport-protocol";
 import { AFGRO_DEFAULT_CHART_OF_ACCOUNTS, type JournalLineInput, validateBalancedJournal } from "./accounting";
 import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCustomerInvoiceJournalNumber, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
 import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, resolveCustomerPaymentOutcome } from "./payment-posting";
+import { normalizeLegacyInvoiceAmounts, normalizeLegacyInvoiceRecord } from "./invoice-amount-integrity";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1009,7 +1010,8 @@ export async function listInvoices(filters?: { customerId?: number; status?: str
     query = query.where(eq(invoices.status, filters.status as any));
   }
 
-  return await query.orderBy(desc(invoices.invoiceDate));
+  const rows = await query.orderBy(desc(invoices.invoiceDate));
+  return rows.map((invoice) => normalizeLegacyInvoiceRecord(invoice));
 }
 
 export async function getInvoiceById(id: number) {
@@ -1027,7 +1029,7 @@ export async function getInvoiceById(id: number) {
     .leftJoin(salesOrders, eq((invoices as any).orderId, salesOrders.id))
     .where(eq(invoices.id, id))
     .limit(1);
-  return result.length > 0 ? result[0] : undefined;
+  return result.length > 0 ? normalizeLegacyInvoiceRecord(result[0]) : undefined;
 }
 
 export async function getInvoiceItems(invoiceId: number) {
@@ -3466,7 +3468,7 @@ export async function getInvoiceByNumber(invoiceNumber: string) {
   const db = await getDb();
   if (!db) return null;
   const result = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1);
-  return result[0] || null;
+  return result[0] ? normalizeLegacyInvoiceRecord(result[0]) : null;
 }
 
 async function getPaymentPostingByIdempotencyKey(dbConn: any, idempotencyKey: string) {
@@ -3522,6 +3524,9 @@ export async function recordInvoicePayment(invoiceId: number, data: {
 	const invoiceRows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
 	const invoice = invoiceRows[0];
 	if (!invoice) throw new Error("Invoice not found");
+	if (normalizeLegacyInvoiceAmounts(invoice).hasLegacyHundredfoldHeader) {
+		throw new Error("This invoice has a legacy 100× header amount mismatch. Run migration 0049 before recording another payment.");
+	}
 	if (!["sent", "partial", "overdue"].includes(invoice.status)) {
 		throw new Error("Only sent, partially paid, or overdue invoices can receive a customer payment.");
 	}
@@ -3874,6 +3879,8 @@ export async function getAgedReceivablesReport(input: { asOfDate: string }) {
     dueDate: invoices.dueDate,
     status: invoices.status,
     balanceDue: invoices.balanceDue,
+    inclusiveTotal: invoices.inclusiveTotal,
+    paidAmount: invoices.paidAmount,
   })
     .from(invoices)
     .leftJoin(customers, eq(invoices.customerId, customers.id))

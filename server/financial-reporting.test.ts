@@ -77,6 +77,27 @@ describe("Financial Accounting report calculations", () => {
     expect(report.receivables[0]).toMatchObject({ invoiceNumber: "INV-002", daysOutstanding: 61, bucket: "61-90" });
   });
 
+  it("uses canonical decimal-rand totals when a legacy header balance is exactly 100× too high", () => {
+    const report = calculateAgedReceivablesReport({
+      asOfDate: "2026-08-15",
+      invoices: [{
+        id: 4,
+        invoiceNumber: "INV-LEGACY-100X",
+        customerName: "Ebrahim",
+        invoiceDate: "2026-05-06",
+        dueDate: "2026-06-05",
+        status: "sent",
+        balanceDue: "494500.00",
+        inclusiveTotal: "4945.00",
+        paidAmount: "0.00",
+      }],
+    });
+
+    expect(report.totalOutstanding).toBe(4945);
+    expect(report.buckets["90+"]).toBe(4945);
+    expect(report.receivables[0]).toMatchObject({ invoiceNumber: "INV-LEGACY-100X", balanceDue: 4945 });
+  });
+
   it("produces a VAT-inclusive actual cash-flow statement from cash receipts and payments", () => {
     const report = calculateCashFlowStatement({
       startDate: "2026-08-01",

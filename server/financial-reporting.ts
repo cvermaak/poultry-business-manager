@@ -1,3 +1,5 @@
+import { normalizeLegacyInvoiceAmounts } from "./invoice-amount-integrity";
+
 export type MoneyValue = string | number | null | undefined;
 
 export const COST_OF_SALES_CATEGORIES = new Set([
@@ -54,6 +56,8 @@ export type ReceivableInvoice = {
   dueDate: string | Date;
   status: string;
   balanceDue: MoneyValue;
+  inclusiveTotal?: MoneyValue;
+  paidAmount?: MoneyValue;
 };
 
 export type CashReceipt = {
@@ -179,11 +183,13 @@ export function calculateAgedReceivablesReport(input: {
   const receivables = input.invoices
     .filter((invoice) => {
       const invoiceDate = dateOnly(invoice.invoiceDate);
-      return OPEN_RECEIVABLE_STATUSES.has(invoice.status) && invoiceDate <= input.asOfDate && asRands(invoice.balanceDue) > 0;
+      const normalized = normalizeLegacyInvoiceAmounts(invoice);
+      return OPEN_RECEIVABLE_STATUSES.has(normalized.status) && invoiceDate <= input.asOfDate && asRands(normalized.balanceDue) > 0;
     })
     .map((invoice) => {
       const invoiceDate = dateOnly(invoice.invoiceDate);
-      const amount = asRands(invoice.balanceDue);
+      const normalized = normalizeLegacyInvoiceAmounts(invoice);
+      const amount = asRands(normalized.balanceDue);
       const daysOutstanding = daysBetween(invoiceDate, input.asOfDate);
       const bucket = receivableBucket(daysOutstanding);
       buckets[bucket] += amount;
@@ -194,7 +200,7 @@ export function calculateAgedReceivablesReport(input: {
         customerName: invoice.customerName || "Unassigned customer",
         invoiceDate,
         dueDate: dateOnly(invoice.dueDate),
-        status: invoice.status,
+        status: normalized.status,
         daysOutstanding,
         bucket,
         balanceDue: Number(amount.toFixed(2)),
