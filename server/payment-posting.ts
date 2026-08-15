@@ -56,7 +56,22 @@ export function validateCustomerPaymentAgainstBalance(input: {
   if (payment.cents > balance.cents) {
     throw new Error("Payment amount cannot exceed the outstanding invoice balance.");
   }
-  return { payment, balance };
+	return { payment, balance };
+}
+
+export function resolveCustomerPaymentOutcome(input: {
+	amount: string | number | null | undefined;
+	balanceDue: string | number | null | undefined;
+}) {
+	const { payment, balance } = validateCustomerPaymentAgainstBalance(input);
+	const remainingCents = balance.cents - payment.cents;
+
+	return {
+		payment,
+		balance,
+		remainingBalance: `${Math.floor(remainingCents / 100)}.${(remainingCents % 100).toString().padStart(2, "0")}`,
+		status: remainingCents === 0 ? "paid" as const : "partial" as const,
+	};
 }
 
 export function buildCustomerPaymentPosting(input: {

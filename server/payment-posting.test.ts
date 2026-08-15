@@ -4,6 +4,7 @@ import {
   buildCustomerPaymentPosting,
   getCustomerPaymentJournalNumber,
   parseRandAmount,
+  resolveCustomerPaymentOutcome,
   validateCustomerPaymentAgainstBalance,
 } from "./payment-posting";
 
@@ -47,5 +48,16 @@ describe("automatic customer payment posting", () => {
     });
     expect(() => validateCustomerPaymentAgainstBalance({ amount: "75.51", balanceDue: "75.50" })).toThrow("cannot exceed");
     expect(() => validateCustomerPaymentAgainstBalance({ amount: "1.00", balanceDue: "0.00" })).toThrow("no remaining balance");
+  });
+
+  it("marks an exact full-balance payment as paid and retains partial status only when cents remain", () => {
+    expect(resolveCustomerPaymentOutcome({ amount: "1092.50", balanceDue: "1092.50" })).toMatchObject({
+      remainingBalance: "0.00",
+      status: "paid",
+    });
+    expect(resolveCustomerPaymentOutcome({ amount: "1092.49", balanceDue: "1092.50" })).toMatchObject({
+      remainingBalance: "0.01",
+      status: "partial",
+    });
   });
 });

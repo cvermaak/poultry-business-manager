@@ -81,7 +81,7 @@ import {
 import { calculatePreTransportSchedule } from "./pre-transport-protocol";
 import { AFGRO_DEFAULT_CHART_OF_ACCOUNTS, type JournalLineInput, validateBalancedJournal } from "./accounting";
 import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCustomerInvoiceJournalNumber, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
-import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, validateCustomerPaymentAgainstBalance } from "./payment-posting";
+import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, resolveCustomerPaymentOutcome } from "./payment-posting";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -3526,7 +3526,7 @@ export async function recordInvoicePayment(invoiceId: number, data: {
 		throw new Error("Only sent, partially paid, or overdue invoices can receive a customer payment.");
 	}
 
-	validateCustomerPaymentAgainstBalance({ amount: payment.normalized, balanceDue: invoice.balanceDue });
+	resolveCustomerPaymentOutcome({ amount: payment.normalized, balanceDue: invoice.balanceDue });
 
 	const invoicePosting = await db.select({ journalEntryId: accountingSourcePostings.journalEntryId })
 		.from(accountingSourcePostings)
@@ -3587,8 +3587,8 @@ export async function recordInvoicePayment(invoiceId: number, data: {
 
 		const updated = await tx.update(invoices).set({
 			paidAmount: sql`CAST(${invoices.paidAmount} + ${payment.normalized} AS DECIMAL(15,2))`,
-			balanceDue: sql`CAST(${invoices.balanceDue} - ${payment.normalized} AS DECIMAL(15,2))`,
-			status: sql`CASE WHEN ${invoices.balanceDue} - ${payment.normalized} = 0 THEN 'paid' ELSE 'partial' END`,
+			balanceDue: sql`GREATEST(CAST(${invoices.balanceDue} AS DECIMAL(15,2)) - CAST(${payment.normalized} AS DECIMAL(15,2)), 0.00)`,
+			status: sql`CASE WHEN CAST(${invoices.balanceDue} AS DECIMAL(15,2)) <= CAST(${payment.normalized} AS DECIMAL(15,2)) THEN 'paid' ELSE 'partial' END`,
 			paymentMethod: data.paymentMethod,
 			paymentDate: data.paymentDate,
 			updatedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
