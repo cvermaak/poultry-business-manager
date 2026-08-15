@@ -1623,7 +1623,7 @@ export async function markInvoiceAsSent(invoiceId: number, sentAt: string, creat
 	});
 }
 
-export async function listJournalEntries(filters?: { startDate?: string; endDate?: string; limit?: number }) {
+export async function listJournalEntries(filters?: { startDate?: string; endDate?: string; includeJournalNumber?: string; limit?: number }) {
   const db = await getDb();
   if (!db) return [];
 
@@ -1632,7 +1632,13 @@ export async function listJournalEntries(filters?: { startDate?: string; endDate
     filters?.endDate ? lte(journalEntries.entryDate, filters.endDate) : undefined,
   ].filter(Boolean) as any[];
   let query = db.select().from(journalEntries).$dynamic();
-  if (conditions.length) query = query.where(and(...conditions));
+  const periodCondition = conditions.length ? and(...conditions) : undefined;
+  const linkedJournalCondition = filters?.includeJournalNumber
+    ? eq(journalEntries.journalNumber, filters.includeJournalNumber)
+    : undefined;
+  if (periodCondition && linkedJournalCondition) query = query.where(or(periodCondition, linkedJournalCondition));
+  else if (periodCondition) query = query.where(periodCondition);
+  else if (linkedJournalCondition) query = query.where(linkedJournalCondition);
   return await query.orderBy(desc(journalEntries.entryDate)).limit(filters?.limit ?? 100);
 }
 

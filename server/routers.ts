@@ -2385,11 +2385,13 @@ export const appRouter = router({
       .input(z.object({
         startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        includeJournalNumber: z.string().trim().min(1).max(100).optional(),
         limit: z.number().int().min(1).max(250).optional(),
       }).optional())
       .query(async ({ input }) => db.listJournalEntries({
         startDate: input?.startDate ? `${input.startDate} 00:00:00` : undefined,
         endDate: input?.endDate ? `${input.endDate} 23:59:59` : undefined,
+        includeJournalNumber: input?.includeJournalNumber,
         limit: input?.limit,
       })),
     listLedger: accountantProcedure

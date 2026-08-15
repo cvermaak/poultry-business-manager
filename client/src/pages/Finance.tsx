@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { resolveFinanceNavigation } from "@/lib/finance-navigation";
+import { buildJournalListInput, resolveFinanceNavigation } from "@/lib/finance-navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -186,7 +186,11 @@ export default function Finance() {
     enabled: startDate <= endDate,
   });
   const accounts = trpc.accounting.listAccounts.useQuery();
-  const journals = trpc.accounting.listJournals.useQuery({ startDate, endDate, limit: 100 });
+  const journalListInput = useMemo(
+    () => buildJournalListInput(startDate, endDate, requestedJournalNumber),
+    [startDate, endDate, requestedJournalNumber],
+  );
+  const journals = trpc.accounting.listJournals.useQuery(journalListInput);
   const seedDefaultChart = trpc.accounting.seedDefaultChart.useMutation({
     onSuccess: () => { void accountingUtils.accounting.listAccounts.invalidate(); setJournalError(null); },
     onError: (error) => setJournalError(error.message),
@@ -503,7 +507,7 @@ export default function Finance() {
               <Alert className="border-emerald-200 bg-emerald-50 text-emerald-950">
                 <BookOpen className="h-4 w-4" />
                 <AlertTitle>Linked invoice posting</AlertTitle>
-                <AlertDescription>Showing the General Ledger journal linked from the invoice: <span className="font-mono font-semibold">{requestedJournalNumber}</span>.</AlertDescription>
+                <AlertDescription>Showing the General Ledger journal linked from the invoice: <span className="font-mono font-semibold">{requestedJournalNumber}</span>. It remains visible even when its entry date falls outside the selected report period.</AlertDescription>
               </Alert>
             )}
             <Card>
