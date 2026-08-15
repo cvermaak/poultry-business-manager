@@ -162,7 +162,7 @@ export default function Finance() {
   const [endDate, setEndDate] = useState(today);
   const [asOfDate, setAsOfDate] = useState(today);
   const [journalDialogOpen, setJournalDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState(() => financeNavigation.tab);
+  const [activeTab, setActiveTab] = useState<string>(() => financeNavigation.tab);
   const [journalError, setJournalError] = useState<string | null>(null);
   const [journalDraft, setJournalDraft] = useState({
     entryDate: `${today}T12:00`, description: "", sourceType: "manual_journal", sourceId: "", lines: [emptyJournalLine(), emptyJournalLine()],
@@ -185,6 +185,8 @@ export default function Finance() {
   const cashFlowStatement = trpc.financialReports.cashFlowStatement.useQuery(periodInput, {
     enabled: startDate <= endDate,
   });
+  const trialBalance = trpc.financialReports.trialBalance.useQuery(receivablesInput);
+  const balanceSheet = trpc.financialReports.balanceSheet.useQuery(receivablesInput);
   const accounts = trpc.accounting.listAccounts.useQuery();
   const journalListInput = useMemo(
     () => buildJournalListInput(startDate, endDate, requestedJournalNumber),
@@ -204,8 +206,8 @@ export default function Finance() {
     onError: (error) => setJournalError(error.message),
   });
 
-  const isLoading = profitAndLoss.isLoading || agedReceivables.isLoading || cashFlowStatement.isLoading;
-  const hasError = profitAndLoss.error || agedReceivables.error || cashFlowStatement.error;
+  const isLoading = profitAndLoss.isLoading || agedReceivables.isLoading || cashFlowStatement.isLoading || trialBalance.isLoading || balanceSheet.isLoading;
+  const hasError = profitAndLoss.error || agedReceivables.error || cashFlowStatement.error || trialBalance.error || balanceSheet.error;
   const isInvalidPeriod = startDate > endDate;
 
   const refreshReports = () => {
@@ -213,6 +215,8 @@ export default function Finance() {
       profitAndLoss.refetch(),
       agedReceivables.refetch(),
       cashFlowStatement.refetch(),
+      trialBalance.refetch(),
+      balanceSheet.refetch(),
     ]);
   };
 
@@ -310,6 +314,8 @@ export default function Finance() {
             <TabsTrigger value="profit-loss" className="gap-2"><TrendingUp className="h-4 w-4" /> Profit &amp; Loss</TabsTrigger>
             <TabsTrigger value="receivables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Receivables</TabsTrigger>
             <TabsTrigger value="cash-flow" className="gap-2"><Banknote className="h-4 w-4" /> Cash Flow</TabsTrigger>
+            <TabsTrigger value="trial-balance" className="gap-2"><BookOpen className="h-4 w-4" /> Trial Balance</TabsTrigger>
+            <TabsTrigger value="balance-sheet" className="gap-2"><Landmark className="h-4 w-4" /> Balance Sheet</TabsTrigger>
             <TabsTrigger value="accounts" className="gap-2"><BookOpen className="h-4 w-4" /> Chart of Accounts</TabsTrigger>
             <TabsTrigger value="journals" className="gap-2"><Landmark className="h-4 w-4" /> General Ledger</TabsTrigger>
           </TabsList>
@@ -475,6 +481,64 @@ export default function Finance() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="trial-balance" className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <MetricCard label="Total debits" value={trialBalance.data?.totalDebit ?? 0} description={`As at ${formatReportDate(asOfDate)}`} icon={ArrowDownRight} />
+              <MetricCard label="Total credits" value={trialBalance.data?.totalCredit ?? 0} description="Posted ledger balances" icon={ArrowUpRight} />
+              <MetricCard label="Difference" value={trialBalance.data?.difference ?? 0} description={trialBalance.data?.isBalanced ? "Trial balance agrees" : "Review unbalanced ledger activity"} icon={CircleAlert} tone={trialBalance.data?.isBalanced ? "positive" : "negative"} />
+            </div>
+            <Alert className={trialBalance.data?.isBalanced ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-rose-200 bg-rose-50 text-rose-950"}>
+              <BookOpen className="h-4 w-4" />
+              <AlertTitle>{trialBalance.data?.isBalanced ? "Trial balance reconciles" : "Trial balance requires review"}</AlertTitle>
+              <AlertDescription>{trialBalance.data?.isBalanced ? "Closing debit and credit balances agree as at the selected date." : "The debit and credit balance columns do not agree. Review posted journals before relying on the statement of financial position."}</AlertDescription>
+            </Alert>
+            <Card>
+              <CardHeader>
+                <CardTitle>Trial balance</CardTitle>
+                <CardDescription>Closing account balances from posted General Ledger entries as at {formatReportDate(asOfDate)}.</CardDescription>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                {(trialBalance.data?.rows.filter((row) => row.balanceDebit !== 0 || row.balanceCredit !== 0).length ?? 0) === 0 ? <div className="px-6 pb-6 text-sm text-muted-foreground">No posted ledger balances exist as at the selected date.</div> : (
+                  <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Account</TableHead><TableHead>Type</TableHead><TableHead className="text-right">Debit balance</TableHead><TableHead className="text-right">Credit balance</TableHead></TableRow></TableHeader><TableBody>
+                    {trialBalance.data?.rows.filter((row) => row.balanceDebit !== 0 || row.balanceCredit !== 0).map((row) => <TableRow key={row.id}><TableCell><span className="font-mono font-medium">{row.accountNumber}</span><span className="ml-2">{row.accountName}</span></TableCell><TableCell><Badge variant="outline" className="capitalize">{row.accountType}</Badge></TableCell><TableCell className="text-right"><Amount value={row.balanceDebit} /></TableCell><TableCell className="text-right"><Amount value={row.balanceCredit} /></TableCell></TableRow>)}
+                  </TableBody><tfoot><TableRow className="bg-muted/40 font-semibold"><TableCell colSpan={2}>Totals</TableCell><TableCell className="text-right"><Amount value={trialBalance.data?.totalDebit ?? 0} emphasis /></TableCell><TableCell className="text-right"><Amount value={trialBalance.data?.totalCredit ?? 0} emphasis /></TableCell></TableRow></tfoot></Table></div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="balance-sheet" className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-3">
+              <MetricCard label="Total assets" value={balanceSheet.data?.totalAssets ?? 0} description={`As at ${formatReportDate(asOfDate)}`} icon={Landmark} tone="positive" />
+              <MetricCard label="Total liabilities" value={balanceSheet.data?.totalLiabilities ?? 0} description="Posted liability balances" icon={ArrowDownRight} tone="warning" />
+              <MetricCard label="Total equity" value={balanceSheet.data?.totalEquity ?? 0} description="Equity plus current-period earnings" icon={TrendingUp} tone="positive" />
+            </div>
+            <Alert className={balanceSheet.data?.isBalanced ? "border-emerald-200 bg-emerald-50 text-emerald-950" : "border-rose-200 bg-rose-50 text-rose-950"}>
+              <Landmark className="h-4 w-4" />
+              <AlertTitle>{balanceSheet.data?.isBalanced ? "Statement of financial position reconciles" : "Statement of financial position requires review"}</AlertTitle>
+              <AlertDescription>{balanceSheet.data?.isBalanced ? "Assets equal liabilities plus equity at the selected reporting date." : "Assets do not equal liabilities plus equity. Check posted ledger entries and account classifications."}</AlertDescription>
+            </Alert>
+            <div className="grid gap-5 xl:grid-cols-2">
+              <Card>
+                <CardHeader><CardTitle>Assets</CardTitle><CardDescription>Debit-normal asset accounts as at {formatReportDate(asOfDate)}.</CardDescription></CardHeader>
+                <CardContent className="space-y-2">
+                  {(balanceSheet.data?.assets.length ?? 0) === 0 ? <p className="text-sm text-muted-foreground">No asset balances are posted.</p> : balanceSheet.data?.assets.map((row) => <div key={row.accountNumber} className="flex items-center justify-between gap-4 border-b pb-2 text-sm"><span><span className="font-mono text-muted-foreground">{row.accountNumber}</span> <span className="font-medium">{row.accountName}</span></span><Amount value={row.amount} /></div>)}
+                  <div className="flex items-center justify-between pt-2 font-bold"><span>Total assets</span><Amount value={balanceSheet.data?.totalAssets ?? 0} emphasis /></div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle>Liabilities and equity</CardTitle><CardDescription>Credit-normal obligations, capital, and current-period earnings.</CardDescription></CardHeader>
+                <CardContent className="space-y-2">
+                  {balanceSheet.data?.liabilities.map((row) => <div key={row.accountNumber} className="flex items-center justify-between gap-4 border-b pb-2 text-sm"><span><span className="font-mono text-muted-foreground">{row.accountNumber}</span> <span className="font-medium">{row.accountName}</span></span><Amount value={row.amount} /></div>)}
+                  <div className="flex items-center justify-between border-b pb-2 text-sm font-semibold"><span>Total liabilities</span><Amount value={balanceSheet.data?.totalLiabilities ?? 0} /></div>
+                  {balanceSheet.data?.equity.map((row) => <div key={row.accountNumber} className="flex items-center justify-between gap-4 border-b pb-2 text-sm"><span><span className="font-mono text-muted-foreground">{row.accountNumber}</span> <span className="font-medium">{row.accountName}</span></span><Amount value={row.amount} /></div>)}
+                  <div className="flex items-center justify-between border-b pb-2 text-sm"><span className="font-medium">Current-period earnings</span><Amount value={balanceSheet.data?.currentPeriodProfit ?? 0} /></div>
+                  <div className="flex items-center justify-between pt-2 font-bold"><span>Total liabilities and equity</span><Amount value={balanceSheet.data?.totalLiabilitiesAndEquity ?? 0} emphasis /></div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           <TabsContent value="accounts" className="space-y-5">

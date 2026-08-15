@@ -67,8 +67,10 @@ import "../drizzle/relations";
 import { ENV } from "./_core/env";
 import {
   calculateAgedReceivablesReport,
+  calculateBalanceSheetReport,
   calculateCashFlowStatement,
   calculateProfitAndLossReport,
+  calculateTrialBalanceReport,
 } from "./financial-reporting";
 import { selectEffectiveDatedRecord } from "./feed-pricing";
 import {
@@ -3988,7 +3990,48 @@ export async function getCashFlowStatementReport(input: { startDate: string; end
         source: 'Mill invoice payment' as const,
       })),
     ],
-  });
+	});
+}
+
+async function getLedgerReportInputs(asOfDate: string) {
+  const db = await getDb();
+  if (!db) return { accounts: [], ledgerLines: [] };
+
+  const [accounts, ledgerLines] = await Promise.all([
+    db.select({
+      id: chartOfAccounts.id,
+      accountNumber: chartOfAccounts.accountNumber,
+      accountName: chartOfAccounts.accountName,
+      accountType: chartOfAccounts.accountType,
+      accountSubtype: chartOfAccounts.accountSubtype,
+      normalBalance: chartOfAccounts.normalBalance,
+    })
+      .from(chartOfAccounts)
+      .where(eq(chartOfAccounts.isActive, 1)),
+    db.select({
+      accountId: generalLedgerEntries.accountId,
+      debit: generalLedgerEntries.debit,
+      credit: generalLedgerEntries.credit,
+    })
+      .from(generalLedgerEntries)
+      .innerJoin(journalEntries, eq(generalLedgerEntries.journalEntryId, journalEntries.id))
+      .where(and(
+        eq(journalEntries.status, "posted"),
+        lte(generalLedgerEntries.entryDate, periodEnd(asOfDate)),
+      )),
+  ]);
+
+  return { accounts, ledgerLines };
+}
+
+export async function getTrialBalanceReport(input: { asOfDate: string }) {
+  const { accounts, ledgerLines } = await getLedgerReportInputs(input.asOfDate);
+  return calculateTrialBalanceReport({ ...input, accounts, ledgerLines });
+}
+
+export async function getBalanceSheetReport(input: { asOfDate: string }) {
+  const { accounts, ledgerLines } = await getLedgerReportInputs(input.asOfDate);
+  return calculateBalanceSheetReport({ ...input, accounts, ledgerLines });
 }
 
 export async function getExpenseCategories() {

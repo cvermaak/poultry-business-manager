@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateAgedReceivablesReport,
+  calculateBalanceSheetReport,
   calculateCashFlowStatement,
   calculateProfitAndLossReport,
+  calculateTrialBalanceReport,
 } from "./financial-reporting";
 
 describe("Financial Accounting report calculations", () => {
@@ -120,5 +122,59 @@ describe("Financial Accounting report calculations", () => {
       { month: "2026-08", cashInflows: 150, cashOutflows: 172.5, netCashMovement: -22.5 },
     ]);
     expect(report.transactions).toHaveLength(4);
+  });
+
+  it("calculates a balanced trial balance from posted debit and credit ledger lines", () => {
+    const report = calculateTrialBalanceReport({
+      asOfDate: "2026-08-15",
+      accounts: [
+        { id: 1, accountNumber: "1000", accountName: "Bank", accountType: "asset", accountSubtype: "current_asset", normalBalance: "debit" },
+        { id: 2, accountNumber: "1100", accountName: "Trade Receivables", accountType: "asset", accountSubtype: "current_asset", normalBalance: "debit" },
+        { id: 3, accountNumber: "2100", accountName: "VAT Output", accountType: "liability", accountSubtype: "tax", normalBalance: "credit" },
+        { id: 4, accountNumber: "4000", accountName: "Live Bird Sales", accountType: "revenue", accountSubtype: "operating_revenue", normalBalance: "credit" },
+      ],
+      ledgerLines: [
+        { accountId: 2, debit: "115.00", credit: "0.00" },
+        { accountId: 4, debit: "0.00", credit: "100.00" },
+        { accountId: 3, debit: "0.00", credit: "15.00" },
+        { accountId: 1, debit: "115.00", credit: "0.00" },
+        { accountId: 2, debit: "0.00", credit: "115.00" },
+      ],
+    });
+
+    expect(report).toMatchObject({ totalDebit: 115, totalCredit: 115, difference: 0, isBalanced: true });
+    expect(report.rows.find((row) => row.accountNumber === "1000")).toMatchObject({ balanceDebit: 115, balanceCredit: 0, netBalance: 115 });
+    expect(report.rows.find((row) => row.accountNumber === "4000")).toMatchObject({ balanceDebit: 0, balanceCredit: 100, netBalance: 100 });
+  });
+
+  it("reconciles assets with liabilities, equity, and current-period earnings", () => {
+    const input = {
+      asOfDate: "2026-08-15",
+      accounts: [
+        { id: 1, accountNumber: "1000", accountName: "Bank", accountType: "asset" as const, accountSubtype: "current_asset", normalBalance: "debit" as const },
+        { id: 2, accountNumber: "1100", accountName: "Trade Receivables", accountType: "asset" as const, accountSubtype: "current_asset", normalBalance: "debit" as const },
+        { id: 3, accountNumber: "2100", accountName: "VAT Output", accountType: "liability" as const, accountSubtype: "tax", normalBalance: "credit" as const },
+        { id: 4, accountNumber: "3000", accountName: "Owner's Equity", accountType: "equity" as const, accountSubtype: "capital", normalBalance: "credit" as const },
+        { id: 5, accountNumber: "4000", accountName: "Live Bird Sales", accountType: "revenue" as const, accountSubtype: "operating_revenue", normalBalance: "credit" as const },
+        { id: 6, accountNumber: "6000", accountName: "Labour", accountType: "expense" as const, accountSubtype: "operating_expense", normalBalance: "debit" as const },
+      ],
+      ledgerLines: [
+        { accountId: 1, debit: "1100.00", credit: "0.00" },
+        { accountId: 2, debit: "100.00", credit: "0.00" },
+        { accountId: 3, debit: "0.00", credit: "150.00" },
+        { accountId: 4, debit: "0.00", credit: "500.00" },
+        { accountId: 5, debit: "0.00", credit: "1000.00" },
+        { accountId: 6, debit: "450.00", credit: "0.00" },
+      ],
+    };
+
+    const report = calculateBalanceSheetReport(input);
+
+    expect(report.currentPeriodProfit).toBe(550);
+    expect(report.totalAssets).toBe(1200);
+    expect(report.totalLiabilities).toBe(150);
+    expect(report.totalEquity).toBe(1050);
+    expect(report.totalLiabilitiesAndEquity).toBe(1200);
+    expect(report).toMatchObject({ difference: 0, isBalanced: true });
   });
 });

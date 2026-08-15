@@ -76,6 +76,36 @@ export type CashPayment = {
   source: "Expense payment" | "Mill invoice payment";
 };
 
+export type LedgerAccountBalance = {
+  id: number;
+  accountNumber: string;
+  accountName: string;
+  accountType: "asset" | "liability" | "equity" | "revenue" | "expense";
+  accountSubtype: string | null;
+  normalBalance: "debit" | "credit";
+};
+
+export type LedgerBalanceLine = {
+  accountId: number;
+  debit: MoneyValue;
+  credit: MoneyValue;
+};
+
+type TrialBalanceRow = LedgerAccountBalance & {
+  debit: number;
+  credit: number;
+  balanceDebit: number;
+  balanceCredit: number;
+  netBalance: number;
+};
+
+type BalanceSheetRow = {
+  accountNumber: string;
+  accountName: string;
+  accountSubtype: string | null;
+  amount: number;
+};
+
 function asRands(value: MoneyValue): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -83,6 +113,20 @@ function asRands(value: MoneyValue): number {
 
 function centsToRands(value: MoneyValue): number {
   return asRands(value) / 100;
+}
+
+function moneyToCents(value: MoneyValue): number {
+  const normalized = String(value ?? "0").trim();
+  const match = normalized.match(/^(-?)(\d+)(?:\.(\d{1,2}))?$/);
+  if (!match) return 0;
+  const whole = Number(match[2]);
+  const fraction = Number((match[3] ?? "").padEnd(2, "0"));
+  const cents = whole * 100 + fraction;
+  return match[1] === "-" ? -cents : cents;
+}
+
+function centsToNumber(cents: number): number {
+  return Number((cents / 100).toFixed(2));
 }
 
 function dateOnly(value: string | Date | null | undefined): string {
@@ -280,5 +324,94 @@ export function calculateCashFlowStatement(input: {
     netCashMovement: Number((cashInflows - cashOutflows).toFixed(2)),
     monthlySummary,
     transactions,
+  };
+}
+
+export function calculateTrialBalanceReport(input: {
+  asOfDate: string;
+  accounts: LedgerAccountBalance[];
+  ledgerLines: LedgerBalanceLine[];
+}) {
+  const totalsByAccount = new Map<number, { debitCents: number; creditCents: number }>();
+  for (const line of input.ledgerLines) {
+    const totals = totalsByAccount.get(line.accountId) ?? { debitCents: 0, creditCents: 0 };
+    totals.debitCents += moneyToCents(line.debit);
+    totals.creditCents += moneyToCents(line.credit);
+    totalsByAccount.set(line.accountId, totals);
+  }
+
+  const rows: TrialBalanceRow[] = input.accounts
+    .map((account) => {
+      const totals = totalsByAccount.get(account.id) ?? { debitCents: 0, creditCents: 0 };
+      const netCents = totals.debitCents - totals.creditCents;
+      return {
+        ...account,
+        debit: centsToNumber(totals.debitCents),
+        credit: centsToNumber(totals.creditCents),
+        balanceDebit: centsToNumber(Math.max(netCents, 0)),
+        balanceCredit: centsToNumber(Math.max(-netCents, 0)),
+        netBalance: centsToNumber(account.normalBalance === "debit" ? netCents : -netCents),
+      };
+    })
+    .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber, undefined, { numeric: true }));
+
+  const totalDebit = rows.reduce((sum, row) => sum + moneyToCents(row.balanceDebit), 0);
+  const totalCredit = rows.reduce((sum, row) => sum + moneyToCents(row.balanceCredit), 0);
+
+  return {
+    asOfDate: input.asOfDate,
+    totalDebit: centsToNumber(totalDebit),
+    totalCredit: centsToNumber(totalCredit),
+    difference: centsToNumber(totalDebit - totalCredit),
+    isBalanced: totalDebit === totalCredit,
+    rows,
+  };
+}
+
+function balanceSheetRows(rows: TrialBalanceRow[], accountType: LedgerAccountBalance["accountType"]): BalanceSheetRow[] {
+  return rows
+    .filter((row) => row.accountType === accountType && row.netBalance !== 0)
+    .map((row) => ({
+      accountNumber: row.accountNumber,
+      accountName: row.accountName,
+      accountSubtype: row.accountSubtype,
+      amount: row.netBalance,
+    }));
+}
+
+export function calculateBalanceSheetReport(input: {
+  asOfDate: string;
+  accounts: LedgerAccountBalance[];
+  ledgerLines: LedgerBalanceLine[];
+}) {
+  const trialBalance = calculateTrialBalanceReport(input);
+  const assets = balanceSheetRows(trialBalance.rows, "asset");
+  const liabilities = balanceSheetRows(trialBalance.rows, "liability");
+  const equity = balanceSheetRows(trialBalance.rows, "equity");
+  const revenue = balanceSheetRows(trialBalance.rows, "revenue");
+  const expenses = balanceSheetRows(trialBalance.rows, "expense");
+
+  const sum = (rows: Array<{ amount: number }>) => centsToNumber(rows.reduce((total, row) => total + moneyToCents(row.amount), 0));
+  const totalAssets = sum(assets);
+  const totalLiabilities = sum(liabilities);
+  const equityBeforeCurrentEarnings = sum(equity);
+  const currentPeriodProfit = Number((sum(revenue) - sum(expenses)).toFixed(2));
+  const totalEquity = Number((equityBeforeCurrentEarnings + currentPeriodProfit).toFixed(2));
+  const totalLiabilitiesAndEquity = Number((totalLiabilities + totalEquity).toFixed(2));
+  const difference = Number((totalAssets - totalLiabilitiesAndEquity).toFixed(2));
+
+  return {
+    asOfDate: input.asOfDate,
+    assets,
+    liabilities,
+    equity,
+    currentPeriodProfit,
+    totalAssets,
+    totalLiabilities,
+    equityBeforeCurrentEarnings,
+    totalEquity,
+    totalLiabilitiesAndEquity,
+    difference,
+    isBalanced: difference === 0,
   };
 }
