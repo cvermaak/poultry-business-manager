@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { resolveFinanceNavigation } from "@/lib/finance-navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -154,29 +155,25 @@ function DetailCategoryTable({
 }
 
 export default function Finance() {
-  const [location] = useLocation();
+  const search = useSearch();
+  const financeNavigation = useMemo(() => resolveFinanceNavigation(search), [search]);
   const today = useMemo(() => toDateInputValue(new Date()), []);
   const [startDate, setStartDate] = useState(getMonthStart);
   const [endDate, setEndDate] = useState(today);
   const [asOfDate, setAsOfDate] = useState(today);
   const [journalDialogOpen, setJournalDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("profit-loss");
+  const [activeTab, setActiveTab] = useState(() => financeNavigation.tab);
   const [journalError, setJournalError] = useState<string | null>(null);
   const [journalDraft, setJournalDraft] = useState({
     entryDate: `${today}T12:00`, description: "", sourceType: "manual_journal", sourceId: "", lines: [emptyJournalLine(), emptyJournalLine()],
   });
   const accountingUtils = trpc.useUtils();
 
-  const requestedJournalNumber = useMemo(() => {
-    const queryIndex = location.indexOf("?");
-    return queryIndex === -1 ? "" : new URLSearchParams(location.slice(queryIndex + 1)).get("journal") || "";
-  }, [location]);
+  const requestedJournalNumber = financeNavigation.journalNumber;
 
   useEffect(() => {
-    const queryIndex = location.indexOf("?");
-    const requestedTab = queryIndex === -1 ? "" : new URLSearchParams(location.slice(queryIndex + 1)).get("tab");
-    if (requestedTab === "journals") setActiveTab("journals");
-  }, [location]);
+    if (financeNavigation.tab === "journals") setActiveTab("journals");
+  }, [financeNavigation.tab]);
 
   const periodInput = useMemo(() => ({ startDate, endDate }), [startDate, endDate]);
   const receivablesInput = useMemo(() => ({ asOfDate }), [asOfDate]);
