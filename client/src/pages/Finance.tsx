@@ -8,16 +8,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   ArrowDownRight,
   ArrowUpRight,
   Banknote,
+  BookOpen,
   CalendarDays,
   CircleAlert,
   Download,
+  FilePlus2,
+  Landmark,
   Loader2,
+  Plus,
   ReceiptText,
   RefreshCw,
+  Trash2,
   TrendingDown,
   TrendingUp,
   WalletCards,
@@ -47,6 +53,14 @@ function formatReportDate(value: string) {
   return Number.isNaN(date.getTime())
     ? value
     : date.toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+type JournalDraftLine = { accountId: string; debit: string; credit: string; description: string };
+const emptyJournalLine = (): JournalDraftLine => ({ accountId: "", debit: "", credit: "", description: "" });
+
+function numberFromAmount(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function Amount({ value, emphasis = false }: { value: number; emphasis?: boolean }) {
@@ -143,6 +157,12 @@ export default function Finance() {
   const [startDate, setStartDate] = useState(getMonthStart);
   const [endDate, setEndDate] = useState(today);
   const [asOfDate, setAsOfDate] = useState(today);
+  const [journalDialogOpen, setJournalDialogOpen] = useState(false);
+  const [journalError, setJournalError] = useState<string | null>(null);
+  const [journalDraft, setJournalDraft] = useState({
+    entryDate: `${today}T12:00`, description: "", sourceType: "manual_journal", sourceId: "", lines: [emptyJournalLine(), emptyJournalLine()],
+  });
+  const accountingUtils = trpc.useUtils();
 
   const periodInput = useMemo(() => ({ startDate, endDate }), [startDate, endDate]);
   const receivablesInput = useMemo(() => ({ asOfDate }), [asOfDate]);
@@ -153,6 +173,20 @@ export default function Finance() {
   const agedReceivables = trpc.financialReports.agedReceivables.useQuery(receivablesInput);
   const cashFlowStatement = trpc.financialReports.cashFlowStatement.useQuery(periodInput, {
     enabled: startDate <= endDate,
+  });
+  const accounts = trpc.accounting.listAccounts.useQuery();
+  const journals = trpc.accounting.listJournals.useQuery({ startDate, endDate, limit: 100 });
+  const seedDefaultChart = trpc.accounting.seedDefaultChart.useMutation({
+    onSuccess: () => { void accountingUtils.accounting.listAccounts.invalidate(); setJournalError(null); },
+    onError: (error) => setJournalError(error.message),
+  });
+  const postJournal = trpc.accounting.postJournal.useMutation({
+    onSuccess: () => {
+      void Promise.all([accountingUtils.accounting.listJournals.invalidate(), accountingUtils.accounting.listLedger.invalidate()]);
+      setJournalDialogOpen(false); setJournalError(null);
+      setJournalDraft({ entryDate: `${today}T12:00`, description: "", sourceType: "manual_journal", sourceId: "", lines: [emptyJournalLine(), emptyJournalLine()] });
+    },
+    onError: (error) => setJournalError(error.message),
   });
 
   const isLoading = profitAndLoss.isLoading || agedReceivables.isLoading || cashFlowStatement.isLoading;
@@ -176,6 +210,25 @@ export default function Finance() {
   const profit = profitAndLoss.data;
   const receivables = agedReceivables.data;
   const cashFlow = cashFlowStatement.data;
+  const journalTotals = useMemo(() => journalDraft.lines.reduce(
+    (totals, line) => ({ debit: totals.debit + numberFromAmount(line.debit), credit: totals.credit + numberFromAmount(line.credit) }),
+    { debit: 0, credit: 0 },
+  ), [journalDraft.lines]);
+  const journalIsBalanced = journalTotals.debit > 0 && Math.abs(journalTotals.debit - journalTotals.credit) < 0.005;
+  const updateJournalLine = (index: number, patch: Partial<JournalDraftLine>) => setJournalDraft((draft) => ({
+    ...draft,
+    lines: draft.lines.map((line, lineIndex) => lineIndex === index ? { ...line, ...patch } : line),
+  }));
+  const submitJournal = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setJournalError(null);
+    if (!journalIsBalanced) { setJournalError("Total debits and credits must match before posting."); return; }
+    postJournal.mutate({
+      entryDate: new Date(journalDraft.entryDate), description: journalDraft.description,
+      sourceType: journalDraft.sourceType || undefined, sourceId: journalDraft.sourceId ? Number(journalDraft.sourceId) : undefined,
+      lines: journalDraft.lines.map((line) => ({ accountId: Number(line.accountId), debit: line.debit || undefined, credit: line.credit || undefined, description: line.description || undefined })),
+    });
+  };
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -242,6 +295,8 @@ export default function Finance() {
             <TabsTrigger value="profit-loss" className="gap-2"><TrendingUp className="h-4 w-4" /> Profit &amp; Loss</TabsTrigger>
             <TabsTrigger value="receivables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Receivables</TabsTrigger>
             <TabsTrigger value="cash-flow" className="gap-2"><Banknote className="h-4 w-4" /> Cash Flow</TabsTrigger>
+            <TabsTrigger value="accounts" className="gap-2"><BookOpen className="h-4 w-4" /> Chart of Accounts</TabsTrigger>
+            <TabsTrigger value="journals" className="gap-2"><Landmark className="h-4 w-4" /> General Ledger</TabsTrigger>
           </TabsList>
 
           <TabsContent value="profit-loss" className="space-y-5">
@@ -406,8 +461,84 @@ export default function Finance() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="accounts" className="space-y-5">
+            <Card>
+              <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Chart of accounts</CardTitle>
+                  <CardDescription>Post journals only to active posting accounts. Account values are stored as rand decimals; VAT is recorded through the separate VAT accounts.</CardDescription>
+                </div>
+                <Button onClick={() => seedDefaultChart.mutate()} disabled={seedDefaultChart.isPending}>
+                  {seedDefaultChart.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                  Seed AFGRO chart
+                </Button>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                {accounts.isLoading ? <div className="px-6 pb-6 text-sm text-muted-foreground">Loading accounts…</div> : (accounts.data?.length ?? 0) === 0 ? <div className="px-6 pb-6 text-sm text-muted-foreground">No accounts are available. Seed the AFGRO chart of accounts to begin posting journals.</div> : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Account</TableHead><TableHead>Type</TableHead><TableHead>Normal balance</TableHead><TableHead className="text-right">Posting status</TableHead></TableRow></TableHeader>
+                      <TableBody>{accounts.data?.map((account) => <TableRow key={account.id}><TableCell className="font-mono font-medium">{account.accountNumber}</TableCell><TableCell><p className="font-medium">{account.accountName}</p><p className="mt-1 text-xs text-muted-foreground">{account.description || account.accountSubtype || "—"}</p></TableCell><TableCell><Badge variant="outline" className="capitalize">{account.accountType}</Badge></TableCell><TableCell className="capitalize">{account.normalBalance}</TableCell><TableCell className="text-right"><Badge variant={account.isPostingAccount ? "secondary" : "outline"}>{account.isPostingAccount ? "Posting" : "Header"}</Badge></TableCell></TableRow>)}</TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="journals" className="space-y-5">
+            <Card>
+              <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div><CardTitle>Posted journals</CardTitle><CardDescription>Every journal must have equal total debits and credits. Posted entries are retained as an auditable record.</CardDescription></div>
+                <Button onClick={() => { setJournalError(null); setJournalDialogOpen(true); }} disabled={(accounts.data?.length ?? 0) === 0}><FilePlus2 className="mr-2 h-4 w-4" /> Post journal</Button>
+              </CardHeader>
+              <CardContent className="px-0 pb-0">
+                {(journals.data?.length ?? 0) === 0 ? <div className="px-6 pb-6 text-sm text-muted-foreground">No journals are posted for the selected period.</div> : (
+                  <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Journal</TableHead><TableHead>Date</TableHead><TableHead>Description</TableHead><TableHead>Source</TableHead><TableHead className="text-right">Debits</TableHead><TableHead className="text-right">Credits</TableHead></TableRow></TableHeader><TableBody>{journals.data?.map((journal) => <TableRow key={journal.id}><TableCell className="font-mono font-medium">{journal.journalNumber}</TableCell><TableCell>{formatReportDate(journal.entryDate)}</TableCell><TableCell>{journal.description}</TableCell><TableCell><Badge variant="outline" className="capitalize">{journal.sourceType?.replace(/_/g, " ") || "manual journal"}</Badge></TableCell><TableCell className="text-right"><Amount value={Number(journal.totalDebit)} /></TableCell><TableCell className="text-right"><Amount value={Number(journal.totalCredit)} /></TableCell></TableRow>)}</TableBody></Table></div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       )}
+
+      <Dialog open={journalDialogOpen} onOpenChange={setJournalDialogOpen}>
+        <DialogContent style={{ width: "95vw", maxWidth: "1100px" }} className="max-h-[92vh] overflow-y-auto">
+          <form onSubmit={submitJournal}>
+            <DialogHeader>
+              <DialogTitle>Post balanced journal</DialogTitle>
+              <DialogDescription>Use this controlled manual-journal form for approved accounting adjustments. Correct a posted entry through a reversing journal rather than overwriting its audit trail.</DialogDescription>
+            </DialogHeader>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <div className="space-y-2"><Label htmlFor="journal-date">Entry date and time</Label><Input id="journal-date" type="datetime-local" value={journalDraft.entryDate} onChange={(event) => setJournalDraft((draft) => ({ ...draft, entryDate: event.target.value }))} required /></div>
+              <div className="space-y-2"><Label htmlFor="journal-source">Source type</Label><Input id="journal-source" value={journalDraft.sourceType} onChange={(event) => setJournalDraft((draft) => ({ ...draft, sourceType: event.target.value }))} placeholder="manual_journal" /></div>
+              <div className="space-y-2"><Label htmlFor="journal-source-id">Source ID (optional)</Label><Input id="journal-source-id" type="number" min="1" value={journalDraft.sourceId} onChange={(event) => setJournalDraft((draft) => ({ ...draft, sourceId: event.target.value }))} /></div>
+              <div className="space-y-2 md:col-span-3"><Label htmlFor="journal-description">Description</Label><Input id="journal-description" value={journalDraft.description} onChange={(event) => setJournalDraft((draft) => ({ ...draft, description: event.target.value }))} placeholder="Describe the approved adjustment" required /></div>
+            </div>
+
+            <div className="mt-6 overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader><TableRow><TableHead className="min-w-56">Account</TableHead><TableHead className="min-w-32">Debit (R)</TableHead><TableHead className="min-w-32">Credit (R)</TableHead><TableHead className="min-w-56">Line description</TableHead><TableHead className="w-12" /></TableRow></TableHeader>
+                <TableBody>
+                  {journalDraft.lines.map((line, index) => (
+                    <TableRow key={index}>
+                      <TableCell><select className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={line.accountId} onChange={(event) => updateJournalLine(index, { accountId: event.target.value })} required><option value="">Select account</option>{accounts.data?.filter((account) => account.isPostingAccount).map((account) => <option key={account.id} value={account.id}>{account.accountNumber} · {account.accountName}</option>)}</select></TableCell>
+                      <TableCell><Input aria-label={`Debit line ${index + 1}`} type="number" min="0" step="0.01" value={line.debit} onChange={(event) => updateJournalLine(index, { debit: event.target.value, credit: event.target.value ? "" : line.credit })} /></TableCell>
+                      <TableCell><Input aria-label={`Credit line ${index + 1}`} type="number" min="0" step="0.01" value={line.credit} onChange={(event) => updateJournalLine(index, { credit: event.target.value, debit: event.target.value ? "" : line.debit })} /></TableCell>
+                      <TableCell><Input aria-label={`Description line ${index + 1}`} value={line.description} onChange={(event) => updateJournalLine(index, { description: event.target.value })} /></TableCell>
+                      <TableCell><Button type="button" variant="ghost" size="icon" onClick={() => setJournalDraft((draft) => ({ ...draft, lines: draft.lines.filter((_, lineIndex) => lineIndex !== index) }))} disabled={journalDraft.lines.length <= 2}><Trash2 className="h-4 w-4" /></Button></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><Button type="button" variant="outline" size="sm" onClick={() => setJournalDraft((draft) => ({ ...draft, lines: [...draft.lines, emptyJournalLine()] }))}><Plus className="mr-2 h-4 w-4" /> Add line</Button><div className={`text-sm font-semibold ${journalIsBalanced ? "text-emerald-700" : "text-amber-700"}`}>Debits <Amount value={journalTotals.debit} /> · Credits <Amount value={journalTotals.credit} /> · {journalIsBalanced ? "Balanced" : "Not balanced"}</div></div>
+            {journalError && <Alert variant="destructive" className="mt-4"><CircleAlert className="h-4 w-4" /><AlertTitle>Journal not posted</AlertTitle><AlertDescription>{journalError}</AlertDescription></Alert>}
+            <DialogFooter className="mt-6"><Button type="button" variant="outline" onClick={() => setJournalDialogOpen(false)}>Cancel</Button><Button type="submit" disabled={postJournal.isPending || !journalIsBalanced}>{postJournal.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Post balanced journal</Button></DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <p className="flex items-start gap-2 rounded-lg border border-dashed p-3 text-xs leading-relaxed text-muted-foreground">
         <Download className="mt-0.5 h-4 w-4 shrink-0" />

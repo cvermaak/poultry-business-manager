@@ -37,6 +37,13 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
+const accountantProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin" && ctx.user.role !== "accountant") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Accounting access is required." });
+  }
+  return next({ ctx });
+});
+
 export const appRouter = router({
   system: systemRouter,
   inventory: inventoryRouter,
@@ -2318,6 +2325,61 @@ export const appRouter = router({
       .query(async (opts) => {
         return await db.listCashFlowForecasts(opts.input.limit, opts.input.offset);
       }),
+  }),
+
+  // ============================================================================
+  // FINANCIAL ACCOUNTING: CHART OF ACCOUNTS AND GENERAL LEDGER
+  // ============================================================================
+  accounting: router({
+    listAccounts: accountantProcedure.query(async () => db.listChartOfAccounts()),
+    createAccount: adminProcedure
+      .input(z.object({
+        accountNumber: z.string().trim().min(3).max(50),
+        accountName: z.string().trim().min(2).max(200),
+        accountType: z.enum(["asset", "liability", "equity", "revenue", "expense"]),
+        accountSubtype: z.string().trim().max(100).optional(),
+        normalBalance: z.enum(["debit", "credit"]),
+        description: z.string().trim().max(2000).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => db.createChartOfAccount({ ...input, createdBy: ctx.user.id })),
+    seedDefaultChart: adminProcedure
+      .mutation(async ({ ctx }) => db.seedDefaultChartOfAccounts(ctx.user.id)),
+    postJournal: accountantProcedure
+      .input(z.object({
+        entryDate: z.date(),
+        description: z.string().trim().min(3).max(500),
+        sourceType: z.string().trim().max(50).optional(),
+        sourceId: z.number().int().positive().optional(),
+        lines: z.array(z.object({
+          accountId: z.number().int().positive(),
+          debit: z.string().optional(),
+          credit: z.string().optional(),
+          description: z.string().trim().max(500).optional(),
+        })).min(2),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await db.postJournalEntry({ ...input, createdBy: ctx.user.id });
+        await db.logUserActivity(ctx.user.id, "post_journal_entry", "journal_entry", result.id, `Posted ${result.journalNumber}`);
+        return result;
+      }),
+    listJournals: accountantProcedure
+      .input(z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        limit: z.number().int().min(1).max(250).optional(),
+      }).optional())
+      .query(async ({ input }) => db.listJournalEntries({
+        startDate: input?.startDate ? `${input.startDate} 00:00:00` : undefined,
+        endDate: input?.endDate ? `${input.endDate} 23:59:59` : undefined,
+        limit: input?.limit,
+      })),
+    listLedger: accountantProcedure
+      .input(z.object({
+        accountId: z.number().int().positive().optional(),
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+      }).optional())
+      .query(async ({ input }) => db.listGeneralLedgerEntries(input)),
   }),
 
   // ============================================================================

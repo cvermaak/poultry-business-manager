@@ -1,4 +1,4 @@
-import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint } from "drizzle-orm/mysql-core"
+import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, uniqueIndex, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint } from "drizzle-orm/mysql-core"
 import { sql } from "drizzle-orm"
 
 export const catchBatches = mysqlTable("catch_batches", {
@@ -106,17 +106,20 @@ export const chartOfAccounts = mysqlTable("chart_of_accounts", {
 	accountType: mysqlEnum(['asset','liability','equity','revenue','expense']).notNull(),
 	accountSubtype: varchar({ length: 100 }),
 	parentAccountId: int(),
+	normalBalance: mysqlEnum('normal_balance', ['debit', 'credit']).default('debit').notNull(),
+	isPostingAccount: tinyint('is_posting_account').default(1).notNull(),
 	isActive: tinyint().default(1).notNull(),
 	description: text(),
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	updatedAt: timestamp({ mode: 'string' }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int().references(() => users.id),
 },
 (table) => [
-	index("chart_of_accounts_accountNumber_unique").on(table.accountNumber),
+	uniqueIndex("uq_chart_of_accounts_account_number").on(table.accountNumber),
 	index("idx_chart_of_accounts_type").on(table.accountType),
 ]);
 
-	export const companySettings = mysqlTable("company_settings", {
+export const companySettings = mysqlTable("company_settings", {
 		id: int().autoincrement().notNull(),
 		companyName: varchar({ length: 255 }).notNull(),
 		vatNumber: varchar({ length: 20 }),
@@ -408,9 +411,10 @@ export const generalLedgerEntries = mysqlTable("general_ledger_entries", {
 	id: int().autoincrement().notNull(),
 	entryNumber: varchar({ length: 50 }).notNull(),
 	entryDate: timestamp({ mode: 'string' }).notNull(),
+	journalEntryId: int('journal_entry_id').references(() => journalEntries.id),
 	accountId: int().notNull().references(() => chartOfAccounts.id),
-	debit: int().default(0).notNull(),
-	credit: int().default(0).notNull(),
+	debit: decimal({ precision: 15, scale: 2 }).default('0.00').notNull(),
+	credit: decimal({ precision: 15, scale: 2 }).default('0.00').notNull(),
 	description: varchar({ length: 500 }).notNull(),
 	referenceType: varchar({ length: 50 }),
 	referenceId: int(),
@@ -420,8 +424,29 @@ export const generalLedgerEntries = mysqlTable("general_ledger_entries", {
 },
 (table) => [
 	index("general_ledger_entries_entryNumber_unique").on(table.entryNumber),
+	index("idx_general_ledger_entries_journal_entry_id").on(table.journalEntryId),
 	index("idx_general_ledger_entries_account_id").on(table.accountId),
 	index("idx_general_ledger_entries_entry_date").on(table.entryDate),
+]);
+
+export const journalEntries = mysqlTable("journal_entries", {
+	id: int().autoincrement().primaryKey().notNull(),
+	journalNumber: varchar({ length: 50 }).notNull(),
+	entryDate: timestamp({ mode: 'string' }).notNull(),
+	description: varchar({ length: 500 }).notNull(),
+	sourceType: varchar({ length: 50 }),
+	sourceId: int(),
+	status: mysqlEnum(['posted', 'reversed']).default('posted').notNull(),
+	totalDebit: decimal({ precision: 15, scale: 2 }).notNull(),
+	totalCredit: decimal({ precision: 15, scale: 2 }).notNull(),
+	reversalOfJournalEntryId: int('reversal_of_journal_entry_id'),
+	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
+	createdBy: int().references(() => users.id),
+},
+(table) => [
+	uniqueIndex("journal_entries_journalNumber_unique").on(table.journalNumber),
+	index("idx_journal_entries_entry_date").on(table.entryDate),
+	index("idx_journal_entries_source").on(table.sourceType, table.sourceId),
 ]);
 
 export const harvestRecords = mysqlTable("harvest_records", {

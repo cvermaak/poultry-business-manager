@@ -30,6 +30,7 @@ import {
   procurementOrderItems,
   chartOfAccounts,
   generalLedgerEntries,
+  journalEntries,
   inventoryItems,
   inventoryLocations,
   inventoryTransactions,
@@ -76,6 +77,7 @@ import {
   type PurchaseOrderStatus,
 } from "./purchase-orders";
 import { calculatePreTransportSchedule } from "./pre-transport-protocol";
+import { AFGRO_DEFAULT_CHART_OF_ACCOUNTS, type JournalLineInput, validateBalancedJournal } from "./accounting";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -114,6 +116,7 @@ export async function getDb() {
           procurementOrderItems,
           chartOfAccounts,
           generalLedgerEntries,
+          journalEntries,
           inventoryItems,
           inventoryLocations,
           inventoryTransactions,
@@ -1362,6 +1365,114 @@ export async function getChartOfAccountById(id: number) {
 
   const result = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function createChartOfAccount(data: {
+  accountNumber: string;
+  accountName: string;
+  accountType: "asset" | "liability" | "equity" | "revenue" | "expense";
+  accountSubtype?: string;
+  normalBalance: "debit" | "credit";
+  isPostingAccount?: boolean;
+  description?: string;
+  createdBy: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const existing = await db.select({ id: chartOfAccounts.id })
+    .from(chartOfAccounts)
+    .where(eq(chartOfAccounts.accountNumber, data.accountNumber))
+    .limit(1);
+  if (existing[0]) throw new Error("An account with this number already exists.");
+
+  const result = await db.insert(chartOfAccounts).values({
+    ...data,
+    isPostingAccount: data.isPostingAccount === false ? 0 : 1,
+    isActive: 1,
+  });
+  return { id: Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0) };
+}
+
+export async function seedDefaultChartOfAccounts(createdBy: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const existing = await db.select({ accountNumber: chartOfAccounts.accountNumber }).from(chartOfAccounts);
+  const existingNumbers = new Set(existing.map((account) => account.accountNumber));
+  const missingAccounts = AFGRO_DEFAULT_CHART_OF_ACCOUNTS
+    .filter((account) => !existingNumbers.has(account.accountNumber))
+    .map((account) => ({ ...account, isPostingAccount: 1, isActive: 1, createdBy }));
+
+  if (missingAccounts.length > 0) await db.insert(chartOfAccounts).values(missingAccounts);
+  return { created: missingAccounts.length, total: AFGRO_DEFAULT_CHART_OF_ACCOUNTS.length };
+}
+
+export async function postJournalEntry(input: {
+  entryDate: Date;
+  description: string;
+  sourceType?: string;
+  sourceId?: number;
+  lines: JournalLineInput[];
+  createdBy: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const validation = validateBalancedJournal(input.lines);
+  if (!validation.ok) throw new Error(validation.error);
+
+  const accountIds = Array.from(new Set(validation.lines.map((line) => line.accountId)));
+  const accounts = await db.select({ id: chartOfAccounts.id, isActive: chartOfAccounts.isActive, isPostingAccount: chartOfAccounts.isPostingAccount })
+    .from(chartOfAccounts)
+    .where(inArray(chartOfAccounts.id, accountIds));
+  if (accounts.length !== accountIds.length || accounts.some((account) => !account.isActive || !account.isPostingAccount)) {
+    throw new Error("Every journal line must use an active posting account.");
+  }
+
+  const entryDate = input.entryDate.toISOString().slice(0, 19).replace("T", " ");
+  const journalNumber = `JNL-${input.entryDate.toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`;
+  return await (db as any).transaction(async (tx: any) => {
+    const created = await tx.insert(journalEntries).values({
+      journalNumber,
+      entryDate,
+      description: input.description.trim(),
+      sourceType: input.sourceType?.trim() || "manual_journal",
+      sourceId: input.sourceId,
+      totalDebit: validation.totalDebit,
+      totalCredit: validation.totalCredit,
+      createdBy: input.createdBy,
+    });
+    const journalEntryId = Number(created[0]?.insertId ?? created.insertId ?? 0);
+    if (!journalEntryId) throw new Error("Journal header could not be created.");
+
+    await tx.insert(generalLedgerEntries).values(validation.lines.map((line) => ({
+      entryNumber: journalNumber,
+      entryDate,
+      journalEntryId,
+      accountId: line.accountId,
+      debit: line.debit,
+      credit: line.credit,
+      description: line.description || input.description.trim(),
+      referenceType: input.sourceType?.trim() || "manual_journal",
+      referenceId: input.sourceId,
+      createdBy: input.createdBy,
+    })));
+    return { id: journalEntryId, journalNumber, totalDebit: validation.totalDebit, totalCredit: validation.totalCredit };
+  });
+}
+
+export async function listJournalEntries(filters?: { startDate?: string; endDate?: string; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions = [
+    filters?.startDate ? gte(journalEntries.entryDate, filters.startDate) : undefined,
+    filters?.endDate ? lte(journalEntries.entryDate, filters.endDate) : undefined,
+  ].filter(Boolean) as any[];
+  let query = db.select().from(journalEntries).$dynamic();
+  if (conditions.length) query = query.where(and(...conditions));
+  return await query.orderBy(desc(journalEntries.entryDate)).limit(filters?.limit ?? 100);
 }
 
 export async function listGeneralLedgerEntries(filters?: {
