@@ -1,45 +1,40 @@
-export type SupplierDropdownOption = {
+export type SupplierOption = {
   id: number;
-  label: string;
+  supplierNumber: string | null;
+  name: string;
 };
 
-type SupplierLike = {
+type SupplierCandidate = {
   id?: unknown;
-  name?: unknown;
   supplierNumber?: unknown;
+  name?: unknown;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
 
-function getSupplierRows(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-  if (isRecord(payload) && Array.isArray(payload.suppliers)) return payload.suppliers;
-  return [];
-}
+export function resolveSupplierOptions(payload: unknown): SupplierOption[] {
+  const candidates: unknown[] = Array.isArray(payload)
+    ? payload
+    : isRecord(payload) && Array.isArray(payload.suppliers)
+      ? payload.suppliers
+      : [];
 
-/**
- * Normalizes direct and wrapped supplier-list responses for a Radix Select.
- * Invalid rows are deliberately excluded because SelectItem values must be non-empty.
- */
-export function resolveSupplierOptions(payload: unknown): SupplierDropdownOption[] {
-  return getSupplierRows(payload).flatMap((row) => {
-    if (!isRecord(row)) return [];
-
-    const supplier = row as SupplierLike;
+  return candidates.flatMap((candidate) => {
+    if (!isRecord(candidate)) return [];
+    const supplier = candidate as SupplierCandidate;
     const id = Number(supplier.id);
     const name = typeof supplier.name === "string" ? supplier.name.trim() : "";
 
-    if (!Number.isSafeInteger(id) || id <= 0 || !name) return [];
-
-    const supplierNumber = typeof supplier.supplierNumber === "string"
-      ? supplier.supplierNumber.trim()
-      : "";
+    if (!Number.isInteger(id) || id <= 0 || !name) return [];
 
     return [{
       id,
-      label: supplierNumber ? `${supplierNumber} — ${name}` : name,
+      name,
+      supplierNumber:
+        typeof supplier.supplierNumber === "string" && supplier.supplierNumber.trim()
+          ? supplier.supplierNumber.trim()
+          : null,
     }];
   });
 }
