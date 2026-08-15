@@ -182,6 +182,7 @@ export default function Finance() {
     enabled: startDate <= endDate,
   });
   const agedReceivables = trpc.financialReports.agedReceivables.useQuery(receivablesInput);
+	const agedPayables = trpc.financialReports.agedPayables.useQuery(receivablesInput);
   const cashFlowStatement = trpc.financialReports.cashFlowStatement.useQuery(periodInput, {
     enabled: startDate <= endDate,
   });
@@ -206,14 +207,15 @@ export default function Finance() {
     onError: (error) => setJournalError(error.message),
   });
 
-  const isLoading = profitAndLoss.isLoading || agedReceivables.isLoading || cashFlowStatement.isLoading || trialBalance.isLoading || balanceSheet.isLoading;
-  const hasError = profitAndLoss.error || agedReceivables.error || cashFlowStatement.error || trialBalance.error || balanceSheet.error;
+  const isLoading = profitAndLoss.isLoading || agedReceivables.isLoading || agedPayables.isLoading || cashFlowStatement.isLoading || trialBalance.isLoading || balanceSheet.isLoading;
+  const hasError = profitAndLoss.error || agedReceivables.error || agedPayables.error || cashFlowStatement.error || trialBalance.error || balanceSheet.error;
   const isInvalidPeriod = startDate > endDate;
 
   const refreshReports = () => {
     void Promise.all([
       profitAndLoss.refetch(),
       agedReceivables.refetch(),
+			agedPayables.refetch(),
       cashFlowStatement.refetch(),
       trialBalance.refetch(),
       balanceSheet.refetch(),
@@ -228,6 +230,7 @@ export default function Finance() {
 
   const profit = profitAndLoss.data;
   const receivables = agedReceivables.data;
+	const payables = agedPayables.data;
   const cashFlow = cashFlowStatement.data;
   const journalTotals = useMemo(() => journalDraft.lines.reduce(
     (totals, line) => ({ debit: totals.debit + numberFromAmount(line.debit), credit: totals.credit + numberFromAmount(line.credit) }),
@@ -283,7 +286,7 @@ export default function Finance() {
               <Input id="financial-end-date" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="financial-as-of-date">Receivables as at</Label>
+              <Label htmlFor="financial-as-of-date">Receivables and payables as at</Label>
               <Input id="financial-as-of-date" type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)} />
             </div>
             <p className="pb-2 text-xs text-muted-foreground xl:max-w-56">
@@ -313,6 +316,7 @@ export default function Finance() {
           <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg bg-muted p-1 sm:w-fit">
             <TabsTrigger value="profit-loss" className="gap-2"><TrendingUp className="h-4 w-4" /> Profit &amp; Loss</TabsTrigger>
             <TabsTrigger value="receivables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Receivables</TabsTrigger>
+				<TabsTrigger value="payables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Payables</TabsTrigger>
             <TabsTrigger value="cash-flow" className="gap-2"><Banknote className="h-4 w-4" /> Cash Flow</TabsTrigger>
             <TabsTrigger value="trial-balance" className="gap-2"><BookOpen className="h-4 w-4" /> Trial Balance</TabsTrigger>
             <TabsTrigger value="balance-sheet" className="gap-2"><Landmark className="h-4 w-4" /> Balance Sheet</TabsTrigger>
@@ -405,6 +409,47 @@ export default function Finance() {
               </CardContent>
             </Card>
           </TabsContent>
+
+				<TabsContent value="payables" className="space-y-5">
+					<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+						<MetricCard label="Total outstanding" value={payables?.totalOutstanding ?? 0} description={`As at ${formatReportDate(asOfDate)}`} icon={ReceiptText} tone="warning" />
+						<MetricCard label="0–30 days" value={payables?.buckets["0-30"] ?? 0} description="Current balances" icon={CalendarDays} />
+						<MetricCard label="31–60 days" value={payables?.buckets["31-60"] ?? 0} description="Supplier follow-up" icon={CircleAlert} tone="warning" />
+						<MetricCard label="61–90 days" value={payables?.buckets["61-90"] ?? 0} description="Escalate payment planning" icon={TrendingDown} tone="negative" />
+						<MetricCard label="Over 90 days" value={payables?.buckets["90+"] ?? 0} description="High supplier-payment risk" icon={CircleAlert} tone="negative" />
+					</div>
+
+					<Card>
+						<CardHeader>
+							<CardTitle>Open supplier payables</CardTitle>
+							<CardDescription>Only mill invoices posted to Trade Payables are included. Balances are aged from the invoice date through {formatReportDate(asOfDate)}.</CardDescription>
+						</CardHeader>
+						<CardContent className="px-0 pb-0">
+							{(payables?.payables.length ?? 0) === 0 ? (
+								<div className="px-6 pb-6 text-sm text-muted-foreground">No open supplier balances as at the selected date.</div>
+							) : (
+								<div className="overflow-x-auto">
+									<Table>
+										<TableHeader><TableRow><TableHead>Supplier invoice</TableHead><TableHead>Supplier</TableHead><TableHead>Invoice date</TableHead><TableHead>Due date</TableHead><TableHead className="text-center">Age</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Balance due</TableHead></TableRow></TableHeader>
+										<TableBody>
+											{payables?.payables.map((invoice) => (
+												<TableRow key={invoice.id}>
+													<TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
+													<TableCell>{invoice.supplierName}</TableCell>
+													<TableCell>{formatReportDate(invoice.invoiceDate)}</TableCell>
+													<TableCell>{formatReportDate(invoice.dueDate)}</TableCell>
+													<TableCell className="text-center"><Badge variant={invoice.bucket === "0-30" ? "secondary" : "destructive"}>{invoice.daysOutstanding} days</Badge></TableCell>
+													<TableCell><Badge variant={invoice.status === "overdue" ? "destructive" : "outline"} className="capitalize">{invoice.status}</Badge></TableCell>
+													<TableCell className="text-right"><Amount value={invoice.balanceDue} emphasis /></TableCell>
+												</TableRow>
+											))}
+										</TableBody>
+									</Table>
+								</div>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
 
           <TabsContent value="cash-flow" className="space-y-5">
             <div className="grid gap-4 md:grid-cols-3">

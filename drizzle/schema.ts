@@ -1387,15 +1387,17 @@ export const additiveInventoryMappings = mysqlTable("additive_inventory_mappings
 export const millInvoices = mysqlTable("mill_invoices", {
   id: int().autoincrement().notNull().primaryKey(),
   feedOrderId: int("feed_order_id").notNull().references(() => feedOrders.id),
+  supplierId: int("supplier_id").references(() => suppliers.id),
   invoiceNumber: varchar({ length: 100 }).notNull(),
   invoiceDate: varchar({ length: 20 }).notNull(),         // ISO date string YYYY-MM-DD
   dueDate: varchar({ length: 20 }).notNull(),             // invoiceDate + 14 days
   amountExcl: decimal({ precision: 12, scale: 2 }).notNull(),
   vatAmount: decimal({ precision: 12, scale: 2 }).default('0.00').notNull(),
   amountIncl: decimal({ precision: 12, scale: 2 }).notNull(),
-  status: mysqlEnum("mill_invoice_status", ['outstanding','paid','overdue','disputed']).default('outstanding').notNull(),
+  status: mysqlEnum("mill_invoice_status", ['outstanding','partial','paid','overdue','disputed']).default('outstanding').notNull(),
   paidDate: varchar({ length: 20 }),
   paidAmount: decimal({ precision: 12, scale: 2 }),
+  balanceDue: decimal("balance_due", { precision: 12, scale: 2 }).default('0.00').notNull(),
   paymentReference: varchar({ length: 200 }),
   notes: text(),
   createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
@@ -1405,8 +1407,26 @@ export const millInvoices = mysqlTable("mill_invoices", {
 (table) => [
   index("mill_invoices_number_unique").on(table.invoiceNumber),
   index("idx_mill_invoices_feed_order").on(table.feedOrderId),
+  index("idx_mill_invoices_supplier").on(table.supplierId),
   index("idx_mill_invoices_status").on(table.status),
   index("idx_mill_invoices_due_date").on(table.dueDate),
+]);
+
+export const supplierInvoicePayments = mysqlTable("supplier_invoice_payments", {
+  id: int().autoincrement().primaryKey().notNull(),
+  millInvoiceId: int("mill_invoice_id").notNull().references(() => millInvoices.id),
+  amount: decimal({ precision: 15, scale: 2 }).notNull(),
+  paymentMethod: varchar("payment_method", { length: 50 }).notNull(),
+  paymentDate: timestamp("payment_date", { mode: "string" }).notNull(),
+  paymentReference: varchar("payment_reference", { length: 200 }),
+  idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+  createdAt: timestamp("created_at", { mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
+  createdBy: int("created_by").references(() => users.id),
+},
+(table) => [
+  uniqueIndex("uq_sip_idempotency_key").on(table.idempotencyKey),
+  index("idx_sip_mill_invoice_id").on(table.millInvoiceId),
+  index("idx_sip_payment_date").on(table.paymentDate),
 ]);
 
 // ─── Units of Measure ──────────────────────────────────────────────────────

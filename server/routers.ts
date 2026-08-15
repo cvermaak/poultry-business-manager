@@ -2143,6 +2143,7 @@ export const appRouter = router({
     createMillInvoice: protectedProcedure
       .input(z.object({
         feedOrderId: z.number(),
+		supplierId: z.number().positive().optional(),
         invoiceNumber: z.string(),
         invoiceDate: z.string(),
         dueDate: z.string(),
@@ -2159,16 +2160,33 @@ export const appRouter = router({
       .input(z.object({
         id: z.number(),
         paidDate: z.string(),
-        paidAmount: z.number().nonnegative(),
+		paidAmount: z.string().regex(/^\d+(?:\.\d{1,2})?$/, "Use a rand amount with no more than two decimal places"),
+		paymentMethod: z.string().trim().min(1).max(50),
+		idempotencyKey: z.string().uuid(),
         paymentReference: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+		.mutation(async ({ input, ctx }) => {
         return await db.recordMillInvoicePayment(input.id, {
           paidDate: input.paidDate,
           paidAmount: input.paidAmount,
+			paymentMethod: input.paymentMethod,
           paymentReference: input.paymentReference,
-        });
+			idempotencyKey: input.idempotencyKey,
+			createdBy: ctx.user.id,
+      	});
       }),
+
+		getMillInvoiceAccountingPosting: protectedProcedure
+			.input(z.object({ id: z.number().positive() }))
+			.query(async ({ input }) => db.getMillInvoicePosting(input.id)),
+
+		getMillInvoicePaymentPostings: protectedProcedure
+			.input(z.object({ id: z.number().positive() }))
+			.query(async ({ input }) => db.getMillInvoicePaymentPostings(input.id)),
+
+		postMillInvoiceToPayables: protectedProcedure
+			.input(z.object({ id: z.number().positive() }))
+			.mutation(async ({ input, ctx }) => db.postMillInvoiceToPayables(input.id, ctx.user.id)),
 
     getInvoiceAgingSummary: protectedProcedure
       .query(async () => {
@@ -2422,6 +2440,12 @@ export const appRouter = router({
         asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
       }))
       .query(async (opts) => db.getAgedReceivablesReport(opts.input)),
+
+		agedPayables: protectedProcedure
+			.input(z.object({
+				asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+			}))
+			.query(async (opts) => db.getAgedPayablesReport(opts.input)),
 
     cashFlowStatement: protectedProcedure
       .input(z.object({

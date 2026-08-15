@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  calculateAgedReceivablesReport,
+	calculateAgedPayablesReport,
+	calculateAgedReceivablesReport,
   calculateBalanceSheetReport,
   calculateCashFlowStatement,
   calculateProfitAndLossReport,
@@ -79,7 +80,7 @@ describe("Financial Accounting report calculations", () => {
     expect(report.receivables[0]).toMatchObject({ invoiceNumber: "INV-002", daysOutstanding: 61, bucket: "61-90" });
   });
 
-  it("uses canonical decimal-rand totals when a legacy header balance is exactly 100× too high", () => {
+	it("uses canonical decimal-rand totals when a legacy header balance is exactly 100× too high", () => {
     const report = calculateAgedReceivablesReport({
       asOfDate: "2026-08-15",
       invoices: [{
@@ -98,9 +99,25 @@ describe("Financial Accounting report calculations", () => {
     expect(report.totalOutstanding).toBe(4945);
     expect(report.buckets["90+"]).toBe(4945);
     expect(report.receivables[0]).toMatchObject({ invoiceNumber: "INV-LEGACY-100X", balanceDue: 4945 });
-  });
+	});
 
-  it("produces a VAT-inclusive actual cash-flow statement from cash receipts and payments", () => {
+	it("groups only open, posted supplier balances into Accounts Payable ageing buckets", () => {
+		const report = calculateAgedPayablesReport({
+			asOfDate: "2026-08-14",
+			invoices: [
+				{ id: 1, invoiceNumber: "MILL-001", supplierName: "The Mill", invoiceDate: "2026-07-15", dueDate: "2026-07-30", status: "outstanding", balanceDue: "1000.00" },
+				{ id: 2, invoiceNumber: "MILL-002", supplierName: "Feed Co", invoiceDate: "2026-06-14", dueDate: "2026-06-29", status: "partial", balanceDue: "2000.00" },
+				{ id: 3, invoiceNumber: "MILL-003", supplierName: "Feed Co", invoiceDate: "2026-04-01", dueDate: "2026-04-15", status: "paid", balanceDue: "0.00" },
+				{ id: 4, invoiceNumber: "MILL-004", supplierName: "Feed Co", invoiceDate: "2026-05-01", dueDate: "2026-05-15", status: "disputed", balanceDue: "3000.00" },
+			],
+		});
+
+		expect(report.totalOutstanding).toBe(3000);
+		expect(report.buckets).toEqual({ "0-30": 1000, "31-60": 0, "61-90": 2000, "90+": 0 });
+		expect(report.payables[0]).toMatchObject({ invoiceNumber: "MILL-002", supplierName: "Feed Co", bucket: "61-90" });
+	});
+
+	it("produces a VAT-inclusive actual cash-flow statement from cash receipts and payments", () => {
     const report = calculateCashFlowStatement({
       startDate: "2026-08-01",
       endDate: "2026-08-31",

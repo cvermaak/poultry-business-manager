@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useLocation } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ function AgingBadge({ dueDate, status }: { dueDate: string | null | undefined; s
 
 export default function MillInvoices() {
   const utils = trpc.useUtils();
+	const [, setLocation] = useLocation();
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -60,6 +62,7 @@ export default function MillInvoices() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
     feedOrderId: "",
+		supplierId: "",
     invoiceNumber: "",
     invoiceDate: new Date().toISOString().slice(0, 10),
     dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
@@ -75,10 +78,12 @@ export default function MillInvoices() {
 
   // Payment dialog
   const [payOpen, setPayOpen] = useState(false);
-  const [payTarget, setPayTarget] = useState<{ id: number; invoiceNumber: string; amountIncl: string } | null>(null);
+  const [payTarget, setPayTarget] = useState<{ id: number; invoiceNumber: string; amountIncl: string; balanceDue: string } | null>(null);
   const [payForm, setPayForm] = useState({
     paidDate: new Date().toISOString().slice(0, 10),
     paidAmount: "",
+		paymentMethod: "EFT",
+		idempotencyKey: "",
     paymentReference: "",
   });
 
@@ -87,11 +92,25 @@ export default function MillInvoices() {
     statusFilter !== "all" ? { status: statusFilter } : {}
   );
   const { data: feedOrders = [] } = trpc.feedOrders.listOrders.useQuery({});
+	const { data: suppliers = [] } = trpc.suppliers.list.useQuery({ isActive: true });
+	const payablePosting = trpc.invoices.getMillInvoiceAccountingPosting.useQuery(
+		{ id: viewInvoice?.id ?? 0 },
+		{ enabled: Boolean(viewOpen && viewInvoice?.id) },
+	);
+	const payablePayments = trpc.invoices.getMillInvoicePaymentPostings.useQuery(
+		{ id: viewInvoice?.id ?? 0 },
+		{ enabled: Boolean(viewOpen && viewInvoice?.id) },
+	);
+	const recheckPostingMutation = trpc.invoices.postMillInvoiceToPayables.useMutation({
+		onSuccess: () => { void utils.invoices.getMillInvoiceAccountingPosting.invalidate(); toast.success("Payable journal confirmed"); },
+		onError: (err) => toast.error(`Posting check failed: ${err.message}`),
+	});
 
   const createMutation = trpc.invoices.createMillInvoice.useMutation({
     onSuccess: () => {
       toast.success("Mill invoice recorded");
       utils.invoices.listMillInvoices.invalidate();
+		void utils.financialReports.agedPayables.invalidate();
       setCreateOpen(false);
       resetCreateForm();
     },
@@ -102,6 +121,8 @@ export default function MillInvoices() {
     onSuccess: () => {
       toast.success("Payment recorded");
       utils.invoices.listMillInvoices.invalidate();
+		void utils.invoices.getMillInvoicePaymentPostings.invalidate();
+		void utils.financialReports.agedPayables.invalidate();
       setPayOpen(false);
     },
     onError: (err) => toast.error(`Failed: ${err.message}`),
@@ -110,6 +131,7 @@ export default function MillInvoices() {
   function resetCreateForm() {
     setCreateForm({
       feedOrderId: "",
+		supplierId: "",
       invoiceNumber: "",
       invoiceDate: new Date().toISOString().slice(0, 10),
       dueDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
@@ -121,12 +143,13 @@ export default function MillInvoices() {
   }
 
   function handleCreateSubmit() {
-    if (!createForm.feedOrderId || !createForm.invoiceNumber || !createForm.amountIncl) {
-      toast.error("Feed Order, Invoice Number, and Amount Incl. are required");
+		if (!createForm.feedOrderId || !createForm.supplierId || !createForm.invoiceNumber || !createForm.amountIncl) {
+      toast.error("Supplier, Feed Order, Invoice Number, and Amount Incl. are required");
       return;
     }
     createMutation.mutate({
       feedOrderId: parseInt(createForm.feedOrderId),
+		supplierId: parseInt(createForm.supplierId),
       invoiceNumber: createForm.invoiceNumber,
       invoiceDate: createForm.invoiceDate,
       dueDate: createForm.dueDate,
@@ -138,10 +161,12 @@ export default function MillInvoices() {
   }
 
   function openPayDialog(inv: any) {
-    setPayTarget({ id: inv.id, invoiceNumber: inv.invoiceNumber, amountIncl: inv.amountIncl });
+    setPayTarget({ id: inv.id, invoiceNumber: inv.invoiceNumber, amountIncl: inv.amountIncl, balanceDue: inv.balanceDue ?? inv.amountIncl });
     setPayForm({
       paidDate: new Date().toISOString().slice(0, 10),
-      paidAmount: String(inv.amountIncl),
+      paidAmount: String(inv.balanceDue ?? inv.amountIncl),
+		paymentMethod: "EFT",
+		idempotencyKey: crypto.randomUUID(),
       paymentReference: "",
     });
     setPayOpen(true);
@@ -152,7 +177,9 @@ export default function MillInvoices() {
     payMutation.mutate({
       id: payTarget.id,
       paidDate: payForm.paidDate,
-      paidAmount: parseFloat(payForm.paidAmount),
+		paidAmount: payForm.paidAmount,
+		paymentMethod: payForm.paymentMethod,
+		idempotencyKey: payForm.idempotencyKey,
       paymentReference: payForm.paymentReference || undefined,
     });
   }
@@ -264,6 +291,7 @@ export default function MillInvoices() {
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
               <SelectItem value="outstanding">Outstanding</SelectItem>
+								<SelectItem value="partial">Partial</SelectItem>
               <SelectItem value="paid">Paid</SelectItem>
               <SelectItem value="overdue">Overdue</SelectItem>
               <SelectItem value="disputed">Disputed</SelectItem>
@@ -291,12 +319,14 @@ export default function MillInvoices() {
                     <tr className="border-b text-muted-foreground">
                       <th className="text-left py-2 pr-4">Invoice #</th>
                       <th className="text-left py-2 pr-4">Feed Order</th>
+							<th className="text-left py-2 pr-4">Supplier</th>
                       <th className="text-left py-2 pr-4">Customer</th>
                       <th className="text-left py-2 pr-4">Invoice Date</th>
                       <th className="text-left py-2 pr-4">Due Date</th>
                       <th className="text-right py-2 pr-4">Excl. VAT</th>
                       <th className="text-right py-2 pr-4">VAT</th>
                       <th className="text-right py-2 pr-4">Incl. VAT</th>
+							<th className="text-right py-2 pr-4">Balance Due</th>
                       <th className="text-left py-2 pr-4">Status</th>
                       <th className="text-left py-2">Actions</th>
                     </tr>
@@ -306,12 +336,14 @@ export default function MillInvoices() {
                       <tr key={inv.id} className="border-b hover:bg-muted/30 transition-colors">
                         <td className="py-2 pr-4 font-mono font-medium">{inv.invoiceNumber}</td>
                         <td className="py-2 pr-4 text-xs">{inv.orderNumber ?? "—"}</td>
+							<td className="py-2 pr-4">{inv.supplierName ?? "Unassigned supplier"}</td>
                         <td className="py-2 pr-4">{inv.customerName ?? "—"}</td>
                         <td className="py-2 pr-4">{fmtDate(inv.invoiceDate)}</td>
                         <td className="py-2 pr-4">{fmtDate(inv.dueDate)}</td>
                         <td className="py-2 pr-4 text-right">{fmt(inv.amountExcl)}</td>
                         <td className="py-2 pr-4 text-right">{fmt(inv.vatAmount)}</td>
                         <td className="py-2 pr-4 text-right font-medium">{fmt(inv.amountIncl)}</td>
+							<td className="py-2 pr-4 text-right font-medium">{fmt(inv.balanceDue ?? inv.amountIncl)}</td>
                         <td className="py-2 pr-4">
                           <AgingBadge dueDate={inv.dueDate} status={inv.status} />
                         </td>
@@ -366,6 +398,10 @@ export default function MillInvoices() {
                   <p className="text-xs text-muted-foreground">Feed Order</p>
                   <p className="font-medium">{viewInvoice.orderNumber ?? "—"}</p>
                 </div>
+						<div>
+							<p className="text-xs text-muted-foreground">Supplier</p>
+							<p className="font-medium">{viewInvoice.supplierName ?? "Unassigned supplier"}</p>
+						</div>
                 <div>
                   <p className="text-xs text-muted-foreground">Customer</p>
                   <p className="font-medium">{viewInvoice.customerName ?? "—"}</p>
@@ -411,9 +447,38 @@ export default function MillInvoices() {
                         <td className="p-2 text-right text-green-700 font-medium">{fmt(viewInvoice.paidAmount)}</td>
                       </tr>
                     )}
+							<tr className="border-t">
+								<td className="p-2 text-muted-foreground">Balance Due</td>
+								<td className="p-2 text-right font-semibold">{fmt(viewInvoice.balanceDue ?? viewInvoice.amountIncl)}</td>
+							</tr>
                   </tbody>
                 </table>
               </div>
+
+					<div className="rounded-lg border bg-muted/20 p-3">
+						<p className="text-xs text-muted-foreground">General Ledger Payable Journal</p>
+						{payablePosting.data ? (
+							<Button variant="link" className="h-auto p-0 font-mono" onClick={() => setLocation(`/finance?tab=journals&journal=${encodeURIComponent(payablePosting.data!.journalNumber)}`)}>
+								Posted · {payablePosting.data.journalNumber}
+							</Button>
+						) : (
+							<Button variant="outline" size="sm" onClick={() => recheckPostingMutation.mutate({ id: viewInvoice.id })} disabled={recheckPostingMutation.isPending}>
+								{recheckPostingMutation.isPending ? "Checking…" : "Post / re-check payable journal"}
+							</Button>
+						)}
+					</div>
+
+					{(payablePayments.data?.length ?? 0) > 0 && (
+						<div className="rounded-lg border">
+							<div className="border-b px-3 py-2 text-sm font-medium">Supplier Payment Journals</div>
+							{payablePayments.data?.map((payment) => (
+								<div key={payment.paymentId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+									<span>{fmt(payment.amount)} · {payment.paymentMethod}</span>
+									{payment.journalNumber ? <Button variant="link" className="h-auto p-0 font-mono" onClick={() => setLocation(`/finance?tab=journals&journal=${encodeURIComponent(payment.journalNumber!)}`)}>{payment.journalNumber}</Button> : <span className="text-muted-foreground">Pending journal</span>}
+								</div>
+							))}
+						</div>
+					)}
 
               {viewInvoice.paymentReference && (
                 <div>
@@ -471,6 +536,13 @@ export default function MillInvoices() {
                 </SelectContent>
               </Select>
             </div>
+					<div className="space-y-1">
+						<Label>Supplier *</Label>
+						<Select value={createForm.supplierId} onValueChange={(v) => setCreateForm((f) => ({ ...f, supplierId: v }))}>
+							<SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+							<SelectContent>{(suppliers as any[]).map((supplier) => <SelectItem key={supplier.id} value={String(supplier.id)}>{supplier.name}</SelectItem>)}</SelectContent>
+						</Select>
+					</div>
             <div className="space-y-1">
               <Label>Mill Invoice Number *</Label>
               <Input
@@ -561,7 +633,7 @@ export default function MillInvoices() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Invoice <span className="font-mono font-medium">{payTarget.invoiceNumber}</span> —
-                Total: <span className="font-medium">{fmt(payTarget.amountIncl)}</span>
+						Total: <span className="font-medium">{fmt(payTarget.amountIncl)}</span> · Balance: <span className="font-medium">{fmt(payTarget.balanceDue)}</span>
               </p>
               <div className="space-y-1">
                 <Label>Payment Date *</Label>
@@ -589,6 +661,18 @@ export default function MillInvoices() {
                   placeholder="EFT ref / cheque no."
                 />
               </div>
+					<div className="space-y-1">
+						<Label>Payment Method *</Label>
+						<Select value={payForm.paymentMethod} onValueChange={(value) => setPayForm((f) => ({ ...f, paymentMethod: value }))}>
+							<SelectTrigger><SelectValue /></SelectTrigger>
+							<SelectContent>
+								<SelectItem value="EFT">EFT</SelectItem>
+								<SelectItem value="Cash">Cash</SelectItem>
+								<SelectItem value="Cheque">Cheque</SelectItem>
+								<SelectItem value="Other">Other</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
             </div>
           )}
           <DialogFooter>

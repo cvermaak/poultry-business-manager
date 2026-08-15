@@ -57,7 +57,17 @@ export type ReceivableInvoice = {
   status: string;
   balanceDue: MoneyValue;
   inclusiveTotal?: MoneyValue;
-  paidAmount?: MoneyValue;
+	paidAmount?: MoneyValue;
+};
+
+export type PayableInvoice = {
+	id: number;
+	invoiceNumber: string;
+	supplierName: string | null;
+	invoiceDate: string | Date;
+	dueDate: string | Date;
+	status: string;
+	balanceDue: MoneyValue;
 };
 
 export type CashReceipt = {
@@ -264,6 +274,51 @@ export function calculateAgedReceivablesReport(input: {
       "90+": Number(buckets["90+"].toFixed(2)),
     },
     receivables,
+  };
+}
+
+export function calculateAgedPayablesReport(input: {
+  asOfDate: string;
+  invoices: PayableInvoice[];
+}) {
+  const buckets = { "0-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
+  const payables = input.invoices
+    .filter((invoice) => {
+      const invoiceDate = dateOnly(invoice.invoiceDate);
+      const balanceDue = asRands(invoice.balanceDue);
+      return invoiceDate <= input.asOfDate && invoice.status !== "paid" && invoice.status !== "disputed" && balanceDue > 0;
+    })
+    .map((invoice) => {
+      const invoiceDate = dateOnly(invoice.invoiceDate);
+      const daysOutstanding = daysBetween(invoiceDate, input.asOfDate);
+      const bucket = receivableBucket(daysOutstanding);
+      const balanceDue = Number(asRands(invoice.balanceDue).toFixed(2));
+      buckets[bucket] += balanceDue;
+      return {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        supplierName: invoice.supplierName || "Unassigned supplier",
+        invoiceDate,
+        dueDate: dateOnly(invoice.dueDate),
+        status: invoice.status,
+        daysOutstanding,
+        bucket,
+        balanceDue,
+      };
+    })
+    .sort((a, b) => b.daysOutstanding - a.daysOutstanding || b.balanceDue - a.balanceDue);
+
+  const totalOutstanding = payables.reduce((sum, row) => sum + row.balanceDue, 0);
+  return {
+    asOfDate: input.asOfDate,
+    totalOutstanding: Number(totalOutstanding.toFixed(2)),
+    buckets: {
+      "0-30": Number(buckets["0-30"].toFixed(2)),
+      "31-60": Number(buckets["31-60"].toFixed(2)),
+      "61-90": Number(buckets["61-90"].toFixed(2)),
+      "90+": Number(buckets["90+"].toFixed(2)),
+    },
+    payables,
   };
 }
 

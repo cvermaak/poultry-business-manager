@@ -62,11 +62,13 @@ import {
 	preTransportProtocols,
 	accountingSourcePostings,
 	customerInvoicePayments,
+	supplierInvoicePayments,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
 import {
-  calculateAgedReceivablesReport,
+	calculateAgedPayablesReport,
+	calculateAgedReceivablesReport,
   calculateBalanceSheetReport,
   calculateCashFlowStatement,
   calculateProfitAndLossReport,
@@ -84,6 +86,7 @@ import { calculatePreTransportSchedule } from "./pre-transport-protocol";
 import { AFGRO_DEFAULT_CHART_OF_ACCOUNTS, type JournalLineInput, validateBalancedJournal } from "./accounting";
 import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCustomerInvoiceJournalNumber, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
 import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, resolveCustomerPaymentOutcome } from "./payment-posting";
+import { buildSupplierInvoicePosting, buildSupplierPaymentPosting, getSupplierInvoiceJournalNumber, getSupplierPaymentJournalNumber, SUPPLIER_PAYABLE_POSTING_ACCOUNTS, validateSupplierPaymentAgainstBalance } from "./supplier-payable-posting";
 import { normalizeLegacyInvoiceAmounts, normalizeLegacyInvoiceRecord } from "./invoice-amount-integrity";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -155,6 +158,7 @@ export async function getDb() {
 			  preTransportProtocols,
 			  accountingSourcePostings,
 			  customerInvoicePayments,
+			  supplierInvoicePayments,
 			},
       });
     } catch (error) {
@@ -1515,6 +1519,50 @@ export async function getCustomerInvoicePaymentPostings(invoiceId: number) {
 		.leftJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
 		.where(eq(customerInvoicePayments.invoiceId, invoiceId))
 		.orderBy(desc(customerInvoicePayments.paymentDate), desc(customerInvoicePayments.id));
+}
+
+export async function getMillInvoicePosting(millInvoiceId: number) {
+	const db = await getDb();
+	if (!db) return null;
+
+	const rows = await db.select({
+		id: journalEntries.id,
+		journalNumber: journalEntries.journalNumber,
+		entryDate: journalEntries.entryDate,
+		totalDebit: journalEntries.totalDebit,
+		totalCredit: journalEntries.totalCredit,
+	})
+		.from(accountingSourcePostings)
+		.innerJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+		.where(and(
+			eq(accountingSourcePostings.sourceType, "supplier_mill_invoice"),
+			eq(accountingSourcePostings.sourceId, millInvoiceId),
+		))
+		.limit(1);
+	return rows[0] ?? null;
+}
+
+export async function getMillInvoicePaymentPostings(millInvoiceId: number) {
+	const db = await getDb();
+	if (!db) return [];
+
+	return await db.select({
+		paymentId: supplierInvoicePayments.id,
+		amount: supplierInvoicePayments.amount,
+		paymentMethod: supplierInvoicePayments.paymentMethod,
+		paymentDate: supplierInvoicePayments.paymentDate,
+		paymentReference: supplierInvoicePayments.paymentReference,
+		journalNumber: journalEntries.journalNumber,
+		journalEntryId: journalEntries.id,
+	})
+		.from(supplierInvoicePayments)
+		.leftJoin(accountingSourcePostings, and(
+			eq(accountingSourcePostings.sourceType, "supplier_mill_invoice_payment"),
+			eq(accountingSourcePostings.sourceId, supplierInvoicePayments.id),
+		))
+		.leftJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+		.where(eq(supplierInvoicePayments.millInvoiceId, millInvoiceId))
+		.orderBy(desc(supplierInvoicePayments.paymentDate), desc(supplierInvoicePayments.id));
 }
 
 export async function markInvoiceAsSent(invoiceId: number, sentAt: string, createdBy: number) {
@@ -3894,14 +3942,38 @@ export async function getAgedReceivablesReport(input: { asOfDate: string }) {
     .leftJoin(customers, eq(invoices.customerId, customers.id))
     .where(lte(invoices.invoiceDate, periodEnd(input.asOfDate)));
 
-  return calculateAgedReceivablesReport({ ...input, invoices: rows });
+	return calculateAgedReceivablesReport({ ...input, invoices: rows });
+}
+
+export async function getAgedPayablesReport(input: { asOfDate: string }) {
+	const db = await getDb();
+	if (!db) return calculateAgedPayablesReport({ ...input, invoices: [] });
+
+	const rows = await db.select({
+		id: millInvoices.id,
+		invoiceNumber: millInvoices.invoiceNumber,
+		supplierName: suppliers.name,
+		invoiceDate: millInvoices.invoiceDate,
+		dueDate: millInvoices.dueDate,
+		status: millInvoices.status,
+		balanceDue: millInvoices.balanceDue,
+	})
+		.from(millInvoices)
+		.innerJoin(accountingSourcePostings, and(
+			eq(accountingSourcePostings.sourceType, "supplier_mill_invoice"),
+			eq(accountingSourcePostings.sourceId, millInvoices.id),
+		))
+		.leftJoin(suppliers, eq(millInvoices.supplierId, suppliers.id))
+		.where(lte(millInvoices.invoiceDate, input.asOfDate));
+
+	return calculateAgedPayablesReport({ ...input, invoices: rows });
 }
 
 export async function getCashFlowStatementReport(input: { startDate: string; endDate: string }) {
   const db = await getDb();
   if (!db) return calculateCashFlowStatement({ ...input, receipts: [], payments: [] });
 
-	const [customerInvoicePaymentRows, historicalInvoicePaymentRows, standalonePaymentRows, expensePaymentRows, millPaymentRows] = await Promise.all([
+		const [customerInvoicePaymentRows, historicalInvoicePaymentRows, standalonePaymentRows, expensePaymentRows, supplierPaymentRows, legacyMillPaymentRows] = await Promise.all([
 		db.select({
 			id: customerInvoicePayments.id,
 			date: customerInvoicePayments.paymentDate,
@@ -3938,15 +4010,25 @@ export async function getCashFlowStatementReport(input: { startDate: string; end
       .from(expenses)
       .innerJoin(expenseCategories, eq(expenses.categoryId, expenseCategories.id))
       .where(and(gte(expenses.paymentDate, periodStart(input.startDate)), lte(expenses.paymentDate, periodEnd(input.endDate)), eq(expenses.status, 'paid'))),
-    db.select({
-      id: millInvoices.id,
+			db.select({
+				id: supplierInvoicePayments.id,
+				date: supplierInvoicePayments.paymentDate,
+				amount: supplierInvoicePayments.amount,
+				invoiceNumber: millInvoices.invoiceNumber,
+			})
+				.from(supplierInvoicePayments)
+				.innerJoin(millInvoices, eq(supplierInvoicePayments.millInvoiceId, millInvoices.id))
+				.where(and(gte(supplierInvoicePayments.paymentDate, periodStart(input.startDate)), lte(supplierInvoicePayments.paymentDate, periodEnd(input.endDate)))),
+	    db.select({
+	      id: millInvoices.id,
       date: millInvoices.paidDate,
       paidAmount: millInvoices.paidAmount,
       amountIncl: millInvoices.amountIncl,
       invoiceNumber: millInvoices.invoiceNumber,
     })
-      .from(millInvoices)
-      .where(and(gte(millInvoices.paidDate, input.startDate), lte(millInvoices.paidDate, input.endDate), eq(millInvoices.status, 'paid'))),
+	    .from(millInvoices)
+			.leftJoin(supplierInvoicePayments, eq(supplierInvoicePayments.millInvoiceId, millInvoices.id))
+	    .where(and(gte(millInvoices.paidDate, input.startDate), lte(millInvoices.paidDate, input.endDate), eq(millInvoices.status, 'paid'), isNull(supplierInvoicePayments.id))),
   ]);
 
 	return calculateCashFlowStatement({
@@ -3982,7 +4064,14 @@ export async function getCashFlowStatementReport(input: { startDate: string; end
         description: `${row.categoryName}: ${row.description}`,
         source: 'Expense payment' as const,
       })),
-      ...millPaymentRows.map((row) => ({
+				...supplierPaymentRows.map((row) => ({
+					id: `supplier-invoice-payment-${row.id}`,
+					date: row.date,
+					amount: Number(row.amount),
+					description: `Supplier invoice payment — ${row.invoiceNumber}`,
+					source: 'Mill invoice payment' as const,
+				})),
+	      ...legacyMillPaymentRows.map((row) => ({
         id: `mill-${row.id}`,
         date: row.date!,
         amount: Number(row.paidAmount ?? row.amountIncl),
@@ -5248,9 +5337,10 @@ export async function listMillInvoices(filters?: {
   if (filters?.feedOrderId) conditions.push(eq(millInvoices.feedOrderId, filters.feedOrderId));
 
   const rows = await db
-    .select({
-      id: millInvoices.id,
-      feedOrderId: millInvoices.feedOrderId,
+	  .select({
+	    id: millInvoices.id,
+	    feedOrderId: millInvoices.feedOrderId,
+			supplierId: millInvoices.supplierId,
       invoiceNumber: millInvoices.invoiceNumber,
       invoiceDate: millInvoices.invoiceDate,
       dueDate: millInvoices.dueDate,
@@ -5258,8 +5348,9 @@ export async function listMillInvoices(filters?: {
       vatAmount: millInvoices.vatAmount,
       amountIncl: millInvoices.amountIncl,
       status: millInvoices.status,
-      paidDate: millInvoices.paidDate,
-      paidAmount: millInvoices.paidAmount,
+	    paidDate: millInvoices.paidDate,
+	    paidAmount: millInvoices.paidAmount,
+			balanceDue: millInvoices.balanceDue,
       paymentReference: millInvoices.paymentReference,
       notes: millInvoices.notes,
       createdAt: millInvoices.createdAt,
@@ -5267,12 +5358,14 @@ export async function listMillInvoices(filters?: {
       orderNumber: feedOrders.orderNumber,
       feedRange: feedOrders.feedRange,
       feedStage: feedOrders.feedStage,
-      quantityTons: feedOrders.quantityTons,
-      customerName: customers.name,
-    })
-    .from(millInvoices)
-    .leftJoin(feedOrders, eq(millInvoices.feedOrderId, feedOrders.id))
-    .leftJoin(customers, eq(feedOrders.customerId, customers.id))
+	    quantityTons: feedOrders.quantityTons,
+	    customerName: customers.name,
+			supplierName: suppliers.name,
+	  })
+	  .from(millInvoices)
+	  .leftJoin(feedOrders, eq(millInvoices.feedOrderId, feedOrders.id))
+	  .leftJoin(customers, eq(feedOrders.customerId, customers.id))
+		.leftJoin(suppliers, eq(millInvoices.supplierId, suppliers.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(millInvoices.invoiceDate));
 
@@ -5292,8 +5385,69 @@ export async function getMillInvoiceById(id: number) {
   return rows[0] ?? undefined;
 }
 
+function millInvoiceEntryDate(invoiceDate: string) {
+  const date = invoiceDate.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Supplier invoice date must use YYYY-MM-DD format.");
+  return `${date} 12:00:00`;
+}
+
+export async function postMillInvoiceToPayables(millInvoiceId: number, createdBy: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const invoice = await getMillInvoiceById(millInvoiceId);
+  if (!invoice) throw new Error("Mill invoice not found.");
+  if (invoice.status === "disputed") throw new Error("A disputed mill invoice cannot be posted to Trade Payables.");
+
+  const requiredAccountNumbers = [
+    SUPPLIER_PAYABLE_POSTING_ACCOUNTS.feedAndProductionInventory,
+    SUPPLIER_PAYABLE_POSTING_ACCOUNTS.vatInput,
+    SUPPLIER_PAYABLE_POSTING_ACCOUNTS.tradePayables,
+  ];
+  const accounts = await db.select({ id: chartOfAccounts.id, accountNumber: chartOfAccounts.accountNumber, isActive: chartOfAccounts.isActive, isPostingAccount: chartOfAccounts.isPostingAccount })
+    .from(chartOfAccounts).where(inArray(chartOfAccounts.accountNumber, requiredAccountNumbers));
+  const accountsByNumber = new Map(accounts.map((account) => [account.accountNumber, account]));
+  for (const accountNumber of requiredAccountNumbers) {
+    const account = accountsByNumber.get(accountNumber);
+    if (!account || !account.isActive || !account.isPostingAccount) throw new Error(`Required posting account ${accountNumber} is missing, inactive, or not postable. Seed or correct the chart of accounts before posting this supplier invoice.`);
+  }
+
+  const sourceDescription = `Supplier mill invoice ${invoice.invoiceNumber}`;
+  const journalLines = buildSupplierInvoicePosting({
+    invoiceNumber: invoice.invoiceNumber,
+    amountExcl: invoice.amountExcl,
+    vatAmount: invoice.vatAmount,
+    amountIncl: invoice.amountIncl,
+    accountIds: {
+      inventory: accountsByNumber.get(SUPPLIER_PAYABLE_POSTING_ACCOUNTS.feedAndProductionInventory)!.id,
+      vatInput: accountsByNumber.get(SUPPLIER_PAYABLE_POSTING_ACCOUNTS.vatInput)!.id,
+      tradePayables: accountsByNumber.get(SUPPLIER_PAYABLE_POSTING_ACCOUNTS.tradePayables)!.id,
+    },
+  });
+  const validation = validateBalancedJournal(journalLines);
+  if (!validation.ok) throw new Error(validation.error);
+
+  return await (db as any).transaction(async (tx: any) => {
+    const existing = await tx.select({ journalEntryId: accountingSourcePostings.journalEntryId, journalNumber: journalEntries.journalNumber })
+      .from(accountingSourcePostings)
+      .innerJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+      .where(and(eq(accountingSourcePostings.sourceType, "supplier_mill_invoice"), eq(accountingSourcePostings.sourceId, millInvoiceId)))
+      .limit(1);
+    if (existing[0]) return { id: existing[0].journalEntryId, journalNumber: existing[0].journalNumber, alreadyPosted: true };
+
+    const entryDate = millInvoiceEntryDate(invoice.invoiceDate);
+    const journalNumber = getSupplierInvoiceJournalNumber(millInvoiceId);
+    const createdJournal = await tx.insert(journalEntries).values({ journalNumber, entryDate, description: sourceDescription, sourceType: "supplier_mill_invoice", sourceId: millInvoiceId, totalDebit: validation.totalDebit, totalCredit: validation.totalCredit, createdBy });
+    const journalEntryId = Number(createdJournal[0]?.insertId ?? createdJournal.insertId ?? 0);
+    if (!journalEntryId) throw new Error("Supplier invoice journal header could not be created.");
+    await tx.insert(generalLedgerEntries).values(journalLines.map((line) => ({ entryNumber: journalNumber, entryDate, journalEntryId, accountId: line.accountId, debit: line.debit, credit: line.credit, description: line.description || sourceDescription, referenceType: "supplier_mill_invoice", referenceId: millInvoiceId, createdBy })));
+    await tx.insert(accountingSourcePostings).values({ sourceType: "supplier_mill_invoice", sourceId: millInvoiceId, journalEntryId, createdBy });
+    return { id: journalEntryId, journalNumber, alreadyPosted: false };
+  });
+}
+
 export async function createMillInvoice(data: {
   feedOrderId: number;
+  supplierId?: number;
   invoiceNumber: string;
   invoiceDate: string;
   dueDate: string;
@@ -5305,21 +5459,26 @@ export async function createMillInvoice(data: {
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  if (!data.createdBy) throw new Error("An authenticated user is required to post a supplier invoice.");
 
-  await db.insert(millInvoices).values({
+  const created = await db.insert(millInvoices).values({
     feedOrderId: data.feedOrderId,
+    supplierId: data.supplierId,
     invoiceNumber: data.invoiceNumber,
     invoiceDate: data.invoiceDate,
     dueDate: data.dueDate,
     amountExcl: String(data.amountExcl),
     vatAmount: String(data.vatAmount ?? 0),
     amountIncl: String(data.amountIncl),
+    balanceDue: String(data.amountIncl),
     status: 'outstanding',
     notes: data.notes,
     createdBy: data.createdBy,
   });
+  const millInvoiceId = Number((created as any)[0]?.insertId ?? (created as any).insertId ?? 0);
+  if (!millInvoiceId) throw new Error("Mill invoice could not be created.");
 
-  // Also update the inline fields on feed_orders for quick reference
+  const posting = await postMillInvoiceToPayables(millInvoiceId, data.createdBy);
   await db.update(feedOrders).set({
     millInvoiceNumber: data.invoiceNumber,
     millInvoiceDate: data.invoiceDate,
@@ -5328,34 +5487,88 @@ export async function createMillInvoice(data: {
     millInvoicePaid: 0,
   }).where(eq(feedOrders.id, data.feedOrderId));
 
-  return true;
+  return { id: millInvoiceId, journalNumber: posting.journalNumber, alreadyPosted: posting.alreadyPosted };
 }
 
 export async function recordMillInvoicePayment(id: number, data: {
   paidDate: string;
-  paidAmount: number;
+  paidAmount: number | string;
+  paymentMethod: string;
   paymentReference?: string;
+  idempotencyKey: string;
+  createdBy: number;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  if (!data.idempotencyKey.trim()) throw new Error("A supplier payment request key is required.");
 
-  await db.update(millInvoices).set({
-    status: 'paid',
-    paidDate: data.paidDate,
-    paidAmount: String(data.paidAmount),
-    paymentReference: data.paymentReference,
-  }).where(eq(millInvoices.id, id));
-
-  // Sync the inline field on feed_orders
-  const inv = await getMillInvoiceById(id);
-  if (inv) {
-    await db.update(feedOrders).set({
-      millInvoicePaid: 1,
-      millInvoicePaidDate: data.paidDate,
-    }).where(eq(feedOrders.id, inv.feedOrderId));
+  const invoice = await getMillInvoiceById(id);
+  if (!invoice) throw new Error("Mill invoice not found.");
+  if (!await getMillInvoicePosting(id)) throw new Error("The supplier invoice must be posted to Trade Payables before recording a payment.");
+  const { payment } = validateSupplierPaymentAgainstBalance({ amount: data.paidAmount, balanceDue: invoice.balanceDue });
+  const requiredAccountNumbers = [SUPPLIER_PAYABLE_POSTING_ACCOUNTS.bank, SUPPLIER_PAYABLE_POSTING_ACCOUNTS.tradePayables];
+  const accounts = await db.select({ id: chartOfAccounts.id, accountNumber: chartOfAccounts.accountNumber, isActive: chartOfAccounts.isActive, isPostingAccount: chartOfAccounts.isPostingAccount })
+    .from(chartOfAccounts).where(inArray(chartOfAccounts.accountNumber, requiredAccountNumbers));
+  const accountsByNumber = new Map(accounts.map((account) => [account.accountNumber, account]));
+  for (const accountNumber of requiredAccountNumbers) {
+    const account = accountsByNumber.get(accountNumber);
+    if (!account || !account.isActive || !account.isPostingAccount) throw new Error(`Required posting account ${accountNumber} is missing, inactive, or not postable. Seed or correct the chart of accounts before recording this supplier payment.`);
   }
+  const journalLines = buildSupplierPaymentPosting({
+    invoiceNumber: invoice.invoiceNumber,
+    amount: payment.normalized,
+    accountIds: {
+      bank: accountsByNumber.get(SUPPLIER_PAYABLE_POSTING_ACCOUNTS.bank)!.id,
+      tradePayables: accountsByNumber.get(SUPPLIER_PAYABLE_POSTING_ACCOUNTS.tradePayables)!.id,
+    },
+  });
+  const validation = validateBalancedJournal(journalLines);
+  if (!validation.ok) throw new Error(validation.error);
 
-  return true;
+  return await (db as any).transaction(async (tx: any) => {
+    const retry = await tx.select({ paymentId: supplierInvoicePayments.id, millInvoiceId: supplierInvoicePayments.millInvoiceId, journalNumber: journalEntries.journalNumber })
+      .from(supplierInvoicePayments)
+      .leftJoin(accountingSourcePostings, and(eq(accountingSourcePostings.sourceType, "supplier_mill_invoice_payment"), eq(accountingSourcePostings.sourceId, supplierInvoicePayments.id)))
+      .leftJoin(journalEntries, eq(accountingSourcePostings.journalEntryId, journalEntries.id))
+      .where(eq(supplierInvoicePayments.idempotencyKey, data.idempotencyKey.trim())).limit(1);
+    if (retry[0]) {
+      if (retry[0].millInvoiceId !== id) throw new Error("This supplier payment request key belongs to a different mill invoice.");
+      return { success: true, paymentId: retry[0].paymentId, journalNumber: retry[0].journalNumber, alreadyPosted: true };
+    }
+
+    const updated = await tx.update(millInvoices).set({
+      paidAmount: sql`CAST(COALESCE(${millInvoices.paidAmount}, 0.00) + ${payment.normalized} AS DECIMAL(12,2))`,
+      balanceDue: sql`GREATEST(CAST(${millInvoices.balanceDue} AS DECIMAL(12,2)) - CAST(${payment.normalized} AS DECIMAL(12,2)), 0.00)`,
+      status: sql`CASE WHEN CAST(${millInvoices.balanceDue} AS DECIMAL(12,2)) <= CAST(${payment.normalized} AS DECIMAL(12,2)) THEN 'paid' ELSE 'partial' END`,
+      paidDate: data.paidDate,
+      paymentReference: data.paymentReference?.trim() || null,
+    }).where(and(eq(millInvoices.id, id), sql`${millInvoices.balanceDue} >= ${payment.normalized}`));
+    const rowsAffected = Number((updated as any).rowsAffected ?? (updated as any)[0]?.affectedRows ?? 0);
+    if (rowsAffected !== 1) throw new Error("Payment amount cannot exceed the current outstanding supplier invoice balance.");
+
+    const paymentDate = `${data.paidDate.slice(0, 10)} 12:00:00`;
+    const createdPayment = await tx.insert(supplierInvoicePayments).values({
+      millInvoiceId: id,
+      amount: payment.normalized,
+      paymentMethod: data.paymentMethod,
+      paymentDate,
+      paymentReference: data.paymentReference?.trim() || null,
+      idempotencyKey: data.idempotencyKey.trim(),
+      createdBy: data.createdBy,
+    });
+    const paymentId = Number(createdPayment[0]?.insertId ?? createdPayment.insertId ?? 0);
+    if (!paymentId) throw new Error("Supplier payment receipt could not be created.");
+    const journalNumber = getSupplierPaymentJournalNumber(paymentId);
+    const sourceDescription = `Supplier payment for ${invoice.invoiceNumber}`;
+    const createdJournal = await tx.insert(journalEntries).values({ journalNumber, entryDate: paymentDate, description: sourceDescription, sourceType: "supplier_mill_invoice_payment", sourceId: paymentId, totalDebit: validation.totalDebit, totalCredit: validation.totalCredit, createdBy: data.createdBy });
+    const journalEntryId = Number(createdJournal[0]?.insertId ?? createdJournal.insertId ?? 0);
+    if (!journalEntryId) throw new Error("Supplier payment journal header could not be created.");
+    await tx.insert(generalLedgerEntries).values(journalLines.map((line) => ({ entryNumber: journalNumber, entryDate: paymentDate, journalEntryId, accountId: line.accountId, debit: line.debit, credit: line.credit, description: line.description || sourceDescription, referenceType: "supplier_mill_invoice_payment", referenceId: paymentId, createdBy: data.createdBy })));
+    await tx.insert(accountingSourcePostings).values({ sourceType: "supplier_mill_invoice_payment", sourceId: paymentId, journalEntryId, createdBy: data.createdBy });
+    const updatedInvoice = (await tx.select({ status: millInvoices.status }).from(millInvoices).where(eq(millInvoices.id, id)).limit(1))[0];
+    await tx.update(feedOrders).set({ millInvoicePaid: updatedInvoice?.status === "paid" ? 1 : 0, millInvoicePaidDate: updatedInvoice?.status === "paid" ? data.paidDate : null }).where(eq(feedOrders.id, invoice.feedOrderId));
+    return { success: true, paymentId, journalNumber, alreadyPosted: false };
+  });
 }
 
 export async function getMillInvoiceAgingSummary() {
