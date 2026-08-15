@@ -39,6 +39,13 @@ export function resolveCustomerInvoiceRevenueAccountNumber(feedOrderId?: number 
   return feedOrderId ? CUSTOMER_INVOICE_POSTING_ACCOUNTS.feedSales : CUSTOMER_INVOICE_POSTING_ACCOUNTS.liveBirdSales;
 }
 
+export function getCustomerInvoiceJournalNumber(invoiceId: number) {
+  if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+    throw new Error("A valid invoice ID is required to create a General Ledger journal number.");
+  }
+  return `GL-${invoiceId}`;
+}
+
 export function buildCustomerInvoicePosting(input: InvoicePostingAmounts & {
   invoiceNumber: string;
   feedOrderId?: number | null;

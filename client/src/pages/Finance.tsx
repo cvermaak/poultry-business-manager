@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -153,16 +154,29 @@ function DetailCategoryTable({
 }
 
 export default function Finance() {
+  const [location] = useLocation();
   const today = useMemo(() => toDateInputValue(new Date()), []);
   const [startDate, setStartDate] = useState(getMonthStart);
   const [endDate, setEndDate] = useState(today);
   const [asOfDate, setAsOfDate] = useState(today);
   const [journalDialogOpen, setJournalDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("profit-loss");
   const [journalError, setJournalError] = useState<string | null>(null);
   const [journalDraft, setJournalDraft] = useState({
     entryDate: `${today}T12:00`, description: "", sourceType: "manual_journal", sourceId: "", lines: [emptyJournalLine(), emptyJournalLine()],
   });
   const accountingUtils = trpc.useUtils();
+
+  const requestedJournalNumber = useMemo(() => {
+    const queryIndex = location.indexOf("?");
+    return queryIndex === -1 ? "" : new URLSearchParams(location.slice(queryIndex + 1)).get("journal") || "";
+  }, [location]);
+
+  useEffect(() => {
+    const queryIndex = location.indexOf("?");
+    const requestedTab = queryIndex === -1 ? "" : new URLSearchParams(location.slice(queryIndex + 1)).get("tab");
+    if (requestedTab === "journals") setActiveTab("journals");
+  }, [location]);
 
   const periodInput = useMemo(() => ({ startDate, endDate }), [startDate, endDate]);
   const receivablesInput = useMemo(() => ({ asOfDate }), [asOfDate]);
@@ -290,7 +304,7 @@ export default function Finance() {
           <div className="flex items-center gap-3 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Loading financial reports…</div>
         </div>
       ) : (
-        <Tabs defaultValue="profit-loss" className="space-y-5">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
           <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-lg bg-muted p-1 sm:w-fit">
             <TabsTrigger value="profit-loss" className="gap-2"><TrendingUp className="h-4 w-4" /> Profit &amp; Loss</TabsTrigger>
             <TabsTrigger value="receivables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Receivables</TabsTrigger>
@@ -488,6 +502,13 @@ export default function Finance() {
           </TabsContent>
 
           <TabsContent value="journals" className="space-y-5">
+            {requestedJournalNumber && (
+              <Alert className="border-emerald-200 bg-emerald-50 text-emerald-950">
+                <BookOpen className="h-4 w-4" />
+                <AlertTitle>Linked invoice posting</AlertTitle>
+                <AlertDescription>Showing the General Ledger journal linked from the invoice: <span className="font-mono font-semibold">{requestedJournalNumber}</span>.</AlertDescription>
+              </Alert>
+            )}
             <Card>
               <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div><CardTitle>Posted journals</CardTitle><CardDescription>Every journal must have equal total debits and credits. Posted entries are retained as an auditable record.</CardDescription></div>
@@ -495,7 +516,7 @@ export default function Finance() {
               </CardHeader>
               <CardContent className="px-0 pb-0">
                 {(journals.data?.length ?? 0) === 0 ? <div className="px-6 pb-6 text-sm text-muted-foreground">No journals are posted for the selected period.</div> : (
-                  <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Journal</TableHead><TableHead>Date</TableHead><TableHead>Description</TableHead><TableHead>Source</TableHead><TableHead className="text-right">Debits</TableHead><TableHead className="text-right">Credits</TableHead></TableRow></TableHeader><TableBody>{journals.data?.map((journal) => <TableRow key={journal.id}><TableCell className="font-mono font-medium">{journal.journalNumber}</TableCell><TableCell>{formatReportDate(journal.entryDate)}</TableCell><TableCell>{journal.description}</TableCell><TableCell><Badge variant="outline" className="capitalize">{journal.sourceType?.replace(/_/g, " ") || "manual journal"}</Badge></TableCell><TableCell className="text-right"><Amount value={Number(journal.totalDebit)} /></TableCell><TableCell className="text-right"><Amount value={Number(journal.totalCredit)} /></TableCell></TableRow>)}</TableBody></Table></div>
+                  <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>General Ledger Journal</TableHead><TableHead>Date</TableHead><TableHead>Description</TableHead><TableHead>Source</TableHead><TableHead className="text-right">Debits</TableHead><TableHead className="text-right">Credits</TableHead></TableRow></TableHeader><TableBody>{journals.data?.map((journal) => <TableRow key={journal.id} className={journal.journalNumber === requestedJournalNumber ? "bg-emerald-50/80" : undefined}><TableCell className="font-mono font-medium"><div className="flex items-center gap-2">{journal.journalNumber}{journal.journalNumber === requestedJournalNumber && <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">Linked invoice</Badge>}</div></TableCell><TableCell>{formatReportDate(journal.entryDate)}</TableCell><TableCell>{journal.description}</TableCell><TableCell><Badge variant="outline" className="capitalize">{journal.sourceType?.replace(/_/g, " ") || "manual journal"}</Badge></TableCell><TableCell className="text-right"><Amount value={Number(journal.totalDebit)} /></TableCell><TableCell className="text-right"><Amount value={Number(journal.totalCredit)} /></TableCell></TableRow>)}</TableBody></Table></div>
                 )}
               </CardContent>
             </Card>

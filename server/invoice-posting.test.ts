@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildCustomerInvoicePosting, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
+import { buildCustomerInvoicePosting, getCustomerInvoiceJournalNumber, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
 import { validateBalancedJournal } from "./accounting";
 
 describe("automatic customer invoice posting", () => {
   const accountIds = { tradeReceivables: 11, vatOutput: 21, revenue: 40 };
+
+  it("uses a distinct General Ledger identifier instead of the customer invoice number", () => {
+    expect(getCustomerInvoiceJournalNumber(1020001)).toBe("GL-1020001");
+    expect(() => getCustomerInvoiceJournalNumber(0)).toThrow("valid invoice ID");
+  });
 
   it("posts a live-bird invoice as receivable, revenue, and VAT output", () => {
     const lines = buildCustomerInvoicePosting({

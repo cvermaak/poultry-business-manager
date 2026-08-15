@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Download, Plus, Eye, Loader2, Send, CreditCard, XCircle } from "lucide-react";
+import { BookOpenCheck, Download, Plus, Eye, Loader2, RefreshCw, Send, CreditCard, XCircle } from "lucide-react";
 import { format } from "date-fns";
 
 export function Invoices() {
@@ -49,7 +49,7 @@ export function Invoices() {
     viewInvoice?.id ?? 0,
     { enabled: !!viewInvoice?.id }
   );
-  const { data: invoicePosting, isLoading: postingLoading } = trpc.invoices.getAccountingPosting.useQuery(
+  const { data: invoicePosting, isLoading: postingLoading, refetch: recheckInvoicePosting } = trpc.invoices.getAccountingPosting.useQuery(
     viewInvoice?.id ?? 0,
     { enabled: !!viewInvoice?.id }
   );
@@ -122,6 +122,25 @@ export function Invoices() {
   const handleViewInvoice = (invoice: any) => {
     setViewInvoice(invoice);
     setViewModalOpen(true);
+  };
+
+  const handleRecheckPosting = async () => {
+    if (!viewInvoice?.id) return;
+    const result = await recheckInvoicePosting();
+    if (result.data) {
+      toast.success(`General Ledger journal ${result.data.journalNumber} is already posted. No duplicate entry was created.`);
+    } else {
+      toast.info("No General Ledger journal is linked to this invoice yet.");
+    }
+  };
+
+  const handleViewLedgerJournal = () => {
+    if (!invoicePosting?.journalNumber) {
+      toast.info("No General Ledger journal is linked to this invoice yet.");
+      return;
+    }
+    setViewModalOpen(false);
+    setLocation(`/finance?tab=journals&journal=${encodeURIComponent(invoicePosting.journalNumber)}`);
   };
 
   const openSendDialog = (invoice: any) => {
@@ -531,7 +550,7 @@ export function Invoices() {
                   </div>
                 )}
                 <div>
-                  <p className="text-sm font-medium text-muted-foreground">General Ledger</p>
+                  <p className="text-sm font-medium text-muted-foreground">General Ledger Journal</p>
                   {postingLoading ? (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Checking posting status</p>
                   ) : invoicePosting ? (
@@ -641,6 +660,21 @@ export function Invoices() {
 
               {/* Actions */}
               <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => void handleRecheckPosting()}
+                  disabled={postingLoading}
+                  title="Re-check the linked General Ledger posting without creating another journal"
+                >
+                  {postingLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Re-check posting
+                </Button>
+                {invoicePosting && (
+                  <Button variant="outline" onClick={handleViewLedgerJournal}>
+                    <BookOpenCheck className="mr-2 h-4 w-4" />
+                    View General Ledger
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => setViewModalOpen(false)}>
                   Close
                 </Button>

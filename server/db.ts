@@ -79,7 +79,7 @@ import {
 } from "./purchase-orders";
 import { calculatePreTransportSchedule } from "./pre-transport-protocol";
 import { AFGRO_DEFAULT_CHART_OF_ACCOUNTS, type JournalLineInput, validateBalancedJournal } from "./accounting";
-import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
+import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCustomerInvoiceJournalNumber, resolveCustomerInvoiceRevenueAccountNumber } from "./invoice-posting";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1549,7 +1549,7 @@ export async function markInvoiceAsSent(invoiceId: number, sentAt: string, creat
 		}
 
 		const entryDate = new Date(invoice.invoiceDate).toISOString().slice(0, 19).replace("T", " ");
-		const journalNumber = `INV-${invoice.id}`;
+		const journalNumber = getCustomerInvoiceJournalNumber(invoice.id);
 		const createdJournal = await tx.insert(journalEntries).values({
 			journalNumber,
 			entryDate,
