@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
+import { resolveSupplierOptions } from "@/lib/supplier-options";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -92,7 +93,13 @@ export default function MillInvoices() {
     statusFilter !== "all" ? { status: statusFilter } : {}
   );
   const { data: feedOrders = [] } = trpc.feedOrders.listOrders.useQuery({});
-	const { data: suppliers = [] } = trpc.suppliers.list.useQuery({ isActive: true });
+	const {
+		data: supplierPayload,
+		isLoading: suppliersLoading,
+		isError: suppliersError,
+		error: suppliersQueryError,
+	} = trpc.suppliers.list.useQuery({ isActive: true });
+	const suppliers = resolveSupplierOptions(supplierPayload);
 	const payablePosting = trpc.invoices.getMillInvoiceAccountingPosting.useQuery(
 		{ id: viewInvoice?.id ?? 0 },
 		{ enabled: Boolean(viewOpen && viewInvoice?.id) },
@@ -142,7 +149,19 @@ export default function MillInvoices() {
     });
   }
 
-  function handleCreateSubmit() {
+	function handleCreateSubmit() {
+		if (suppliersLoading) {
+			toast.error("Suppliers are still loading. Please wait a moment and try again.");
+			return;
+		}
+		if (suppliersError) {
+			toast.error("Suppliers could not be loaded. Refresh the page and try again.");
+			return;
+		}
+		if (suppliers.length === 0) {
+			toast.error("No active suppliers are available. Create or reactivate a supplier before recording this invoice.");
+			return;
+		}
 		if (!createForm.feedOrderId || !createForm.supplierId || !createForm.invoiceNumber || !createForm.amountIncl) {
       toast.error("Supplier, Feed Order, Invoice Number, and Amount Incl. are required");
       return;
@@ -536,13 +555,23 @@ export default function MillInvoices() {
                 </SelectContent>
               </Select>
             </div>
-					<div className="space-y-1">
-						<Label>Supplier *</Label>
-						<Select value={createForm.supplierId} onValueChange={(v) => setCreateForm((f) => ({ ...f, supplierId: v }))}>
-							<SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
-							<SelectContent>{(suppliers as any[]).map((supplier) => <SelectItem key={supplier.id} value={String(supplier.id)}>{supplier.name}</SelectItem>)}</SelectContent>
-						</Select>
-					</div>
+						<div className="space-y-1">
+							<Label>Supplier *</Label>
+							<Select value={createForm.supplierId} onValueChange={(v) => setCreateForm((f) => ({ ...f, supplierId: v }))} disabled={suppliersLoading || suppliersError || suppliers.length === 0}>
+								<SelectTrigger aria-label="Supplier"><SelectValue placeholder={suppliersLoading ? "Loading suppliers…" : "Select supplier"} /></SelectTrigger>
+								<SelectContent>
+									{suppliers.map((supplier) => <SelectItem key={supplier.id} value={String(supplier.id)}>{supplier.label}</SelectItem>)}
+								</SelectContent>
+							</Select>
+							{suppliersLoading && <p className="text-xs text-muted-foreground">Loading active suppliers…</p>}
+							{suppliersError && <p className="text-xs text-destructive">Unable to load suppliers: {suppliersQueryError?.message ?? "unknown error"}</p>}
+							{!suppliersLoading && !suppliersError && suppliers.length === 0 && (
+								<div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+									<span>No active suppliers exist yet.</span>
+									<Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => { setCreateOpen(false); setLocation("/suppliers"); }}>Manage Suppliers</Button>
+								</div>
+							)}
+						</div>
             <div className="space-y-1">
               <Label>Mill Invoice Number *</Label>
               <Input
