@@ -63,6 +63,9 @@ import {
 	accountingSourcePostings,
 	customerInvoicePayments,
 	supplierInvoicePayments,
+	bankReconciliations,
+	bankStatementLines,
+	bankReconciliationMatches,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -88,6 +91,13 @@ import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCust
 import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, resolveCustomerPaymentOutcome } from "./payment-posting";
 import { buildSupplierInvoicePosting, buildSupplierPaymentPosting, getSupplierInvoiceJournalNumber, getSupplierPaymentJournalNumber, SUPPLIER_PAYABLE_POSTING_ACCOUNTS, validateSupplierPaymentAgainstBalance } from "./supplier-payable-posting";
 import { normalizeLegacyInvoiceAmounts, normalizeLegacyInvoiceRecord } from "./invoice-amount-integrity";
+import {
+  calculateReconciliationControls,
+  createStatementLineKey,
+  ledgerSignedAmount,
+  validateBankStatementMatch,
+  type BankStatementDirection,
+} from "./bank-reconciliation";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -159,6 +169,9 @@ export async function getDb() {
 			  accountingSourcePostings,
 			  customerInvoicePayments,
 			  supplierInvoicePayments,
+			  bankReconciliations,
+			  bankStatementLines,
+			  bankReconciliationMatches,
 			},
       });
     } catch (error) {
@@ -1713,6 +1726,308 @@ export async function listGeneralLedgerEntries(filters?: {
   }
 
   return await query.orderBy(desc(generalLedgerEntries.entryDate));
+}
+
+// ============================================================================
+// FINANCIAL ACCOUNTING: BANK RECONCILIATION
+// ============================================================================
+
+type BankReconciliationCreateInput = {
+  bankAccountId: number;
+  statementStartDate: string;
+  statementEndDate: string;
+  openingStatementBalance: string;
+  closingStatementBalance: string;
+  notes?: string;
+  createdBy: number;
+};
+
+type BankStatementLineCreateInput = {
+  reconciliationId: number;
+  transactionDate: string;
+  valueDate?: string;
+  description: string;
+  reference?: string;
+  direction: BankStatementDirection;
+  amount: string;
+  runningBalance?: string;
+  createdBy: number;
+};
+
+function bankReconciliationDateTime(date: string, endOfDay = false) {
+  return `${date} ${endOfDay ? "23:59:59" : "00:00:00"}`;
+}
+
+async function assertEditableBankReconciliation(tx: any, reconciliationId: number) {
+  const rows = await tx.select().from(bankReconciliations).where(eq(bankReconciliations.id, reconciliationId)).limit(1);
+  const reconciliation = rows[0];
+  if (!reconciliation) throw new Error("Bank reconciliation not found.");
+  if (reconciliation.status === "completed") throw new Error("A completed reconciliation is locked and cannot be changed.");
+  return reconciliation;
+}
+
+export async function createBankReconciliation(input: BankReconciliationCreateInput) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (input.statementStartDate > input.statementEndDate) {
+    throw new Error("Statement start date must be on or before the statement end date.");
+  }
+
+  const accountRows = await db.select({
+    id: chartOfAccounts.id,
+    accountNumber: chartOfAccounts.accountNumber,
+    isActive: chartOfAccounts.isActive,
+    isPostingAccount: chartOfAccounts.isPostingAccount,
+  }).from(chartOfAccounts).where(eq(chartOfAccounts.id, input.bankAccountId)).limit(1);
+  const account = accountRows[0];
+  if (!account || !account.isActive || !account.isPostingAccount || account.accountNumber !== "1000") {
+    throw new Error("Bank Reconciliation currently requires the active posting account 1000 — Bank.");
+  }
+
+  const reconciliationNumber = `BR-${input.statementEndDate.replace(/-/g, "")}-${Date.now()}`;
+  const existing = await db.select({ id: bankReconciliations.id }).from(bankReconciliations).where(and(
+    eq(bankReconciliations.bankAccountId, input.bankAccountId),
+    eq(bankReconciliations.statementStartDate, input.statementStartDate),
+    eq(bankReconciliations.statementEndDate, input.statementEndDate),
+  )).limit(1);
+  if (existing[0]) throw new Error("A reconciliation already exists for this Bank account and statement period.");
+
+  const result = await db.insert(bankReconciliations).values({
+    reconciliationNumber,
+    bankAccountId: input.bankAccountId,
+    statementStartDate: input.statementStartDate,
+    statementEndDate: input.statementEndDate,
+    openingStatementBalance: input.openingStatementBalance,
+    closingStatementBalance: input.closingStatementBalance,
+    notes: input.notes?.trim() || null,
+    createdBy: input.createdBy,
+  });
+  const id = Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
+  if (!id) throw new Error("Bank reconciliation could not be created.");
+  return { id, reconciliationNumber };
+}
+
+export async function listBankReconciliations() {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select({
+    id: bankReconciliations.id,
+    reconciliationNumber: bankReconciliations.reconciliationNumber,
+    bankAccountId: bankReconciliations.bankAccountId,
+    bankAccountNumber: chartOfAccounts.accountNumber,
+    bankAccountName: chartOfAccounts.accountName,
+    statementStartDate: bankReconciliations.statementStartDate,
+    statementEndDate: bankReconciliations.statementEndDate,
+    openingStatementBalance: bankReconciliations.openingStatementBalance,
+    closingStatementBalance: bankReconciliations.closingStatementBalance,
+    status: bankReconciliations.status,
+    completedAt: bankReconciliations.completedAt,
+    createdAt: bankReconciliations.createdAt,
+  }).from(bankReconciliations)
+    .innerJoin(chartOfAccounts, eq(bankReconciliations.bankAccountId, chartOfAccounts.id))
+    .orderBy(desc(bankReconciliations.statementEndDate), desc(bankReconciliations.id));
+}
+
+export async function getBankReconciliationWorkspace(reconciliationId: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  const headerRows = await db.select({
+    id: bankReconciliations.id,
+    reconciliationNumber: bankReconciliations.reconciliationNumber,
+    bankAccountId: bankReconciliations.bankAccountId,
+    bankAccountNumber: chartOfAccounts.accountNumber,
+    bankAccountName: chartOfAccounts.accountName,
+    statementStartDate: bankReconciliations.statementStartDate,
+    statementEndDate: bankReconciliations.statementEndDate,
+    openingStatementBalance: bankReconciliations.openingStatementBalance,
+    closingStatementBalance: bankReconciliations.closingStatementBalance,
+    status: bankReconciliations.status,
+    notes: bankReconciliations.notes,
+    completedAt: bankReconciliations.completedAt,
+  }).from(bankReconciliations)
+    .innerJoin(chartOfAccounts, eq(bankReconciliations.bankAccountId, chartOfAccounts.id))
+    .where(eq(bankReconciliations.id, reconciliationId)).limit(1);
+  const reconciliation = headerRows[0];
+  if (!reconciliation) return null;
+
+  const [statementLines, matches, ledgerEntries] = await Promise.all([
+    db.select().from(bankStatementLines).where(eq(bankStatementLines.reconciliationId, reconciliationId)).orderBy(asc(bankStatementLines.transactionDate), asc(bankStatementLines.id)),
+    db.select().from(bankReconciliationMatches).where(eq(bankReconciliationMatches.reconciliationId, reconciliationId)),
+    db.select().from(generalLedgerEntries).where(and(
+      eq(generalLedgerEntries.accountId, reconciliation.bankAccountId),
+      gte(generalLedgerEntries.entryDate, bankReconciliationDateTime(reconciliation.statementStartDate)),
+      lte(generalLedgerEntries.entryDate, bankReconciliationDateTime(reconciliation.statementEndDate, true)),
+    )).orderBy(asc(generalLedgerEntries.entryDate), asc(generalLedgerEntries.id)),
+  ]);
+
+  const matchByLedgerEntry = new Map(matches.map((match) => [match.ledgerEntryId, match]));
+  const matchByStatementLine = new Map<number, typeof matches>();
+  for (const match of matches) {
+    const existing = matchByStatementLine.get(match.statementLineId) ?? [];
+    existing.push(match);
+    matchByStatementLine.set(match.statementLineId, existing);
+  }
+  const controls = calculateReconciliationControls({
+    openingStatementBalance: String(reconciliation.openingStatementBalance),
+    closingStatementBalance: String(reconciliation.closingStatementBalance),
+    statementLines: statementLines.map((line) => ({ id: line.id, direction: line.direction, amount: String(line.amount), status: line.status })),
+    ledgerEntries: ledgerEntries.map((entry) => ({ id: entry.id, debit: String(entry.debit), credit: String(entry.credit), isReconciled: entry.isReconciled })),
+  });
+
+  return {
+    reconciliation,
+    statementLines: statementLines.map((line) => ({ ...line, matches: matchByStatementLine.get(line.id) ?? [] })),
+    ledgerEntries: ledgerEntries.map((entry) => ({ ...entry, currentMatch: matchByLedgerEntry.get(entry.id) ?? null })),
+    controls,
+  };
+}
+
+export async function addBankStatementLine(input: BankStatementLineCreateInput) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const lineKey = createStatementLineKey(input);
+
+  return await (db as any).transaction(async (tx: any) => {
+    await assertEditableBankReconciliation(tx, input.reconciliationId);
+    const duplicate = await tx.select({ id: bankStatementLines.id }).from(bankStatementLines).where(and(
+      eq(bankStatementLines.reconciliationId, input.reconciliationId),
+      eq(bankStatementLines.lineKey, lineKey),
+    )).limit(1);
+    if (duplicate[0]) throw new Error("This statement line is already captured in the selected reconciliation.");
+
+    const result = await tx.insert(bankStatementLines).values({
+      reconciliationId: input.reconciliationId,
+      lineKey,
+      transactionDate: input.transactionDate,
+      valueDate: input.valueDate || null,
+      description: input.description.trim(),
+      reference: input.reference?.trim() || null,
+      direction: input.direction,
+      amount: input.amount,
+      runningBalance: input.runningBalance || null,
+      createdBy: input.createdBy,
+    });
+    await tx.update(bankReconciliations).set({ status: "in_progress" }).where(eq(bankReconciliations.id, input.reconciliationId));
+    return { id: Number(result[0]?.insertId ?? result.insertId ?? 0), lineKey };
+  });
+}
+
+export async function deleteUnmatchedBankStatementLine(reconciliationId: number, statementLineId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await (db as any).transaction(async (tx: any) => {
+    await assertEditableBankReconciliation(tx, reconciliationId);
+    const rows = await tx.select().from(bankStatementLines).where(and(
+      eq(bankStatementLines.id, statementLineId),
+      eq(bankStatementLines.reconciliationId, reconciliationId),
+    )).limit(1);
+    const line = rows[0];
+    if (!line) throw new Error("Bank statement line not found.");
+    if (line.status === "matched") throw new Error("Unmatch this statement line before deleting it.");
+    await tx.delete(bankStatementLines).where(eq(bankStatementLines.id, statementLineId));
+    return { success: true };
+  });
+}
+
+export async function matchBankStatementLine(input: { reconciliationId: number; statementLineId: number; ledgerEntryIds: number[]; matchedBy: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const distinctLedgerEntryIds = Array.from(new Set(input.ledgerEntryIds));
+  if (distinctLedgerEntryIds.length === 0) throw new Error("Select at least one Bank GL entry to match.");
+
+  return await (db as any).transaction(async (tx: any) => {
+    const reconciliation = await assertEditableBankReconciliation(tx, input.reconciliationId);
+    const statementRows = await tx.select().from(bankStatementLines).where(and(
+      eq(bankStatementLines.id, input.statementLineId),
+      eq(bankStatementLines.reconciliationId, input.reconciliationId),
+    )).limit(1);
+    const statementLine = statementRows[0];
+    if (!statementLine) throw new Error("Bank statement line not found.");
+    if (statementLine.status === "matched") throw new Error("This bank statement line is already matched.");
+
+    const ledgerEntries = await tx.select().from(generalLedgerEntries).where(and(
+      eq(generalLedgerEntries.accountId, reconciliation.bankAccountId),
+      inArray(generalLedgerEntries.id, distinctLedgerEntryIds),
+    ));
+    if (ledgerEntries.length !== distinctLedgerEntryIds.length) throw new Error("Every selected entry must be an eligible Bank GL entry.");
+    if (ledgerEntries.some((entry: any) => entry.isReconciled)) throw new Error("One or more selected Bank GL entries have already been reconciled.");
+
+    const validation = validateBankStatementMatch(statementLine, ledgerEntries);
+    if (!validation.ok) throw new Error(validation.error);
+
+    const existingMatches = await tx.select({ ledgerEntryId: bankReconciliationMatches.ledgerEntryId })
+      .from(bankReconciliationMatches).where(inArray(bankReconciliationMatches.ledgerEntryId, distinctLedgerEntryIds));
+    if (existingMatches.length > 0) throw new Error("One or more selected Bank GL entries are already linked to a reconciliation.");
+
+    await tx.insert(bankReconciliationMatches).values(ledgerEntries.map((entry: any) => ({
+      reconciliationId: input.reconciliationId,
+      statementLineId: input.statementLineId,
+      ledgerEntryId: entry.id,
+      matchedAmount: (() => {
+        const cents = ledgerSignedAmount(entry);
+        return `${Math.trunc(Math.abs(cents) / 100)}.${(Math.abs(cents) % 100).toString().padStart(2, "0")}`;
+      })(),
+      matchedBy: input.matchedBy,
+    })));
+    await tx.update(bankStatementLines).set({ status: "matched" }).where(eq(bankStatementLines.id, input.statementLineId));
+    await tx.update(generalLedgerEntries).set({ isReconciled: 1 }).where(inArray(generalLedgerEntries.id, distinctLedgerEntryIds));
+    await tx.update(bankReconciliations).set({ status: "in_progress" }).where(eq(bankReconciliations.id, input.reconciliationId));
+    return { success: true, matchedAmount: validation.matchedAmount };
+  });
+}
+
+export async function unmatchBankStatementLine(reconciliationId: number, statementLineId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await (db as any).transaction(async (tx: any) => {
+    await assertEditableBankReconciliation(tx, reconciliationId);
+    const matches = await tx.select().from(bankReconciliationMatches).where(and(
+      eq(bankReconciliationMatches.reconciliationId, reconciliationId),
+      eq(bankReconciliationMatches.statementLineId, statementLineId),
+    ));
+    if (matches.length === 0) throw new Error("This statement line does not have a reconciliation match.");
+    const ledgerEntryIds = matches.map((match: any) => match.ledgerEntryId);
+    await tx.delete(bankReconciliationMatches).where(and(
+      eq(bankReconciliationMatches.reconciliationId, reconciliationId),
+      eq(bankReconciliationMatches.statementLineId, statementLineId),
+    ));
+    await tx.update(bankStatementLines).set({ status: "unmatched" }).where(eq(bankStatementLines.id, statementLineId));
+    await tx.update(generalLedgerEntries).set({ isReconciled: 0 }).where(inArray(generalLedgerEntries.id, ledgerEntryIds));
+    return { success: true };
+  });
+}
+
+export async function completeBankReconciliation(reconciliationId: number, completedBy: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await (db as any).transaction(async (tx: any) => {
+    const reconciliation = await assertEditableBankReconciliation(tx, reconciliationId);
+    const [statementLines, ledgerEntries] = await Promise.all([
+      tx.select().from(bankStatementLines).where(eq(bankStatementLines.reconciliationId, reconciliationId)),
+      tx.select().from(generalLedgerEntries).where(and(
+        eq(generalLedgerEntries.accountId, reconciliation.bankAccountId),
+        gte(generalLedgerEntries.entryDate, bankReconciliationDateTime(reconciliation.statementStartDate)),
+        lte(generalLedgerEntries.entryDate, bankReconciliationDateTime(reconciliation.statementEndDate, true)),
+      )),
+    ]);
+    const controls = calculateReconciliationControls({
+      openingStatementBalance: String(reconciliation.openingStatementBalance),
+      closingStatementBalance: String(reconciliation.closingStatementBalance),
+      statementLines: statementLines.map((line: any) => ({ id: line.id, direction: line.direction, amount: String(line.amount), status: line.status })),
+      ledgerEntries: ledgerEntries.map((entry: any) => ({ id: entry.id, debit: String(entry.debit), credit: String(entry.credit), isReconciled: entry.isReconciled })),
+    });
+    if (!controls.canComplete) {
+      throw new Error(`Reconciliation cannot be completed: statement difference ${controls.statementBalanceDifference}; ${controls.unmatchedStatementLineIds.length} unmatched statement line(s); ${controls.unmatchedLedgerEntryIds.length} unmatched Bank GL line(s).`);
+    }
+
+    await tx.update(bankReconciliations).set({
+      status: "completed",
+      completedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
+      completedBy,
+    }).where(eq(bankReconciliations.id, reconciliationId));
+    return { success: true, controls };
+  });
 }
 
 // ============================================================================

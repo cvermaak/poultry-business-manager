@@ -2422,6 +2422,81 @@ export const appRouter = router({
   }),
 
   // ============================================================================
+  // FINANCIAL ACCOUNTING: BANK RECONCILIATION
+  // ============================================================================
+  bankReconciliation: router({
+    list: accountantProcedure.query(async () => db.listBankReconciliations()),
+    getWorkspace: accountantProcedure
+      .input(z.object({ reconciliationId: z.number().int().positive() }))
+      .query(async ({ input }) => db.getBankReconciliationWorkspace(input.reconciliationId)),
+    create: accountantProcedure
+      .input(z.object({
+        bankAccountId: z.number().int().positive(),
+        statementStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+        statementEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+        openingStatementBalance: z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use an exact decimal amount"),
+        closingStatementBalance: z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use an exact decimal amount"),
+        notes: z.string().trim().max(4000).optional(),
+      }).refine((input) => input.statementStartDate <= input.statementEndDate, {
+        message: "Statement start date must be on or before the statement end date.",
+        path: ["statementEndDate"],
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await db.createBankReconciliation({ ...input, createdBy: ctx.user.id });
+        await db.logUserActivity(ctx.user.id, "create_bank_reconciliation", "bank_reconciliation", result.id, `Created ${result.reconciliationNumber}`);
+        return result;
+      }),
+    addStatementLine: accountantProcedure
+      .input(z.object({
+        reconciliationId: z.number().int().positive(),
+        transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+        valueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates").optional(),
+        description: z.string().trim().min(2).max(500),
+        reference: z.string().trim().max(200).optional(),
+        direction: z.enum(["inflow", "outflow"]),
+        amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use a positive exact decimal amount"),
+        runningBalance: z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/, "Use an exact decimal amount").optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await db.addBankStatementLine({ ...input, createdBy: ctx.user.id });
+        await db.logUserActivity(ctx.user.id, "add_bank_statement_line", "bank_reconciliation", input.reconciliationId, `Added statement line ${result.lineKey}`);
+        return result;
+      }),
+    deleteStatementLine: accountantProcedure
+      .input(z.object({ reconciliationId: z.number().int().positive(), statementLineId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await db.deleteUnmatchedBankStatementLine(input.reconciliationId, input.statementLineId);
+        await db.logUserActivity(ctx.user.id, "delete_bank_statement_line", "bank_reconciliation", input.reconciliationId, `Deleted statement line ${input.statementLineId}`);
+        return result;
+      }),
+    matchStatementLine: accountantProcedure
+      .input(z.object({
+        reconciliationId: z.number().int().positive(),
+        statementLineId: z.number().int().positive(),
+        ledgerEntryIds: z.array(z.number().int().positive()).min(1).max(50),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await db.matchBankStatementLine({ ...input, matchedBy: ctx.user.id });
+        await db.logUserActivity(ctx.user.id, "match_bank_statement_line", "bank_reconciliation", input.reconciliationId, `Matched statement line ${input.statementLineId}`);
+        return result;
+      }),
+    unmatchStatementLine: accountantProcedure
+      .input(z.object({ reconciliationId: z.number().int().positive(), statementLineId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await db.unmatchBankStatementLine(input.reconciliationId, input.statementLineId);
+        await db.logUserActivity(ctx.user.id, "unmatch_bank_statement_line", "bank_reconciliation", input.reconciliationId, `Unmatched statement line ${input.statementLineId}`);
+        return result;
+      }),
+    complete: accountantProcedure
+      .input(z.object({ reconciliationId: z.number().int().positive() }))
+      .mutation(async ({ input, ctx }) => {
+        const result = await db.completeBankReconciliation(input.reconciliationId, ctx.user.id);
+        await db.logUserActivity(ctx.user.id, "complete_bank_reconciliation", "bank_reconciliation", input.reconciliationId, "Completed bank reconciliation");
+        return result;
+      }),
+  }),
+
+  // ============================================================================
   // FINANCIAL ACCOUNTING: ACTUAL REPORTING
   // ============================================================================
   financialReports: router({

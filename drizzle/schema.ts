@@ -481,6 +481,69 @@ export const accountingSourcePostings = mysqlTable("accounting_source_postings",
 	uniqueIndex("uq_accounting_source_postings_journal").on(table.journalEntryId),
 ]);
 
+// ============================================================================
+// FINANCIAL ACCOUNTING: BANK RECONCILIATION
+// ============================================================================
+// Statement dates remain ISO YYYY-MM-DD text to preserve the bank-supplied
+// calendar date without timezone conversion. Monetary amounts are decimal rands.
+export const bankReconciliations = mysqlTable("bank_reconciliations", {
+	id: int().autoincrement().primaryKey().notNull(),
+	reconciliationNumber: varchar({ length: 50 }).notNull(),
+	bankAccountId: int("bank_account_id").notNull().references(() => chartOfAccounts.id),
+	statementStartDate: varchar({ length: 10 }).notNull(),
+	statementEndDate: varchar({ length: 10 }).notNull(),
+	openingStatementBalance: decimal({ precision: 15, scale: 2 }).notNull(),
+	closingStatementBalance: decimal({ precision: 15, scale: 2 }).notNull(),
+	status: mysqlEnum(["draft", "in_progress", "completed"]).default("draft").notNull(),
+	notes: text(),
+	completedAt: timestamp({ mode: "string" }),
+	completedBy: int("completed_by").references(() => users.id),
+	createdAt: timestamp({ mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
+	updatedAt: timestamp({ mode: "string" }).defaultNow().onUpdateNow().notNull(),
+	createdBy: int("created_by").notNull().references(() => users.id),
+},
+	(table) => [
+		uniqueIndex("uq_bank_reconciliations_number").on(table.reconciliationNumber),
+		uniqueIndex("uq_bank_reconciliations_account_period").on(table.bankAccountId, table.statementStartDate, table.statementEndDate),
+		index("idx_bank_reconciliations_status").on(table.status),
+	]);
+
+export const bankStatementLines = mysqlTable("bank_statement_lines", {
+	id: int().autoincrement().primaryKey().notNull(),
+	reconciliationId: int("reconciliation_id").notNull().references(() => bankReconciliations.id, { onDelete: "cascade" }),
+	lineKey: varchar({ length: 100 }).notNull(),
+	transactionDate: varchar({ length: 10 }).notNull(),
+	valueDate: varchar({ length: 10 }),
+	description: varchar({ length: 500 }).notNull(),
+	reference: varchar({ length: 200 }),
+	direction: mysqlEnum(["inflow", "outflow"]).notNull(),
+	amount: decimal({ precision: 15, scale: 2 }).notNull(),
+	runningBalance: decimal({ precision: 15, scale: 2 }),
+	status: mysqlEnum(["unmatched", "matched"]).default("unmatched").notNull(),
+	createdAt: timestamp({ mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
+	createdBy: int("created_by").notNull().references(() => users.id),
+},
+	(table) => [
+		uniqueIndex("uq_bank_statement_lines_reconciliation_key").on(table.reconciliationId, table.lineKey),
+		index("idx_bank_statement_lines_reconciliation_status").on(table.reconciliationId, table.status),
+		index("idx_bank_statement_lines_date").on(table.transactionDate),
+	]);
+
+export const bankReconciliationMatches = mysqlTable("bank_reconciliation_matches", {
+	id: int().autoincrement().primaryKey().notNull(),
+	reconciliationId: int("reconciliation_id").notNull().references(() => bankReconciliations.id, { onDelete: "cascade" }),
+	statementLineId: int("statement_line_id").notNull().references(() => bankStatementLines.id, { onDelete: "cascade" }),
+	ledgerEntryId: int("ledger_entry_id").notNull().references(() => generalLedgerEntries.id),
+	matchedAmount: decimal({ precision: 15, scale: 2 }).notNull(),
+	matchedAt: timestamp({ mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
+	matchedBy: int("matched_by").notNull().references(() => users.id),
+},
+	(table) => [
+		uniqueIndex("uq_bank_reconciliation_match_pair").on(table.statementLineId, table.ledgerEntryId),
+		uniqueIndex("uq_bank_reconciliation_match_ledger_entry").on(table.ledgerEntryId),
+		index("idx_bank_reconciliation_matches_reconciliation").on(table.reconciliationId),
+	]);
+
 export const harvestRecords = mysqlTable("harvest_records", {
 	id: int().autoincrement().notNull(),
 	flockId: int().notNull().references(() => flocks.id, { onDelete: "cascade" } ),

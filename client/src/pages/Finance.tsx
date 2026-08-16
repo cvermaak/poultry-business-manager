@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { buildJournalListInput, resolveFinanceNavigation } from "@/lib/finance-navigation";
+import { BankReconciliationPanel } from "@/components/BankReconciliationPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -318,6 +319,7 @@ export default function Finance() {
             <TabsTrigger value="receivables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Receivables</TabsTrigger>
 				<TabsTrigger value="payables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Payables</TabsTrigger>
             <TabsTrigger value="cash-flow" className="gap-2"><Banknote className="h-4 w-4" /> Cash Flow</TabsTrigger>
+            <TabsTrigger value="bank-reconciliation" className="gap-2"><Landmark className="h-4 w-4" /> Bank Reconciliation</TabsTrigger>
             <TabsTrigger value="trial-balance" className="gap-2"><BookOpen className="h-4 w-4" /> Trial Balance</TabsTrigger>
             <TabsTrigger value="balance-sheet" className="gap-2"><Landmark className="h-4 w-4" /> Balance Sheet</TabsTrigger>
             <TabsTrigger value="accounts" className="gap-2"><BookOpen className="h-4 w-4" /> Chart of Accounts</TabsTrigger>
@@ -493,7 +495,7 @@ export default function Finance() {
                 <CardContent className="space-y-4 text-sm">
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-950"><p className="font-medium">Cash received</p><p className="mt-1 text-emerald-900/80">Invoice payments recorded in the selected period and standalone payment records.</p></div>
                   <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-rose-950"><p className="font-medium">Cash paid</p><p className="mt-1 text-rose-900/80">Paid operational expenses and paid mill invoices with a recorded payment date.</p></div>
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950"><p className="font-medium">Important scope</p><p className="mt-1 text-amber-900/80">This statement shows net cash movement, not a bank balance. It does not estimate future cash or reconcile bank transactions.</p></div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950"><p className="font-medium">Important scope</p><p className="mt-1 text-amber-900/80">This statement shows operational cash movement, not a Bank balance. Use the Bank Reconciliation tab to match Bank GL activity against statement lines.</p></div>
                 </CardContent>
               </Card>
             </div>
@@ -526,6 +528,14 @@ export default function Finance() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="bank-reconciliation" className="space-y-5">
+            <BankReconciliationPanel accounts={(accounts.data ?? []).map((account) => ({
+              id: account.id,
+              accountNumber: account.accountNumber,
+              accountName: account.accountName,
+            }))} />
           </TabsContent>
 
           <TabsContent value="trial-balance" className="space-y-5">
