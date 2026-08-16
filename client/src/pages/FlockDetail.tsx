@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { formatWeight, getWeightValue, getUnitLabel } from "@/lib/weightUtils";
 import { formatRand } from "@/lib/format";
+import { normalizeHealthRecordNotes } from "@/lib/health-record-notes";
 import { PlanCatchDialog } from "@/components/PlanCatchDialog";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
@@ -472,7 +473,7 @@ export default function FlockDetail() {
       dosage: healthRecordForm.dosage || undefined,
       veterinarianName: healthRecordForm.veterinarianName || undefined,
       cost: healthRecordForm.cost || undefined,
-      notes: healthRecordForm.notes || undefined,
+      notes: normalizeHealthRecordNotes(healthRecordForm.notes),
     });
   };
 
@@ -3326,7 +3327,7 @@ export default function FlockDetail() {
                     dosage: healthRecordForm.dosage || undefined,
                     veterinarianName: healthRecordForm.veterinarianName || undefined,
                     cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined,
-                    notes: healthRecordForm.notes || undefined,
+                    notes: normalizeHealthRecordNotes(healthRecordForm.notes),
                   });
                 } else {
                   createHealthRecord.mutate({
@@ -3339,7 +3340,7 @@ export default function FlockDetail() {
                     dosage: healthRecordForm.dosage || undefined,
                     veterinarianName: healthRecordForm.veterinarianName || undefined,
                     cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined,
-                    notes: healthRecordForm.notes || undefined,
+                    notes: normalizeHealthRecordNotes(healthRecordForm.notes),
                   });
                 }
               }}

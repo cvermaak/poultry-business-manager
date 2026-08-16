@@ -801,7 +801,7 @@ export const appRouter = router({
           veterinarianName: z.string().optional(),
           cost: z.number().optional(),
           followUpDate: z.date().optional(),
-          notes: z.string().optional(),
+          notes: z.string().nullable().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -833,7 +833,7 @@ export const appRouter = router({
           veterinarianName: z.string().optional(),
           cost: z.number().optional(),
           followUpDate: z.date().optional(),
-          notes: z.string().optional(),
+          notes: z.string().nullable().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
