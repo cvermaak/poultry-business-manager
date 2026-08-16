@@ -66,6 +66,9 @@ import {
 	bankReconciliations,
 	bankStatementLines,
 	bankReconciliationMatches,
+	financialPeriods,
+	financialControlReviews,
+	financialPeriodActions,
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
@@ -95,9 +98,18 @@ import {
   calculateReconciliationControls,
   createStatementLineKey,
   ledgerSignedAmount,
-  validateBankStatementMatch,
-  type BankStatementDirection,
+	validateBankStatementMatch,
+	type BankStatementDirection,
 } from "./bank-reconciliation";
+import {
+	assertIsoPeriod,
+	buildReversalLines,
+	calculateVatSummary,
+	evaluatePeriodCloseReadiness,
+	isDateInsidePeriod,
+	type CloseReviewStatus,
+	type CloseReviewType,
+} from "./period-close";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -172,6 +184,9 @@ export async function getDb() {
 			  bankReconciliations,
 			  bankStatementLines,
 			  bankReconciliationMatches,
+			  financialPeriods,
+			  financialControlReviews,
+			  financialPeriodActions,
 			},
       });
     } catch (error) {
@@ -1457,8 +1472,9 @@ export async function postJournalEntry(input: {
     throw new Error("Every journal line must use an active posting account.");
   }
 
-  const entryDate = input.entryDate.toISOString().slice(0, 19).replace("T", " ");
-  const journalNumber = `JNL-${input.entryDate.toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`;
+	const entryDate = input.entryDate.toISOString().slice(0, 19).replace("T", " ");
+	await assertFinancialDateOpen(entryDate);
+	const journalNumber = `JNL-${input.entryDate.toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`;
 	return await (db as any).transaction(async (tx: any) => {
     const created = await tx.insert(journalEntries).values({
       journalNumber,
@@ -1586,6 +1602,7 @@ export async function markInvoiceAsSent(invoiceId: number, sentAt: string, creat
 	const invoice = invoiceRows[0];
 	if (!invoice) throw new Error("Invoice not found");
 	if (invoice.status === "cancelled") throw new Error("Cancelled invoices cannot be sent or posted.");
+	await assertFinancialDateOpen(new Date(invoice.invoiceDate).toISOString().slice(0, 19).replace("T", " "));
 
 	const revenueAccountNumber = resolveCustomerInvoiceRevenueAccountNumber(invoice.feedOrderId);
 	const requiredAccountNumbers = [
@@ -1767,13 +1784,14 @@ async function assertEditableBankReconciliation(tx: any, reconciliationId: numbe
 }
 
 export async function createBankReconciliation(input: BankReconciliationCreateInput) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  if (input.statementStartDate > input.statementEndDate) {
-    throw new Error("Statement start date must be on or before the statement end date.");
-  }
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	if (input.statementStartDate > input.statementEndDate) {
+		throw new Error("Statement start date must be on or before the statement end date.");
+	}
+	await assertFinancialRangeOpenWithDatabase(db, input.statementStartDate, input.statementEndDate);
 
-  const accountRows = await db.select({
+	const accountRows = await db.select({
     id: chartOfAccounts.id,
     accountNumber: chartOfAccounts.accountNumber,
     isActive: chartOfAccounts.isActive,
@@ -1888,9 +1906,10 @@ export async function addBankStatementLine(input: BankStatementLineCreateInput) 
   if (!db) throw new Error("Database not available");
   const lineKey = createStatementLineKey(input);
 
-  return await (db as any).transaction(async (tx: any) => {
-    await assertEditableBankReconciliation(tx, input.reconciliationId);
-    const duplicate = await tx.select({ id: bankStatementLines.id }).from(bankStatementLines).where(and(
+	return await (db as any).transaction(async (tx: any) => {
+		const reconciliation = await assertEditableBankReconciliation(tx, input.reconciliationId);
+		await assertFinancialRangeOpenWithDatabase(tx, reconciliation.statementStartDate, reconciliation.statementEndDate);
+		const duplicate = await tx.select({ id: bankStatementLines.id }).from(bankStatementLines).where(and(
       eq(bankStatementLines.reconciliationId, input.reconciliationId),
       eq(bankStatementLines.lineKey, lineKey),
     )).limit(1);
@@ -1915,10 +1934,11 @@ export async function addBankStatementLine(input: BankStatementLineCreateInput) 
 
 export async function deleteUnmatchedBankStatementLine(reconciliationId: number, statementLineId: number) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  return await (db as any).transaction(async (tx: any) => {
-    await assertEditableBankReconciliation(tx, reconciliationId);
-    const rows = await tx.select().from(bankStatementLines).where(and(
+	if (!db) throw new Error("Database not available");
+	return await (db as any).transaction(async (tx: any) => {
+		const reconciliation = await assertEditableBankReconciliation(tx, reconciliationId);
+		await assertFinancialRangeOpenWithDatabase(tx, reconciliation.statementStartDate, reconciliation.statementEndDate);
+		const rows = await tx.select().from(bankStatementLines).where(and(
       eq(bankStatementLines.id, statementLineId),
       eq(bankStatementLines.reconciliationId, reconciliationId),
     )).limit(1);
@@ -1936,9 +1956,10 @@ export async function matchBankStatementLine(input: { reconciliationId: number; 
   const distinctLedgerEntryIds = Array.from(new Set(input.ledgerEntryIds));
   if (distinctLedgerEntryIds.length === 0) throw new Error("Select at least one Bank GL entry to match.");
 
-  return await (db as any).transaction(async (tx: any) => {
-    const reconciliation = await assertEditableBankReconciliation(tx, input.reconciliationId);
-    const statementRows = await tx.select().from(bankStatementLines).where(and(
+	return await (db as any).transaction(async (tx: any) => {
+		const reconciliation = await assertEditableBankReconciliation(tx, input.reconciliationId);
+		await assertFinancialRangeOpenWithDatabase(tx, reconciliation.statementStartDate, reconciliation.statementEndDate);
+		const statementRows = await tx.select().from(bankStatementLines).where(and(
       eq(bankStatementLines.id, input.statementLineId),
       eq(bankStatementLines.reconciliationId, input.reconciliationId),
     )).limit(1);
@@ -1979,10 +2000,11 @@ export async function matchBankStatementLine(input: { reconciliationId: number; 
 
 export async function unmatchBankStatementLine(reconciliationId: number, statementLineId: number) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  return await (db as any).transaction(async (tx: any) => {
-    await assertEditableBankReconciliation(tx, reconciliationId);
-    const matches = await tx.select().from(bankReconciliationMatches).where(and(
+	if (!db) throw new Error("Database not available");
+	return await (db as any).transaction(async (tx: any) => {
+		const reconciliation = await assertEditableBankReconciliation(tx, reconciliationId);
+		await assertFinancialRangeOpenWithDatabase(tx, reconciliation.statementStartDate, reconciliation.statementEndDate);
+		const matches = await tx.select().from(bankReconciliationMatches).where(and(
       eq(bankReconciliationMatches.reconciliationId, reconciliationId),
       eq(bankReconciliationMatches.statementLineId, statementLineId),
     ));
@@ -2027,7 +2049,281 @@ export async function completeBankReconciliation(reconciliationId: number, compl
       completedBy,
     }).where(eq(bankReconciliations.id, reconciliationId));
     return { success: true, controls };
-  });
+	});
+}
+
+// ============================================================================
+// FINANCIAL ACCOUNTING: PERIOD CLOSE AND FINANCIAL CONTROLS
+// ============================================================================
+
+function financialTimestamp() {
+	return new Date().toISOString().slice(0, 19).replace("T", " ");
+}
+
+function financialBusinessDate(value: Date | string) {
+	if (value instanceof Date) return value.toISOString().slice(0, 10);
+	return value.slice(0, 10);
+}
+
+async function findClosedFinancialPeriod(database: any, date: Date | string) {
+	const businessDate = financialBusinessDate(date);
+	const rows = await database.select({
+		id: financialPeriods.id,
+		periodName: financialPeriods.periodName,
+		startDate: financialPeriods.startDate,
+		endDate: financialPeriods.endDate,
+	}).from(financialPeriods).where(and(
+		eq(financialPeriods.status, "closed"),
+		lte(financialPeriods.startDate, businessDate),
+		gte(financialPeriods.endDate, businessDate),
+	)).limit(1);
+	return rows[0] ?? null;
+}
+
+export async function assertFinancialDateOpen(date: Date | string) {
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	const closedPeriod = await findClosedFinancialPeriod(db, date);
+	if (closedPeriod) {
+		throw new Error(`Financial period ${closedPeriod.periodName} (${closedPeriod.startDate} to ${closedPeriod.endDate}) is closed. Reopen the period with an audit reason before posting.`);
+	}
+}
+
+async function assertFinancialRangeOpenWithDatabase(database: any, startDate: string, endDate: string) {
+	const rows = await database.select({
+		periodName: financialPeriods.periodName,
+		startDate: financialPeriods.startDate,
+		endDate: financialPeriods.endDate,
+	}).from(financialPeriods).where(and(
+		eq(financialPeriods.status, "closed"),
+		lte(financialPeriods.startDate, endDate.slice(0, 10)),
+		gte(financialPeriods.endDate, startDate.slice(0, 10)),
+	)).limit(1);
+	if (rows[0]) throw new Error(`Financial period ${rows[0].periodName} (${rows[0].startDate} to ${rows[0].endDate}) is closed. Reopen it with an audit reason before changing Bank Reconciliation evidence.`);
+}
+
+async function getFinancialPeriodById(database: any, periodId: number) {
+	const rows = await database.select().from(financialPeriods).where(eq(financialPeriods.id, periodId)).limit(1);
+	if (!rows[0]) throw new Error("Financial period not found.");
+	return rows[0];
+}
+
+async function getPeriodCloseWorkspaceWithDatabase(database: any, periodId: number) {
+	const period = await getFinancialPeriodById(database, periodId);
+	const [reviews, actions, bankRows, vatRows, trialBalance] = await Promise.all([
+		database.select().from(financialControlReviews).where(eq(financialControlReviews.periodId, periodId)).orderBy(asc(financialControlReviews.reviewType)),
+		database.select().from(financialPeriodActions).where(eq(financialPeriodActions.periodId, periodId)).orderBy(desc(financialPeriodActions.actionAt), desc(financialPeriodActions.id)),
+		database.select({
+			id: bankReconciliations.id,
+			reconciliationNumber: bankReconciliations.reconciliationNumber,
+			status: bankReconciliations.status,
+			statementStartDate: bankReconciliations.statementStartDate,
+			statementEndDate: bankReconciliations.statementEndDate,
+		}).from(bankReconciliations).where(and(
+			lte(bankReconciliations.statementStartDate, period.endDate),
+			gte(bankReconciliations.statementEndDate, period.startDate),
+		)),
+		database.select({
+			accountNumber: chartOfAccounts.accountNumber,
+			debit: generalLedgerEntries.debit,
+			credit: generalLedgerEntries.credit,
+		}).from(generalLedgerEntries)
+			.innerJoin(journalEntries, eq(generalLedgerEntries.journalEntryId, journalEntries.id))
+			.innerJoin(chartOfAccounts, eq(generalLedgerEntries.accountId, chartOfAccounts.id))
+			.where(and(
+				eq(journalEntries.status, "posted"),
+				inArray(chartOfAccounts.accountNumber, ["1300", "2100"]),
+				gte(generalLedgerEntries.entryDate, periodStart(period.startDate)),
+				lte(generalLedgerEntries.entryDate, periodEnd(period.endDate)),
+			)),
+		getTrialBalanceReport({ asOfDate: period.endDate }),
+	]);
+
+	const signed = (positive: unknown, negative: unknown) => {
+		const toCents = (value: unknown) => {
+			const normalized = String(value ?? "0");
+			const [whole, fraction = ""] = normalized.split(".");
+			return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+		};
+		const cents = toCents(positive) - toCents(negative);
+		return `${cents < 0 ? "-" : ""}${Math.trunc(Math.abs(cents) / 100)}.${(Math.abs(cents) % 100).toString().padStart(2, "0")}`;
+	};
+	const vatSummary = calculateVatSummary({
+		outputVat: vatRows.filter((row: any) => row.accountNumber === "2100").map((row: any) => signed(row.credit, row.debit)),
+		inputVat: vatRows.filter((row: any) => row.accountNumber === "1300").map((row: any) => signed(row.debit, row.credit)),
+	});
+	const readiness = evaluatePeriodCloseReadiness({
+		period,
+		requiredReviews: reviews.map((review: any) => ({ reviewType: review.reviewType, reviewStatus: review.reviewStatus })),
+		bankReconciliations: bankRows,
+		trialBalanceDifference: Number(trialBalance.difference).toFixed(2),
+	});
+	return { period, reviews, actions, bankReconciliations: bankRows, vatSummary, trialBalance, readiness };
+}
+
+export async function createFinancialPeriod(input: { periodName: string; startDate: string; endDate: string; notes?: string; createdBy: number }) {
+	assertIsoPeriod(input.startDate, input.endDate);
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	const overlapping = await db.select({ id: financialPeriods.id, periodName: financialPeriods.periodName })
+		.from(financialPeriods).where(and(
+			lte(financialPeriods.startDate, input.endDate),
+			gte(financialPeriods.endDate, input.startDate),
+		)).limit(1);
+	if (overlapping[0]) throw new Error(`This period overlaps existing period ${overlapping[0].periodName}. Overlapping financial periods are not allowed.`);
+
+	return await (db as any).transaction(async (tx: any) => {
+		const result = await tx.insert(financialPeriods).values({
+			periodName: input.periodName.trim(),
+			startDate: input.startDate,
+			endDate: input.endDate,
+			notes: input.notes?.trim() || null,
+			createdBy: input.createdBy,
+		});
+		const periodId = Number(result[0]?.insertId ?? result.insertId ?? 0);
+		if (!periodId) throw new Error("Financial period could not be created.");
+		await tx.insert(financialControlReviews).values([
+			{ periodId, reviewType: "bank_reconciliation", reviewStatus: "pending" },
+			{ periodId, reviewType: "vat_summary", reviewStatus: "pending" },
+			{ periodId, reviewType: "trial_balance", reviewStatus: "pending" },
+			{ periodId, reviewType: "financial_statements", reviewStatus: "pending" },
+		]);
+		await tx.insert(financialPeriodActions).values({ periodId, actionType: "period_created", actionBy: input.createdBy, reason: "Financial period created" });
+		return { id: periodId, periodName: input.periodName.trim() };
+	});
+}
+
+export async function listFinancialPeriods() {
+	const db = await getDb();
+	if (!db) return [];
+	return await db.select().from(financialPeriods).orderBy(desc(financialPeriods.endDate), desc(financialPeriods.id));
+}
+
+export async function getFinancialPeriodWorkspace(periodId: number) {
+	const db = await getDb();
+	if (!db) return null;
+	return await getPeriodCloseWorkspaceWithDatabase(db, periodId);
+}
+
+export async function recordFinancialControlReview(input: { periodId: number; reviewType: CloseReviewType; reviewStatus: CloseReviewStatus; notes?: string; reviewedBy: number }) {
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	return await (db as any).transaction(async (tx: any) => {
+		const period = await getFinancialPeriodById(tx, input.periodId);
+		if (period.status === "closed") throw new Error("A closed financial period cannot be changed. Reopen it with an audit reason first.");
+		await tx.update(financialControlReviews).set({
+			reviewStatus: input.reviewStatus,
+			notes: input.notes?.trim() || null,
+			reviewedAt: financialTimestamp(),
+			reviewedBy: input.reviewedBy,
+		}).where(and(
+			eq(financialControlReviews.periodId, input.periodId),
+			eq(financialControlReviews.reviewType, input.reviewType),
+		));
+		await tx.insert(financialPeriodActions).values({
+			periodId: input.periodId,
+			actionType: input.reviewStatus === "approved" ? "review_approved" : "review_exception",
+			reason: input.notes?.trim() || null,
+			referenceType: "financial_control_review",
+			actionBy: input.reviewedBy,
+		});
+		return { success: true };
+	});
+}
+
+export async function closeFinancialPeriod(periodId: number, closedBy: number) {
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	const workspace = await getPeriodCloseWorkspaceWithDatabase(db, periodId);
+	if (workspace.period.status === "closed") throw new Error("This financial period is already closed.");
+	if (!workspace.readiness.canClose) {
+		throw new Error(`Period cannot be closed: ${workspace.readiness.missingReviewTypes.length} review(s) pending; ${workspace.readiness.exceptionReviewTypes.length} review exception(s); ${workspace.readiness.incompleteBankReconciliationIds.length} incomplete Bank reconciliation(s); trial-balance difference ${workspace.trialBalance.difference}.`);
+	}
+	return await (db as any).transaction(async (tx: any) => {
+		await tx.update(financialPeriods).set({ status: "closed", closedAt: financialTimestamp(), closedBy, lastReadinessCheckAt: financialTimestamp() }).where(eq(financialPeriods.id, periodId));
+		await tx.insert(financialPeriodActions).values({ periodId, actionType: "period_closed", actionBy: closedBy, reason: "All close readiness controls approved" });
+		return { success: true };
+	});
+}
+
+export async function reopenFinancialPeriod(input: { periodId: number; reason: string; reopenedBy: number }) {
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	const reason = input.reason.trim();
+	if (reason.length < 10) throw new Error("Provide a reopen reason of at least 10 characters for the audit record.");
+	return await (db as any).transaction(async (tx: any) => {
+		const period = await getFinancialPeriodById(tx, input.periodId);
+		if (period.status !== "closed") throw new Error("Only a closed financial period can be reopened.");
+		await tx.update(financialPeriods).set({ status: "open", reopenedAt: financialTimestamp(), reopenedBy: input.reopenedBy, reopenReason: reason }).where(eq(financialPeriods.id, input.periodId));
+		await tx.insert(financialPeriodActions).values({ periodId: input.periodId, actionType: "period_reopened", actionBy: input.reopenedBy, reason });
+		return { success: true };
+	});
+}
+
+export async function listReversibleJournals(periodId: number) {
+	const db = await getDb();
+	if (!db) return [];
+	const period = await getFinancialPeriodById(db, periodId);
+	return await db.select({
+		id: journalEntries.id,
+		journalNumber: journalEntries.journalNumber,
+		entryDate: journalEntries.entryDate,
+		description: journalEntries.description,
+		totalDebit: journalEntries.totalDebit,
+		totalCredit: journalEntries.totalCredit,
+		status: journalEntries.status,
+	}).from(journalEntries).where(and(
+		eq(journalEntries.sourceType, "manual_journal"),
+		eq(journalEntries.status, "posted"),
+		gte(journalEntries.entryDate, periodStart(period.startDate)),
+		lte(journalEntries.entryDate, periodEnd(period.endDate)),
+	)).orderBy(desc(journalEntries.entryDate), desc(journalEntries.id));
+}
+
+export async function reverseManualJournal(input: { periodId: number; journalEntryId: number; reversalDate: string; reason: string; createdBy: number }) {
+	assertIsoPeriod(input.reversalDate, input.reversalDate);
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	const reason = input.reason.trim();
+	if (reason.length < 10) throw new Error("Provide a reversal reason of at least 10 characters for the audit record.");
+	await assertFinancialDateOpen(`${input.reversalDate} 00:00:00`);
+	return await (db as any).transaction(async (tx: any) => {
+		const period = await getFinancialPeriodById(tx, input.periodId);
+		const sourceRows = await tx.select().from(journalEntries).where(eq(journalEntries.id, input.journalEntryId)).limit(1);
+		const source = sourceRows[0];
+		if (!source || source.sourceType !== "manual_journal" || source.status !== "posted") {
+			throw new Error("Only an unreversed manual journal can be reversed through this control.");
+		}
+		if (!isDateInsidePeriod(source.entryDate, period)) throw new Error("The selected journal is not inside this financial period.");
+		const originalLines = await tx.select({ accountId: generalLedgerEntries.accountId, debit: generalLedgerEntries.debit, credit: generalLedgerEntries.credit, description: generalLedgerEntries.description })
+			.from(generalLedgerEntries).where(eq(generalLedgerEntries.journalEntryId, input.journalEntryId)).orderBy(asc(generalLedgerEntries.id));
+		const reversalLines = buildReversalLines(originalLines.map((line: any) => ({ ...line, debit: String(line.debit), credit: String(line.credit) })));
+		const validation = validateBalancedJournal(reversalLines);
+		if (!validation.ok) throw new Error(validation.error);
+		const journalNumber = `RV-${source.journalNumber}-${Date.now()}`.slice(0, 50);
+		const entryDate = `${input.reversalDate} 00:00:00`;
+		const created = await tx.insert(journalEntries).values({
+			journalNumber,
+			entryDate,
+			description: `Reversal of ${source.journalNumber}: ${reason}`.slice(0, 500),
+			sourceType: "journal_reversal",
+			sourceId: source.id,
+			status: "posted",
+			totalDebit: validation.totalDebit,
+			totalCredit: validation.totalCredit,
+			reversalOfJournalEntryId: source.id,
+			createdBy: input.createdBy,
+		});
+		const reversalJournalEntryId = Number(created[0]?.insertId ?? created.insertId ?? 0);
+		if (!reversalJournalEntryId) throw new Error("Reversal journal header could not be created.");
+		await tx.insert(generalLedgerEntries).values(validation.lines.map((line) => ({
+			entryNumber: journalNumber, entryDate, journalEntryId: reversalJournalEntryId, accountId: line.accountId,
+			debit: line.debit, credit: line.credit, description: line.description, referenceType: "journal_reversal", referenceId: source.id, createdBy: input.createdBy,
+		})));
+		await tx.update(journalEntries).set({ status: "reversed" }).where(eq(journalEntries.id, source.id));
+		await tx.insert(financialPeriodActions).values({ periodId: input.periodId, actionType: "journal_reversed", reason, referenceType: "journal_entry", referenceId: source.id, actionBy: input.createdBy });
+		return { id: reversalJournalEntryId, journalNumber };
+	});
 }
 
 // ============================================================================
@@ -3895,6 +4191,7 @@ export async function recordInvoicePayment(invoiceId: number, data: {
 	const invoiceRows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
 	const invoice = invoiceRows[0];
 	if (!invoice) throw new Error("Invoice not found");
+	await assertFinancialDateOpen(data.paymentDate);
 	if (normalizeLegacyInvoiceAmounts(invoice).hasLegacyHundredfoldHeader) {
 		throw new Error("This invoice has a legacy 100× header amount mismatch. Run migration 0049 before recording another payment.");
 	}
@@ -5709,9 +6006,10 @@ function millInvoiceEntryDate(invoiceDate: string) {
 export async function postMillInvoiceToPayables(millInvoiceId: number, createdBy: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const invoice = await getMillInvoiceById(millInvoiceId);
-  if (!invoice) throw new Error("Mill invoice not found.");
-  if (invoice.status === "disputed") throw new Error("A disputed mill invoice cannot be posted to Trade Payables.");
+	const invoice = await getMillInvoiceById(millInvoiceId);
+	if (!invoice) throw new Error("Mill invoice not found.");
+	if (invoice.status === "disputed") throw new Error("A disputed mill invoice cannot be posted to Trade Payables.");
+	await assertFinancialDateOpen(millInvoiceEntryDate(invoice.invoiceDate));
 
   const requiredAccountNumbers = [
     SUPPLIER_PAYABLE_POSTING_ACCOUNTS.feedAndProductionInventory,
@@ -5772,9 +6070,10 @@ export async function createMillInvoice(data: {
   notes?: string;
   createdBy?: number;
 }) {
-  const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  if (!data.createdBy) throw new Error("An authenticated user is required to post a supplier invoice.");
+	const db = await getDb();
+	if (!db) throw new Error("Database not available");
+	if (!data.createdBy) throw new Error("An authenticated user is required to post a supplier invoice.");
+	await assertFinancialDateOpen(millInvoiceEntryDate(data.invoiceDate));
 
   const created = await db.insert(millInvoices).values({
     feedOrderId: data.feedOrderId,
@@ -5817,9 +6116,10 @@ export async function recordMillInvoicePayment(id: number, data: {
   if (!db) throw new Error("Database not available");
   if (!data.idempotencyKey.trim()) throw new Error("A supplier payment request key is required.");
 
-  const invoice = await getMillInvoiceById(id);
-  if (!invoice) throw new Error("Mill invoice not found.");
-  if (!await getMillInvoicePosting(id)) throw new Error("The supplier invoice must be posted to Trade Payables before recording a payment.");
+	const invoice = await getMillInvoiceById(id);
+	if (!invoice) throw new Error("Mill invoice not found.");
+	await assertFinancialDateOpen(data.paidDate);
+	if (!await getMillInvoicePosting(id)) throw new Error("The supplier invoice must be posted to Trade Payables before recording a payment.");
   const { payment } = validateSupplierPaymentAgainstBalance({ amount: data.paidAmount, balanceDue: invoice.balanceDue });
   const requiredAccountNumbers = [SUPPLIER_PAYABLE_POSTING_ACCOUNTS.bank, SUPPLIER_PAYABLE_POSTING_ACCOUNTS.tradePayables];
   const accounts = await db.select({ id: chartOfAccounts.id, accountNumber: chartOfAccounts.accountNumber, isActive: chartOfAccounts.isActive, isPostingAccount: chartOfAccounts.isPostingAccount })

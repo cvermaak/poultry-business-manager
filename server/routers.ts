@@ -2496,9 +2496,75 @@ export const appRouter = router({
       }),
   }),
 
-  // ============================================================================
-  // FINANCIAL ACCOUNTING: ACTUAL REPORTING
-  // ============================================================================
+	// ============================================================================
+	// FINANCIAL ACCOUNTING: PERIOD CLOSE AND FINANCIAL CONTROLS
+	// ============================================================================
+	periodClose: router({
+		list: accountantProcedure.query(async () => db.listFinancialPeriods()),
+		getWorkspace: accountantProcedure
+			.input(z.object({ periodId: z.number().int().positive() }))
+			.query(async ({ input }) => db.getFinancialPeriodWorkspace(input.periodId)),
+		create: adminProcedure
+			.input(z.object({
+				periodName: z.string().trim().min(3).max(100),
+				startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+				endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+				notes: z.string().trim().max(4000).optional(),
+			}).refine((input) => input.startDate <= input.endDate, {
+				message: "Period start date must be on or before period end date.",
+				path: ["endDate"],
+			}))
+			.mutation(async ({ input, ctx }) => {
+				const result = await db.createFinancialPeriod({ ...input, createdBy: ctx.user.id });
+				await db.logUserActivity(ctx.user.id, "create_financial_period", "financial_period", result.id, `Created ${result.periodName}`);
+				return result;
+			}),
+		recordReview: accountantProcedure
+			.input(z.object({
+				periodId: z.number().int().positive(),
+				reviewType: z.enum(["bank_reconciliation", "vat_summary", "trial_balance", "financial_statements"]),
+				reviewStatus: z.enum(["approved", "exception"]),
+				notes: z.string().trim().max(4000).optional(),
+			}))
+			.mutation(async ({ input, ctx }) => {
+				const result = await db.recordFinancialControlReview({ ...input, reviewedBy: ctx.user.id });
+				await db.logUserActivity(ctx.user.id, "review_financial_period", "financial_period", input.periodId, `${input.reviewType}: ${input.reviewStatus}`);
+				return result;
+			}),
+		close: adminProcedure
+			.input(z.object({ periodId: z.number().int().positive() }))
+			.mutation(async ({ input, ctx }) => {
+				const result = await db.closeFinancialPeriod(input.periodId, ctx.user.id);
+				await db.logUserActivity(ctx.user.id, "close_financial_period", "financial_period", input.periodId, "Closed financial period");
+				return result;
+			}),
+		reopen: adminProcedure
+			.input(z.object({ periodId: z.number().int().positive(), reason: z.string().trim().min(10).max(4000) }))
+			.mutation(async ({ input, ctx }) => {
+				const result = await db.reopenFinancialPeriod({ ...input, reopenedBy: ctx.user.id });
+				await db.logUserActivity(ctx.user.id, "reopen_financial_period", "financial_period", input.periodId, input.reason);
+				return result;
+			}),
+		listReversibleJournals: accountantProcedure
+			.input(z.object({ periodId: z.number().int().positive() }))
+			.query(async ({ input }) => db.listReversibleJournals(input.periodId)),
+		reverseManualJournal: adminProcedure
+			.input(z.object({
+				periodId: z.number().int().positive(),
+				journalEntryId: z.number().int().positive(),
+				reversalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD dates"),
+				reason: z.string().trim().min(10).max(4000),
+			}))
+			.mutation(async ({ input, ctx }) => {
+				const result = await db.reverseManualJournal({ ...input, createdBy: ctx.user.id });
+				await db.logUserActivity(ctx.user.id, "reverse_manual_journal", "journal_entry", input.journalEntryId, `Created ${result.journalNumber}: ${input.reason}`);
+				return result;
+			}),
+	}),
+
+	// ============================================================================
+	// FINANCIAL ACCOUNTING: ACTUAL REPORTING
+	// ============================================================================
   financialReports: router({
     profitAndLoss: protectedProcedure
       .input(z.object({

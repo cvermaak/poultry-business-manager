@@ -3,6 +3,7 @@ import { useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { buildJournalListInput, resolveFinanceNavigation } from "@/lib/finance-navigation";
 import { BankReconciliationPanel } from "@/components/BankReconciliationPanel";
+import { PeriodClosePanel } from "@/components/PeriodClosePanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,8 +22,9 @@ import {
   CircleAlert,
   Download,
   FilePlus2,
-  Landmark,
-  Loader2,
+	Landmark,
+	LockKeyhole,
+	Loader2,
   Plus,
   ReceiptText,
   RefreshCw,
@@ -319,8 +321,9 @@ export default function Finance() {
             <TabsTrigger value="receivables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Receivables</TabsTrigger>
 				<TabsTrigger value="payables" className="gap-2"><ReceiptText className="h-4 w-4" /> Aged Payables</TabsTrigger>
             <TabsTrigger value="cash-flow" className="gap-2"><Banknote className="h-4 w-4" /> Cash Flow</TabsTrigger>
-            <TabsTrigger value="bank-reconciliation" className="gap-2"><Landmark className="h-4 w-4" /> Bank Reconciliation</TabsTrigger>
-            <TabsTrigger value="trial-balance" className="gap-2"><BookOpen className="h-4 w-4" /> Trial Balance</TabsTrigger>
+	            <TabsTrigger value="bank-reconciliation" className="gap-2"><Landmark className="h-4 w-4" /> Bank Reconciliation</TabsTrigger>
+	            <TabsTrigger value="period-close" className="gap-2"><LockKeyhole className="h-4 w-4" /> Period Close</TabsTrigger>
+	            <TabsTrigger value="trial-balance" className="gap-2"><BookOpen className="h-4 w-4" /> Trial Balance</TabsTrigger>
             <TabsTrigger value="balance-sheet" className="gap-2"><Landmark className="h-4 w-4" /> Balance Sheet</TabsTrigger>
             <TabsTrigger value="accounts" className="gap-2"><BookOpen className="h-4 w-4" /> Chart of Accounts</TabsTrigger>
             <TabsTrigger value="journals" className="gap-2"><Landmark className="h-4 w-4" /> General Ledger</TabsTrigger>
@@ -530,15 +533,19 @@ export default function Finance() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="bank-reconciliation" className="space-y-5">
-            <BankReconciliationPanel accounts={(accounts.data ?? []).map((account) => ({
+	          <TabsContent value="bank-reconciliation" className="space-y-5">
+	            <BankReconciliationPanel accounts={(accounts.data ?? []).map((account) => ({
               id: account.id,
               accountNumber: account.accountNumber,
               accountName: account.accountName,
-            }))} />
-          </TabsContent>
+	            }))} />
+	          </TabsContent>
 
-          <TabsContent value="trial-balance" className="space-y-5">
+	          <TabsContent value="period-close" className="space-y-5">
+	            <PeriodClosePanel />
+	          </TabsContent>
+
+	          <TabsContent value="trial-balance" className="space-y-5">
             <div className="grid gap-4 md:grid-cols-3">
               <MetricCard label="Total debits" value={trialBalance.data?.totalDebit ?? 0} description={`As at ${formatReportDate(asOfDate)}`} icon={ArrowDownRight} />
               <MetricCard label="Total credits" value={trialBalance.data?.totalCredit ?? 0} description="Posted ledger balances" icon={ArrowUpRight} />
