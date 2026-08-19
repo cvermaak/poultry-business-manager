@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReversalLines, calculateVatSummary, evaluatePeriodCloseReadiness } from "./period-close";
+import { buildReversalJournalNumber, buildReversalLines, calculateVatSummary, evaluatePeriodCloseReadiness } from "./period-close";
 
 describe("Period Close financial controls", () => {
   it("summarizes VAT output, input, and the exact payable position", () => {
@@ -42,5 +42,9 @@ describe("Period Close financial controls", () => {
       { accountId: 1, debit: "0.00", credit: "100.00", description: "Reversal — Bank receipt" },
       { accountId: 2, debit: "100.00", credit: "0.00", description: "Reversal — Revenue" },
     ]);
+  });
+
+  it("uses the required REV-JNL prefix for controlled reversal journals", () => {
+    expect(buildReversalJournalNumber("JNL-20261217-123", 456)).toBe("REV-JNL-JNL-20261217-123-456");
   });
 });

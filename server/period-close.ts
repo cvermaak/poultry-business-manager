@@ -72,3 +72,7 @@ export function buildReversalLines(lines: Array<{ accountId: number; debit: stri
     description: `Reversal — ${line.description}`,
   }));
 }
+
+export function buildReversalJournalNumber(sourceJournalNumber: string, timestamp = Date.now()) {
+  return `REV-JNL-${sourceJournalNumber}-${timestamp}`.slice(0, 50);
+}

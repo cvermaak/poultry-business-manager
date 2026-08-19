@@ -558,13 +558,13 @@ export const financialPeriods = mysqlTable("financial_periods", {
 	notes: text(),
 	lastReadinessCheckAt: timestamp({ mode: "string" }),
 	closedAt: timestamp({ mode: "string" }),
-	closedBy: int("closed_by").references(() => users.id),
+	closedBy: int().references(() => users.id),
 	reopenedAt: timestamp({ mode: "string" }),
-	reopenedBy: int("reopened_by").references(() => users.id),
+	reopenedBy: int().references(() => users.id),
 	reopenReason: varchar({ length: 1000 }),
 	createdAt: timestamp({ mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
 	updatedAt: timestamp({ mode: "string" }).defaultNow().onUpdateNow().notNull(),
-	createdBy: int("created_by").notNull().references(() => users.id),
+	createdBy: int().notNull().references(() => users.id),
 },
 	(table) => [
 		uniqueIndex("uq_financial_periods_dates").on(table.startDate, table.endDate),
@@ -573,12 +573,12 @@ export const financialPeriods = mysqlTable("financial_periods", {
 
 export const financialControlReviews = mysqlTable("financial_control_reviews", {
 	id: int().autoincrement().primaryKey().notNull(),
-	periodId: int("period_id").notNull().references(() => financialPeriods.id, { onDelete: "cascade" }),
+	periodId: int().notNull().references(() => financialPeriods.id, { onDelete: "cascade" }),
 	reviewType: mysqlEnum(["bank_reconciliation", "vat_summary", "trial_balance", "financial_statements"]).notNull(),
 	reviewStatus: mysqlEnum(["pending", "approved", "exception"]).default("pending").notNull(),
 	notes: varchar({ length: 4000 }),
 	reviewedAt: timestamp({ mode: "string" }),
-	reviewedBy: int("reviewed_by").references(() => users.id),
+	reviewedBy: int().references(() => users.id),
 	createdAt: timestamp({ mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
 	updatedAt: timestamp({ mode: "string" }).defaultNow().onUpdateNow().notNull(),
 },
@@ -589,13 +589,13 @@ export const financialControlReviews = mysqlTable("financial_control_reviews", {
 
 export const financialPeriodActions = mysqlTable("financial_period_actions", {
 	id: int().autoincrement().primaryKey().notNull(),
-	periodId: int("period_id").notNull().references(() => financialPeriods.id, { onDelete: "cascade" }),
+	periodId: int().notNull().references(() => financialPeriods.id, { onDelete: "cascade" }),
 	actionType: mysqlEnum(["period_created", "review_approved", "review_exception", "period_closed", "period_reopened", "journal_reversed"]).notNull(),
 	reason: varchar({ length: 4000 }),
 	referenceType: varchar({ length: 50 }),
 	referenceId: int(),
 	actionAt: timestamp({ mode: "string" }).default("CURRENT_TIMESTAMP").notNull(),
-	actionBy: int("action_by").notNull().references(() => users.id),
+	actionBy: int().notNull().references(() => users.id),
 },
 	(table) => [
 		index("idx_financial_period_actions_period").on(table.periodId, table.actionAt),

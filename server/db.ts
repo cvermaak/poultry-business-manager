@@ -103,6 +103,7 @@ import {
 } from "./bank-reconciliation";
 import {
 	assertIsoPeriod,
+	buildReversalJournalNumber,
 	buildReversalLines,
 	calculateVatSummary,
 	evaluatePeriodCloseReadiness,
@@ -2300,7 +2301,7 @@ export async function reverseManualJournal(input: { periodId: number; journalEnt
 		const reversalLines = buildReversalLines(originalLines.map((line: any) => ({ ...line, debit: String(line.debit), credit: String(line.credit) })));
 		const validation = validateBalancedJournal(reversalLines);
 		if (!validation.ok) throw new Error(validation.error);
-		const journalNumber = `RV-${source.journalNumber}-${Date.now()}`.slice(0, 50);
+		const journalNumber = buildReversalJournalNumber(source.journalNumber);
 		const entryDate = `${input.reversalDate} 00:00:00`;
 		const created = await tx.insert(journalEntries).values({
 			journalNumber,
