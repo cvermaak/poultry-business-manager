@@ -3,6 +3,16 @@ import bcrypt from "bcrypt";
 const SALT_ROUNDS = 12;
 
 /**
+ * IMPORTANT: `users.passwordHash` must always contain a bcrypt hash
+ * (e.g. "$2b$12$..."). Never write a plain-text password or a hand-rolled
+ * hash directly into that column - `verifyPassword()` uses `bcrypt.compare`,
+ * which will always return false for anything that isn't in bcrypt's own
+ * format. Always go through `hashPassword()` (or the `resetPassword` /
+ * `changePassword` mutations in server/routers.ts, or
+ * scripts/reset-user-password.mjs for direct DB fixes) to set a password.
+ */
+
+/**
  * Hash a plain text password using bcrypt
  */
 export async function hashPassword(plainPassword: string): Promise<string> {
