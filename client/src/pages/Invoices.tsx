@@ -319,7 +319,7 @@ export function Invoices() {
         </Button>
       </div>
 
-      <Tabs defaultValue="all" onValueChange={setSelectedStatus} className="w-full">
+      <Tabs value={selectedStatus} onValueChange={setSelectedStatus} className="w-full">
         <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="all">All</TabsTrigger>
           <TabsTrigger value="draft">Draft</TabsTrigger>
