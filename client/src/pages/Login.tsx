@@ -1,24 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, EyeOff, LogIn, AlertCircle } from "lucide-react";
-import { setJWTToken } from "@/lib/jwt";
+import { Eye, EyeOff, LogIn, AlertCircle, ShieldAlert } from "lucide-react";
+import { setJWTToken, isUsingSessionFallback } from "@/lib/jwt";
 
 export default function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usingSessionFallback, setUsingSessionFallback] = useState(false);
+
+  // Detect on mount whether localStorage is unavailable (e.g. incognito/
+  // private browsing mode) so we can warn the user before they log in.
+  useEffect(() => {
+    setUsingSessionFallback(isUsingSessionFallback());
+  }, []);
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: (data) => {
       if (data.token) {
-        // Store JWT token in localStorage
+        // Store JWT token, falling back to sessionStorage if localStorage
+        // is unavailable (e.g. incognito/private browsing mode).
         setJWTToken(data.token);
+        setUsingSessionFallback(isUsingSessionFallback());
       }
       
       if (data.mustChangePassword) {
@@ -63,6 +72,15 @@ export default function LoginPage() {
         </CardHeader>
         
         <CardContent className="space-y-6">
+          {usingSessionFallback && (
+            <Alert>
+              <ShieldAlert className="h-4 w-4" />
+              <AlertDescription>
+                Private/incognito browsing detected. You can still sign in, but your session will not persist after you close this browser window or restart your browser.
+              </AlertDescription>
+            </Alert>
+          )}
+
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
