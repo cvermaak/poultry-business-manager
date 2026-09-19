@@ -2061,6 +2061,14 @@ export function mysqlTimestamp(date = new Date()) {
 	return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
+export function currencyDecimal(value: number) {
+	if (!Number.isFinite(value)) {
+		throw new Error("Sales Order monetary values must be finite.");
+	}
+	const floatingPointAllowance = Number.EPSILON * Math.max(1, Math.abs(value));
+	return (Math.round((value + floatingPointAllowance) * 100) / 100).toFixed(2);
+}
+
 function financialTimestamp() {
 	return mysqlTimestamp();
 }
@@ -6525,9 +6533,12 @@ export async function createSalesOrder(data: {
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const { items, ...orderData } = data;
+  const { items, subtotal, taxAmount, totalAmount, ...orderData } = data;
   const result = await db.insert(salesOrders).values({
     ...orderData,
+    subtotal: currencyDecimal(subtotal),
+    taxAmount: currencyDecimal(taxAmount),
+    totalAmount: currencyDecimal(totalAmount),
     status: orderData.status ?? "draft",
   });
   const insertId = Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
@@ -6541,11 +6552,11 @@ export async function createSalesOrder(data: {
         feedBatchId: item.feedBatchId ?? null,
         quantity: String(item.quantity),
         unit: item.unit,
-        unitPrice: Math.round(item.unitPrice),
-        subtotal: Math.round(item.subtotal),
+        unitPrice: currencyDecimal(item.unitPrice),
+        subtotal: currencyDecimal(item.subtotal),
         taxRate: String(item.taxRate ?? 15),
-        taxAmount: Math.round(item.taxAmount),
-        totalAmount: Math.round(item.totalAmount),
+        taxAmount: currencyDecimal(item.taxAmount),
+        totalAmount: currencyDecimal(item.totalAmount),
       }))
     );
   }
@@ -6568,7 +6579,14 @@ export async function updateSalesOrder(
 ) {
   const db = await getDb();
   if (!db) return undefined;
-  await db.update(salesOrders).set({ ...data, updatedAt: mysqlTimestamp() }).where(eq(salesOrders.id, id));
+  const { subtotal, taxAmount, totalAmount, ...orderData } = data;
+  await db.update(salesOrders).set({
+    ...orderData,
+    ...(subtotal === undefined ? {} : { subtotal: currencyDecimal(subtotal) }),
+    ...(taxAmount === undefined ? {} : { taxAmount: currencyDecimal(taxAmount) }),
+    ...(totalAmount === undefined ? {} : { totalAmount: currencyDecimal(totalAmount) }),
+    updatedAt: mysqlTimestamp(),
+  }).where(eq(salesOrders.id, id));
   return getSalesOrderById(id);
 }
 
@@ -6618,11 +6636,11 @@ export async function replaceSalesOrderItems(
         feedBatchId: item.feedBatchId ?? null,
         quantity: String(item.quantity),
         unit: item.unit,
-        unitPrice: Math.round(item.unitPrice),
-        subtotal: Math.round(item.subtotal),
+        unitPrice: currencyDecimal(item.unitPrice),
+        subtotal: currencyDecimal(item.subtotal),
         taxRate: String(item.taxRate ?? 15),
-        taxAmount: Math.round(item.taxAmount),
-        totalAmount: Math.round(item.totalAmount),
+        taxAmount: currencyDecimal(item.taxAmount),
+        totalAmount: currencyDecimal(item.totalAmount),
       }))
     );
   }
