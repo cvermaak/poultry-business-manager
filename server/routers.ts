@@ -94,9 +94,22 @@ export const appRouter = router({
         const cookieOptions = getSessionCookieOptions(ctx.req);
         ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
         
+        // Also generate a JWT and return it to the client so it can be
+        // stored client-side (localStorage/sessionStorage) and sent via the
+        // Authorization header. This is required for environments like
+        // incognito/private browsing where cookies may be blocked or
+        // cleared, which would otherwise leave the user unauthenticated
+        // even though login succeeded.
+        const token = generateJWT({
+          userId: user.id,
+          email: user.email || "",
+          role: user.role,
+        });
+        
         return {
           success: true,
           mustChangePassword: user.mustChangePassword,
+          token,
           user: {
             id: user.id,
             name: user.name,
