@@ -2057,8 +2057,12 @@ export async function completeBankReconciliation(reconciliationId: number, compl
 // FINANCIAL ACCOUNTING: PERIOD CLOSE AND FINANCIAL CONTROLS
 // ============================================================================
 
+export function mysqlTimestamp(date = new Date()) {
+	return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
 function financialTimestamp() {
-	return new Date().toISOString().slice(0, 19).replace("T", " ");
+	return mysqlTimestamp();
 }
 
 function financialBusinessDate(value: Date | string) {
@@ -6564,7 +6568,7 @@ export async function updateSalesOrder(
 ) {
   const db = await getDb();
   if (!db) return undefined;
-  await db.update(salesOrders).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(salesOrders.id, id));
+  await db.update(salesOrders).set({ ...data, updatedAt: mysqlTimestamp() }).where(eq(salesOrders.id, id));
   return getSalesOrderById(id);
 }
 
@@ -6574,14 +6578,14 @@ export async function updateSalesOrderStatus(
 ) {
   const db = await getDb();
   if (!db) return undefined;
-  await db.update(salesOrders).set({ status, updatedAt: new Date().toISOString() }).where(eq(salesOrders.id, id));
+  await db.update(salesOrders).set({ status, updatedAt: mysqlTimestamp() }).where(eq(salesOrders.id, id));
   return getSalesOrderById(id);
 }
 
 export async function cancelSalesOrder(id: number) {
   const db = await getDb();
   if (!db) return undefined;
-  await db.update(salesOrders).set({ status: "cancelled", updatedAt: new Date().toISOString() }).where(eq(salesOrders.id, id));
+  await db.update(salesOrders).set({ status: "cancelled", updatedAt: mysqlTimestamp() }).where(eq(salesOrders.id, id));
   return getSalesOrderById(id);
 }
 
