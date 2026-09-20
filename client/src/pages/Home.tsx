@@ -4,7 +4,7 @@ import { Activity, TrendingUp, Users, DollarSign, Bell, AlertCircle, Clock, Chec
 import { Skeleton } from "@/components/ui/skeleton";
 import RemindersWidget from "@/components/RemindersWidget";
 import FeedAlertsWidget from "@/components/FeedAlertsWidget";
-import InvoiceAgingWidget from "@/components/InvoiceAgingWidget";
+import FinancialAttentionWidget from "@/components/FinancialAttentionWidget";
 
 export default function Home() {
   const { data: analytics, isLoading } = trpc.analytics.dashboard.useQuery();
@@ -163,9 +163,9 @@ export default function Home() {
         <Card className="col-span-full">
           <FeedAlertsWidget />
         </Card>
-        <Card className="col-span-full">
-          <InvoiceAgingWidget />
-        </Card>
+        <div className="col-span-full">
+          <FinancialAttentionWidget />
+        </div>
       </div>
     </div>
   );

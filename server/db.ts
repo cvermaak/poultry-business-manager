@@ -6227,35 +6227,47 @@ export async function recordMillInvoicePayment(id: number, data: {
 
 export async function getMillInvoiceAgingSummary() {
   const db = await getDb();
-  if (!db) return { outstanding: 0, overdue: 0, paid: 0, totalOutstandingAmount: 0, totalOverdueAmount: 0 };
+  if (!db) return { outstanding: 0, overdue: 0, paid: 0, dueSoonCount: 0, totalOutstandingAmount: 0, totalOverdueAmount: 0, dueSoonAmount: 0 };
 
   const today = new Date().toISOString().slice(0, 10);
+  const dueSoonDate = new Date(`${today}T00:00:00Z`);
+  dueSoonDate.setUTCDate(dueSoonDate.getUTCDate() + 7);
+  const dueSoonCutoff = dueSoonDate.toISOString().slice(0, 10);
 
   const rows = await db
     .select({
       status: millInvoices.status,
       dueDate: millInvoices.dueDate,
       amountIncl: millInvoices.amountIncl,
+      balanceDue: millInvoices.balanceDue,
     })
     .from(millInvoices);
 
   let outstanding = 0, overdue = 0, paid = 0;
-  let totalOutstandingAmount = 0, totalOverdueAmount = 0;
+  let dueSoonCount = 0;
+  let totalOutstandingAmount = 0, totalOverdueAmount = 0, dueSoonAmount = 0;
 
   for (const row of rows) {
-    const amount = parseFloat(String(row.amountIncl) || '0');
+    const amount = parseFloat(String(row.balanceDue ?? row.amountIncl) || '0');
     if (row.status === 'paid') {
       paid++;
+    } else if (row.status === 'disputed') {
+      continue;
     } else if (row.dueDate && row.dueDate < today) {
       overdue++;
       totalOverdueAmount += amount;
+      totalOutstandingAmount += amount;
+    } else if (row.dueDate && row.dueDate <= dueSoonCutoff) {
+      dueSoonCount++;
+      dueSoonAmount += amount;
+      totalOutstandingAmount += amount;
     } else {
       outstanding++;
       totalOutstandingAmount += amount;
     }
   }
 
-  return { outstanding, overdue, paid, totalOutstandingAmount, totalOverdueAmount };
+  return { outstanding, overdue, paid, dueSoonCount, totalOutstandingAmount, totalOverdueAmount, dueSoonAmount };
 }
 
 // ============================================================================
@@ -6397,9 +6409,12 @@ export async function listFeedDeliveryInvoices(filters?: {
 
 export async function getCustomerInvoiceAgingSummary() {
   const db = await getDb();
-  if (!db) return { draft: 0, sent: 0, overdue: 0, paid: 0, totalOutstanding: 0, totalOverdue: 0 };
+  if (!db) return { draft: 0, sent: 0, overdue: 0, paid: 0, dueSoonCount: 0, totalOutstanding: 0, totalOverdue: 0, dueSoonAmount: 0 };
 
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueSoonCutoff = new Date(today);
+  dueSoonCutoff.setDate(dueSoonCutoff.getDate() + 7);
 
   const rows = await db
     .select({
@@ -6410,8 +6425,8 @@ export async function getCustomerInvoiceAgingSummary() {
     })
     .from(invoices);
 
-  let draft = 0, sent = 0, overdue = 0, paid = 0;
-  let totalOutstanding = 0, totalOverdue = 0;
+  let draft = 0, sent = 0, overdue = 0, paid = 0, dueSoonCount = 0;
+  let totalOutstanding = 0, totalOverdue = 0, dueSoonAmount = 0;
 
   for (const row of rows) {
     const balance = parseFloat(String(row.balanceDue) || '0');
@@ -6420,11 +6435,16 @@ export async function getCustomerInvoiceAgingSummary() {
       paid++;
     } else if (row.status === 'cancelled') {
       // skip
-    } else if (due && due < today && (row.status as string) !== 'paid') {
-      overdue++;
-      totalOverdue += balance;
     } else if (row.status === 'draft') {
       draft++;
+      totalOutstanding += balance;
+    } else if (due && due < today) {
+      overdue++;
+      totalOverdue += balance;
+      totalOutstanding += balance;
+    } else if (due && due <= dueSoonCutoff) {
+      dueSoonCount++;
+      dueSoonAmount += balance;
       totalOutstanding += balance;
     } else {
       sent++;
@@ -6432,7 +6452,7 @@ export async function getCustomerInvoiceAgingSummary() {
     }
   }
 
-  return { draft, sent, overdue, paid, totalOutstanding, totalOverdue };
+  return { draft, sent, overdue, paid, dueSoonCount, totalOutstanding, totalOverdue, dueSoonAmount };
 }
 
 

@@ -1,0 +1,388 @@
+diff --git a/client/src/components/FinancialAttentionWidget.tsx b/client/src/components/FinancialAttentionWidget.tsx
+new file mode 100644
+index 0000000..b36d996
+--- /dev/null
++++ b/client/src/components/FinancialAttentionWidget.tsx
+@@ -0,0 +1,148 @@
++import { trpc } from "@/lib/trpc";
++import { Badge } from "@/components/ui/badge";
++import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
++import { AlertTriangle, CheckCircle2, Clock3, Landmark, Loader2 } from "lucide-react";
++import { Link } from "wouter";
++
++type AttentionItem = {
++  id: string;
++  heading: string;
++  description: string;
++  amount: number;
++  count: number;
++  href: string;
++  tone: "overdue" | "upcoming";
++};
++
++const formatCurrency = (value: unknown) =>
++  new Intl.NumberFormat("en-ZA", {
++    style: "currency",
++    currency: "ZAR",
++    minimumFractionDigits: 2,
++    maximumFractionDigits: 2,
++  }).format(Number(value ?? 0));
++
++export default function FinancialAttentionWidget() {
++  const { data: aging, isLoading, isError } = trpc.invoices.getInvoiceAgingSummary.useQuery();
++
++  const customer = aging?.customer ?? {
++    overdue: 0,
++    totalOverdue: 0,
++    dueSoonCount: 0,
++    dueSoonAmount: 0,
++  };
++  const supplier = aging?.mill ?? {
++    overdue: 0,
++    totalOverdueAmount: 0,
++    dueSoonCount: 0,
++    dueSoonAmount: 0,
++  };
++
++  const attentionItems: AttentionItem[] = [
++    {
++      id: "customer-overdue",
++      heading: "Customer invoices overdue",
++      description: "Collection follow-up required",
++      amount: Number(customer.totalOverdue ?? 0),
++      count: Number(customer.overdue ?? 0),
++      href: "/sales/invoices",
++      tone: "overdue" as const,
++    },
++    {
++      id: "customer-due-soon",
++      heading: "Customer invoices due ≤7 days",
++      description: "Plan collection follow-up",
++      amount: Number(customer.dueSoonAmount ?? 0),
++      count: Number(customer.dueSoonCount ?? 0),
++      href: "/sales/invoices",
++      tone: "upcoming" as const,
++    },
++    {
++      id: "supplier-overdue",
++      heading: "Supplier invoices overdue",
++      description: "Payment or supplier follow-up required",
++      amount: Number(supplier.totalOverdueAmount ?? 0),
++      count: Number(supplier.overdue ?? 0),
++      href: "/invoicing/mill-invoices",
++      tone: "overdue" as const,
++    },
++    {
++      id: "supplier-due-soon",
++      heading: "Supplier invoices due ≤7 days",
++      description: "Plan payment requirements",
++      amount: Number(supplier.dueSoonAmount ?? 0),
++      count: Number(supplier.dueSoonCount ?? 0),
++      href: "/invoicing/mill-invoices",
++      tone: "upcoming" as const,
++    },
++  ].filter((item) => item.count > 0 && item.amount > 0);
++
++  return (
++    <Card>
++      <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
++        <div className="space-y-1">
++          <CardTitle className="flex items-center gap-2 text-base">
++            <Landmark className="h-4 w-4 text-primary" />
++            Financial attention
++          </CardTitle>
++          <CardDescription>
++            Only customer collections and supplier payments needing follow-up are shown here.
++          </CardDescription>
++        </div>
++        <Link href="/finance?tab=receivables" className="shrink-0 text-sm font-medium text-primary hover:underline">
++          View Finance →
++        </Link>
++      </CardHeader>
++      <CardContent>
++        {isLoading ? (
++          <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
++            <Loader2 className="h-4 w-4 animate-spin" /> Loading financial attention…
++          </div>
++        ) : isError ? (
++          <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
++            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
++            <span>Financial attention is temporarily unavailable. Use Finance to review receivables and payables.</span>
++          </div>
++        ) : attentionItems.length === 0 ? (
++          <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
++            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
++            <div>
++              <p className="font-medium">No customer or supplier invoice actions need attention.</p>
++              <p className="text-xs text-emerald-800/80">There are no overdue invoices or invoices due within the next seven days.</p>
++            </div>
++          </div>
++        ) : (
++          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
++            {attentionItems.map((item) => {
++              const isOverdue = item.tone === "overdue";
++              const Icon = isOverdue ? AlertTriangle : Clock3;
++              return (
++                <Link
++                  key={item.id}
++                  href={item.href}
++                  className={`rounded-lg border p-3 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${
++                    isOverdue
++                      ? "border-rose-200 bg-rose-50 hover:bg-rose-100"
++                      : "border-amber-200 bg-amber-50 hover:bg-amber-100"
++                  }`}
++                >
++                  <div className="flex items-start justify-between gap-2">
++                    <Icon className={`h-4 w-4 shrink-0 ${isOverdue ? "text-rose-600" : "text-amber-600"}`} />
++                    <Badge variant="outline" className={isOverdue ? "border-rose-300 text-rose-700" : "border-amber-300 text-amber-700"}>
++                      {item.count} {item.count === 1 ? "invoice" : "invoices"}
++                    </Badge>
++                  </div>
++                  <p className="mt-3 text-sm font-semibold leading-snug">{item.heading}</p>
++                  <p className={`mt-1 text-xl font-bold tabular-nums ${isOverdue ? "text-rose-700" : "text-amber-700"}`}>
++                    {formatCurrency(item.amount)}
++                  </p>
++                  <p className="mt-1 text-xs text-muted-foreground">{item.description}</p>
++                </Link>
++              );
++            })}
++          </div>
++        )}
++      </CardContent>
++    </Card>
++  );
++}
+diff --git a/client/src/components/InvoiceAgingWidget.tsx b/client/src/components/InvoiceAgingWidget.tsx
+index cfb4681..256fbe8 100644
+--- a/client/src/components/InvoiceAgingWidget.tsx
++++ b/client/src/components/InvoiceAgingWidget.tsx
+@@ -37,8 +37,8 @@ export default function InvoiceAgingWidget() {
+     );
+   }
+ 
+-  const customer = aging?.customer ?? { totalOutstanding: 0, overdueCount: 0, overdueAmount: 0, dueSoonCount: 0 };
+-  const mill = aging?.mill ?? { totalOutstanding: 0, overdueCount: 0, dueSoonCount: 0, dueSoonAmount: 0 };
++  const customer = aging?.customer ?? { totalOutstanding: 0, overdue: 0, totalOverdue: 0, dueSoonCount: 0, dueSoonAmount: 0 };
++  const mill = aging?.mill ?? { totalOutstandingAmount: 0, overdue: 0, totalOverdueAmount: 0, dueSoonCount: 0, dueSoonAmount: 0 };
+ 
+   return (
+     <Card>
+@@ -64,10 +64,10 @@ export default function InvoiceAgingWidget() {
+               <p className="text-xs text-muted-foreground">Outstanding</p>
+               <p className="text-sm font-bold">{fmt(customer.totalOutstanding)}</p>
+             </div>
+-            <div className={`rounded-lg p-2 text-center ${(customer.overdueCount ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
++            <div className={`rounded-lg p-2 text-center ${(customer.overdue ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
+               <p className="text-xs text-muted-foreground">Overdue</p>
+-              <p className={`text-sm font-bold ${(customer.overdueCount ?? 0) > 0 ? "text-red-600" : ""}`}>
+-                {customer.overdueCount ?? 0}
++              <p className={`text-sm font-bold ${(customer.overdue ?? 0) > 0 ? "text-red-600" : ""}`}>
++                {customer.overdue ?? 0}
+               </p>
+             </div>
+             <div className={`rounded-lg p-2 text-center ${(customer.dueSoonCount ?? 0) > 0 ? "bg-yellow-50 dark:bg-yellow-950/20" : "bg-muted/40"}`}>
+@@ -94,12 +94,12 @@ export default function InvoiceAgingWidget() {
+           <div className="grid grid-cols-3 gap-2">
+             <div className="bg-muted/40 rounded-lg p-2 text-center">
+               <p className="text-xs text-muted-foreground">Outstanding</p>
+-              <p className="text-sm font-bold">{fmt(mill.totalOutstanding)}</p>
++              <p className="text-sm font-bold">{fmt(mill.totalOutstandingAmount)}</p>
+             </div>
+-            <div className={`rounded-lg p-2 text-center ${(mill.overdueCount ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
++            <div className={`rounded-lg p-2 text-center ${(mill.overdue ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
+               <p className="text-xs text-muted-foreground">Overdue</p>
+-              <p className={`text-sm font-bold ${(mill.overdueCount ?? 0) > 0 ? "text-red-600" : ""}`}>
+-                {mill.overdueCount ?? 0}
++              <p className={`text-sm font-bold ${(mill.overdue ?? 0) > 0 ? "text-red-600" : ""}`}>
++                {mill.overdue ?? 0}
+               </p>
+             </div>
+             <div className={`rounded-lg p-2 text-center ${(mill.dueSoonCount ?? 0) > 0 ? "bg-orange-50 dark:bg-orange-950/20" : "bg-muted/40"}`}>
+@@ -109,13 +109,13 @@ export default function InvoiceAgingWidget() {
+               </p>
+             </div>
+           </div>
+-          {(mill.overdueCount ?? 0) > 0 && (
++          {(mill.overdue ?? 0) > 0 && (
+             <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600 bg-red-50 dark:bg-red-950/20 rounded px-2 py-1">
+               <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+-              {mill.overdueCount} mill invoice{(mill.overdueCount ?? 0) > 1 ? "s" : ""} overdue — action required
++              {mill.overdue} mill invoice{(mill.overdue ?? 0) > 1 ? "s" : ""} overdue — action required
+             </div>
+           )}
+-          {(mill.dueSoonCount ?? 0) > 0 && (mill.overdueCount ?? 0) === 0 && (
++          {(mill.dueSoonCount ?? 0) > 0 && (mill.overdue ?? 0) === 0 && (
+             <div className="mt-2 flex items-center gap-1.5 text-xs text-orange-600 bg-orange-50 dark:bg-orange-950/20 rounded px-2 py-1">
+               <Clock className="w-3 h-3 flex-shrink-0" />
+               {mill.dueSoonCount} mill invoice{(mill.dueSoonCount ?? 0) > 1 ? "s" : ""} due within 7 days
+diff --git a/client/src/pages/Home.tsx b/client/src/pages/Home.tsx
+index 1aae8b0..9a5543a 100644
+--- a/client/src/pages/Home.tsx
++++ b/client/src/pages/Home.tsx
+@@ -4,7 +4,7 @@ import { Activity, TrendingUp, Users, DollarSign, Bell, AlertCircle, Clock, Chec
+ import { Skeleton } from "@/components/ui/skeleton";
+ import RemindersWidget from "@/components/RemindersWidget";
+ import FeedAlertsWidget from "@/components/FeedAlertsWidget";
+-import InvoiceAgingWidget from "@/components/InvoiceAgingWidget";
++import FinancialAttentionWidget from "@/components/FinancialAttentionWidget";
+ 
+ export default function Home() {
+   const { data: analytics, isLoading } = trpc.analytics.dashboard.useQuery();
+@@ -163,9 +163,9 @@ export default function Home() {
+         <Card className="col-span-full">
+           <FeedAlertsWidget />
+         </Card>
+-        <Card className="col-span-full">
+-          <InvoiceAgingWidget />
+-        </Card>
++        <div className="col-span-full">
++          <FinancialAttentionWidget />
++        </div>
+       </div>
+     </div>
+   );
+diff --git a/server/dashboard-financial-attention-ui.test.ts b/server/dashboard-financial-attention-ui.test.ts
+new file mode 100644
+index 0000000..a4fa532
+--- /dev/null
++++ b/server/dashboard-financial-attention-ui.test.ts
+@@ -0,0 +1,29 @@
++import { readFileSync } from "node:fs";
++import { resolve } from "node:path";
++import { describe, expect, it } from "vitest";
++
++const homePagePath = resolve(process.cwd(), "client/src/pages/Home.tsx");
++const widgetPath = resolve(process.cwd(), "client/src/components/FinancialAttentionWidget.tsx");
++const databasePath = resolve(process.cwd(), "server/db.ts");
++
++describe("dashboard financial attention", () => {
++  it("replaces detailed dashboard ageing with action-focused alerts and finance navigation", () => {
++    const homePage = readFileSync(homePagePath, "utf8");
++    const widget = readFileSync(widgetPath, "utf8");
++    const database = readFileSync(databasePath, "utf8");
++
++    expect(homePage).toContain('import FinancialAttentionWidget from "@/components/FinancialAttentionWidget";');
++    expect(homePage).toContain("<FinancialAttentionWidget />");
++    expect(homePage).not.toContain("<InvoiceAgingWidget />");
++
++    expect(widget).toContain("Financial attention");
++    expect(widget).toContain("No customer or supplier invoice actions need attention.");
++    expect(widget).toContain('href="/finance?tab=receivables"');
++    expect(widget).toContain("Customer invoices overdue");
++    expect(widget).toContain("Supplier invoices due ≤7 days");
++    expect(widget).not.toContain("Outstanding");
++
++    expect(database).toContain("dueSoonCount");
++    expect(database).toContain("dueSoonAmount");
++  });
++});
+diff --git a/server/db.ts b/server/db.ts
+index 06c2722..a376858 100644
+--- a/server/db.ts
++++ b/server/db.ts
+@@ -6227,35 +6227,47 @@ export async function recordMillInvoicePayment(id: number, data: {
+ 
+ export async function getMillInvoiceAgingSummary() {
+   const db = await getDb();
+-  if (!db) return { outstanding: 0, overdue: 0, paid: 0, totalOutstandingAmount: 0, totalOverdueAmount: 0 };
++  if (!db) return { outstanding: 0, overdue: 0, paid: 0, dueSoonCount: 0, totalOutstandingAmount: 0, totalOverdueAmount: 0, dueSoonAmount: 0 };
+ 
+   const today = new Date().toISOString().slice(0, 10);
++  const dueSoonDate = new Date(`${today}T00:00:00Z`);
++  dueSoonDate.setUTCDate(dueSoonDate.getUTCDate() + 7);
++  const dueSoonCutoff = dueSoonDate.toISOString().slice(0, 10);
+ 
+   const rows = await db
+     .select({
+       status: millInvoices.status,
+       dueDate: millInvoices.dueDate,
+       amountIncl: millInvoices.amountIncl,
++      balanceDue: millInvoices.balanceDue,
+     })
+     .from(millInvoices);
+ 
+   let outstanding = 0, overdue = 0, paid = 0;
+-  let totalOutstandingAmount = 0, totalOverdueAmount = 0;
++  let dueSoonCount = 0;
++  let totalOutstandingAmount = 0, totalOverdueAmount = 0, dueSoonAmount = 0;
+ 
+   for (const row of rows) {
+-    const amount = parseFloat(String(row.amountIncl) || '0');
++    const amount = parseFloat(String(row.balanceDue ?? row.amountIncl) || '0');
+     if (row.status === 'paid') {
+       paid++;
++    } else if (row.status === 'disputed') {
++      continue;
+     } else if (row.dueDate && row.dueDate < today) {
+       overdue++;
+       totalOverdueAmount += amount;
++      totalOutstandingAmount += amount;
++    } else if (row.dueDate && row.dueDate <= dueSoonCutoff) {
++      dueSoonCount++;
++      dueSoonAmount += amount;
++      totalOutstandingAmount += amount;
+     } else {
+       outstanding++;
+       totalOutstandingAmount += amount;
+     }
+   }
+ 
+-  return { outstanding, overdue, paid, totalOutstandingAmount, totalOverdueAmount };
++  return { outstanding, overdue, paid, dueSoonCount, totalOutstandingAmount, totalOverdueAmount, dueSoonAmount };
+ }
+ 
+ // ============================================================================
+@@ -6397,9 +6409,12 @@ export async function listFeedDeliveryInvoices(filters?: {
+ 
+ export async function getCustomerInvoiceAgingSummary() {
+   const db = await getDb();
+-  if (!db) return { draft: 0, sent: 0, overdue: 0, paid: 0, totalOutstanding: 0, totalOverdue: 0 };
++  if (!db) return { draft: 0, sent: 0, overdue: 0, paid: 0, dueSoonCount: 0, totalOutstanding: 0, totalOverdue: 0, dueSoonAmount: 0 };
+ 
+   const today = new Date();
++  today.setHours(0, 0, 0, 0);
++  const dueSoonCutoff = new Date(today);
++  dueSoonCutoff.setDate(dueSoonCutoff.getDate() + 7);
+ 
+   const rows = await db
+     .select({
+@@ -6410,8 +6425,8 @@ export async function getCustomerInvoiceAgingSummary() {
+     })
+     .from(invoices);
+ 
+-  let draft = 0, sent = 0, overdue = 0, paid = 0;
+-  let totalOutstanding = 0, totalOverdue = 0;
++  let draft = 0, sent = 0, overdue = 0, paid = 0, dueSoonCount = 0;
++  let totalOutstanding = 0, totalOverdue = 0, dueSoonAmount = 0;
+ 
+   for (const row of rows) {
+     const balance = parseFloat(String(row.balanceDue) || '0');
+@@ -6420,19 +6435,24 @@ export async function getCustomerInvoiceAgingSummary() {
+       paid++;
+     } else if (row.status === 'cancelled') {
+       // skip
+-    } else if (due && due < today && (row.status as string) !== 'paid') {
+-      overdue++;
+-      totalOverdue += balance;
+     } else if (row.status === 'draft') {
+       draft++;
+       totalOutstanding += balance;
++    } else if (due && due < today) {
++      overdue++;
++      totalOverdue += balance;
++      totalOutstanding += balance;
++    } else if (due && due <= dueSoonCutoff) {
++      dueSoonCount++;
++      dueSoonAmount += balance;
++      totalOutstanding += balance;
+     } else {
+       sent++;
+       totalOutstanding += balance;
+     }
+   }
+ 
+-  return { draft, sent, overdue, paid, totalOutstanding, totalOverdue };
++  return { draft, sent, overdue, paid, dueSoonCount, totalOutstanding, totalOverdue, dueSoonAmount };
+ }
+ 
+ 

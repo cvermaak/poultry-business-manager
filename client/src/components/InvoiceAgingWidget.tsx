@@ -37,8 +37,8 @@ export default function InvoiceAgingWidget() {
     );
   }
 
-  const customer = aging?.customer ?? { totalOutstanding: 0, overdueCount: 0, overdueAmount: 0, dueSoonCount: 0 };
-  const mill = aging?.mill ?? { totalOutstanding: 0, overdueCount: 0, dueSoonCount: 0, dueSoonAmount: 0 };
+  const customer = aging?.customer ?? { totalOutstanding: 0, overdue: 0, totalOverdue: 0, dueSoonCount: 0, dueSoonAmount: 0 };
+  const mill = aging?.mill ?? { totalOutstandingAmount: 0, overdue: 0, totalOverdueAmount: 0, dueSoonCount: 0, dueSoonAmount: 0 };
 
   return (
     <Card>
@@ -64,10 +64,10 @@ export default function InvoiceAgingWidget() {
               <p className="text-xs text-muted-foreground">Outstanding</p>
               <p className="text-sm font-bold">{fmt(customer.totalOutstanding)}</p>
             </div>
-            <div className={`rounded-lg p-2 text-center ${(customer.overdueCount ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
+            <div className={`rounded-lg p-2 text-center ${(customer.overdue ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
               <p className="text-xs text-muted-foreground">Overdue</p>
-              <p className={`text-sm font-bold ${(customer.overdueCount ?? 0) > 0 ? "text-red-600" : ""}`}>
-                {customer.overdueCount ?? 0}
+              <p className={`text-sm font-bold ${(customer.overdue ?? 0) > 0 ? "text-red-600" : ""}`}>
+                {customer.overdue ?? 0}
               </p>
             </div>
             <div className={`rounded-lg p-2 text-center ${(customer.dueSoonCount ?? 0) > 0 ? "bg-yellow-50 dark:bg-yellow-950/20" : "bg-muted/40"}`}>
@@ -94,12 +94,12 @@ export default function InvoiceAgingWidget() {
           <div className="grid grid-cols-3 gap-2">
             <div className="bg-muted/40 rounded-lg p-2 text-center">
               <p className="text-xs text-muted-foreground">Outstanding</p>
-              <p className="text-sm font-bold">{fmt(mill.totalOutstanding)}</p>
+              <p className="text-sm font-bold">{fmt(mill.totalOutstandingAmount)}</p>
             </div>
-            <div className={`rounded-lg p-2 text-center ${(mill.overdueCount ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
+            <div className={`rounded-lg p-2 text-center ${(mill.overdue ?? 0) > 0 ? "bg-red-50 dark:bg-red-950/20" : "bg-muted/40"}`}>
               <p className="text-xs text-muted-foreground">Overdue</p>
-              <p className={`text-sm font-bold ${(mill.overdueCount ?? 0) > 0 ? "text-red-600" : ""}`}>
-                {mill.overdueCount ?? 0}
+              <p className={`text-sm font-bold ${(mill.overdue ?? 0) > 0 ? "text-red-600" : ""}`}>
+                {mill.overdue ?? 0}
               </p>
             </div>
             <div className={`rounded-lg p-2 text-center ${(mill.dueSoonCount ?? 0) > 0 ? "bg-orange-50 dark:bg-orange-950/20" : "bg-muted/40"}`}>
@@ -109,13 +109,13 @@ export default function InvoiceAgingWidget() {
               </p>
             </div>
           </div>
-          {(mill.overdueCount ?? 0) > 0 && (
+          {(mill.overdue ?? 0) > 0 && (
             <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600 bg-red-50 dark:bg-red-950/20 rounded px-2 py-1">
               <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-              {mill.overdueCount} mill invoice{(mill.overdueCount ?? 0) > 1 ? "s" : ""} overdue — action required
+              {mill.overdue} mill invoice{(mill.overdue ?? 0) > 1 ? "s" : ""} overdue — action required
             </div>
           )}
-          {(mill.dueSoonCount ?? 0) > 0 && (mill.overdueCount ?? 0) === 0 && (
+          {(mill.dueSoonCount ?? 0) > 0 && (mill.overdue ?? 0) === 0 && (
             <div className="mt-2 flex items-center gap-1.5 text-xs text-orange-600 bg-orange-50 dark:bg-orange-950/20 rounded px-2 py-1">
               <Clock className="w-3 h-3 flex-shrink-0" />
               {mill.dueSoonCount} mill invoice{(mill.dueSoonCount ?? 0) > 1 ? "s" : ""} due within 7 days
