@@ -2044,7 +2044,9 @@ export const appRouter = router({
                   quantity: Number(invoice.totalBirds || 1),
                   pricePerUnit: parseFloat(invoice.pricePerKgExcl?.toString() || '0'),
                   weight: parseFloat(invoice.totalWeight?.toString() || '0'),
-                  vatPercentage: typeof invoice.vatPercentage === 'number' ? invoice.vatPercentage : 15,
+                  vatPercentage: invoice.vatPercentage !== null && invoice.vatPercentage !== undefined
+                    ? parseFloat(invoice.vatPercentage.toString())
+                    : 15,
                 },
               ];
 

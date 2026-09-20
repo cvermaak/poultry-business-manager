@@ -228,6 +228,17 @@ export function Invoices() {
     return `R ${num.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
+  const formatVatRate = (value: unknown, fallback = "15.00%") => {
+    if (value === null || value === undefined || value === "") return fallback;
+    const rate = Number(value);
+    return Number.isFinite(rate) ? `${rate.toFixed(2)}%` : fallback;
+  };
+
+  const getInvoiceVatLabel = (invoice: any) =>
+    invoice.vatPercentage === null || invoice.vatPercentage === undefined
+      ? "Mixed rates"
+      : formatVatRate(invoice.vatPercentage);
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "draft": return <Badge variant="outline">Draft</Badge>;
@@ -679,7 +690,7 @@ export function Invoices() {
                             <TableCell className="text-right">{parseFloat(item.quantity || '1').toFixed(2)}</TableCell>
                             <TableCell className="text-right">{formatCurrency((item.unitPrice || 0) / 100)}</TableCell>
                             <TableCell className="text-right">{parseFloat(item.discountPercent || '0').toFixed(2)}%</TableCell>
-                            <TableCell className="text-right">{parseFloat(item.taxRate || '15').toFixed(2)}%</TableCell>
+                            <TableCell className="text-right">{formatVatRate(item.taxRate)}</TableCell>
                             <TableCell className="text-right">{formatCurrency((item.totalAmount || 0) / 100)}</TableCell>
                           </TableRow>
                         ))
@@ -694,7 +705,7 @@ export function Invoices() {
                           <TableCell className="text-right">{viewInvoice.totalBirds || "—"}</TableCell>
                           <TableCell className="text-right">{formatCurrency(viewInvoice.pricePerKgExcl || 0)}</TableCell>
                           <TableCell className="text-right">0%</TableCell>
-                          <TableCell className="text-right">{viewInvoice.vatPercentage || 15}%</TableCell>
+                          <TableCell className="text-right">{formatVatRate(viewInvoice.vatPercentage)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(viewInvoice.inclusiveTotal || 0)}</TableCell>
                         </TableRow>
                       )}
@@ -713,7 +724,7 @@ export function Invoices() {
                     <span>{formatCurrency(viewInvoice.exclusiveTotal || 0)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">VAT ({viewInvoice.vatPercentage || 15}%)</span>
+                    <span className="text-muted-foreground">VAT ({getInvoiceVatLabel(viewInvoice)})</span>
                     <span>{formatCurrency(viewInvoice.vatAmount || 0)}</span>
                   </div>
                   <Separator />

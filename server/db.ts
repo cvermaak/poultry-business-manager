@@ -2069,6 +2069,18 @@ export function currencyDecimal(value: number) {
 	return (Math.round((value + floatingPointAllowance) * 100) / 100).toFixed(2);
 }
 
+export function resolveInvoiceVatRate(value: unknown, fallback = 15) {
+	if (value === null || value === undefined || value === "") return fallback;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function getUniformInvoiceVatPercentage(items: Array<{ taxRate?: unknown }>) {
+	if (items.length === 0) return "15.00";
+	const rates = new Set(items.map((item) => resolveInvoiceVatRate(item.taxRate).toFixed(2)));
+	return rates.size === 1 ? [...rates][0] : null;
+}
+
 function financialTimestamp() {
 	return mysqlTimestamp();
 }
@@ -6750,7 +6762,7 @@ export async function createInvoiceFromSalesOrder(data: {
     exclusiveTotal: subtotal,
     vatAmount: taxAmount,
     inclusiveTotal: totalAmount,
-    vatPercentage: '15.00',
+    vatPercentage: getUniformInvoiceVatPercentage(items),
     status: 'draft',
     notes: data.notes ?? null,
     createdBy: data.createdBy,
@@ -6765,7 +6777,7 @@ export async function createInvoiceFromSalesOrder(data: {
       items.map((item) => {
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || 0;
-        const taxRate = Number(item.taxRate) || 15;
+        const taxRate = resolveInvoiceVatRate(item.taxRate);
         const sub = qty * price;
         const tax = sub * (taxRate / 100);
         const total = sub + tax;
