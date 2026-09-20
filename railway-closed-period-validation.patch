@@ -1,0 +1,404 @@
+diff --git a/client/src/components/BankReconciliationPanel.tsx b/client/src/components/BankReconciliationPanel.tsx
+index aad9111..f24995d 100644
+--- a/client/src/components/BankReconciliationPanel.tsx
++++ b/client/src/components/BankReconciliationPanel.tsx
+@@ -1,5 +1,6 @@
+ import { useEffect, useMemo, useState } from "react";
+ import { trpc } from "@/lib/trpc";
++import { formatFinancialMutationError } from "@/lib/financial-period-errors";
+ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+ import { Badge } from "@/components/ui/badge";
+ import { Button } from "@/components/ui/button";
+@@ -80,7 +81,7 @@ export function BankReconciliationPanel({ accounts }: { accounts: AccountOption[
+   };
+   const mutationOptions = {
+     onSuccess: () => { setError(null); refresh(); },
+-    onError: (mutationError: Error) => setError(mutationError.message),
++    onError: (mutationError: Error) => setError(formatFinancialMutationError(mutationError, "Bank Reconciliation action could not be completed")),
+   };
+   const create = trpc.bankReconciliation.create.useMutation({
+     ...mutationOptions,
+diff --git a/client/src/components/PeriodClosePanel.tsx b/client/src/components/PeriodClosePanel.tsx
+index 94f7cde..4d45955 100644
+--- a/client/src/components/PeriodClosePanel.tsx
++++ b/client/src/components/PeriodClosePanel.tsx
+@@ -1,4 +1,5 @@
+ import { trpc } from "@/lib/trpc";
++import { formatFinancialMutationError } from "@/lib/financial-period-errors";
+ import { useEffect, useState } from "react";
+ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+ import { Badge } from "@/components/ui/badge";
+@@ -76,7 +77,10 @@ export function PeriodClosePanel() {
+   };
+ 	const mutationOptions = {
+ 		onSuccess: () => { setError(null); refresh(); },
+-		onError: (mutationError: unknown) => setError(mutationError instanceof Error ? mutationError.message : "The financial control action could not be completed."),
++		onError: (mutationError: unknown) => setError(formatFinancialMutationError(
++			mutationError instanceof Error ? mutationError : undefined,
++			"Financial control action could not be completed",
++		)),
+ 	};
+   const create = trpc.periodClose.create.useMutation({
+     ...mutationOptions,
+diff --git a/client/src/lib/financial-period-errors.ts b/client/src/lib/financial-period-errors.ts
+new file mode 100644
+index 0000000..8a23f93
+--- /dev/null
++++ b/client/src/lib/financial-period-errors.ts
+@@ -0,0 +1,44 @@
++import {
++  isClosedFinancialPeriodError,
++  removeFinancialPeriodErrorPrefix,
++} from "@shared/financial-period-errors";
++
++type ErrorWithMessage = {
++  message?: unknown;
++};
++
++export type FinancialMutationErrorPresentation = {
++  title: string;
++  description: string;
++};
++
++export function presentFinancialMutationError(
++  error: ErrorWithMessage | null | undefined,
++  fallbackTitle: string,
++): FinancialMutationErrorPresentation {
++  const message = typeof error?.message === "string" && error.message.trim()
++    ? error.message.trim()
++    : "Please try again or contact an administrator if the problem continues.";
++
++  if (isClosedFinancialPeriodError(message)) {
++    return {
++      title: "Posting blocked — financial period is closed",
++      description: removeFinancialPeriodErrorPrefix(message),
++    };
++  }
++
++  return {
++    title: fallbackTitle,
++    description: message,
++  };
++}
++
++export function formatFinancialMutationError(
++  error: ErrorWithMessage | null | undefined,
++  fallbackTitle: string,
++) {
++  const presentation = presentFinancialMutationError(error, fallbackTitle);
++  return presentation.title === fallbackTitle
++    ? presentation.description
++    : `${presentation.title}. ${presentation.description}`;
++}
+diff --git a/client/src/pages/Finance.tsx b/client/src/pages/Finance.tsx
+index 00cf124..73a8594 100644
+--- a/client/src/pages/Finance.tsx
++++ b/client/src/pages/Finance.tsx
+@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
+ import { useSearch } from "wouter";
+ import { trpc } from "@/lib/trpc";
+ import { buildJournalListInput, resolveFinanceNavigation } from "@/lib/finance-navigation";
++import { formatFinancialMutationError } from "@/lib/financial-period-errors";
+ import { BankReconciliationPanel } from "@/components/BankReconciliationPanel";
+ import { PeriodClosePanel } from "@/components/PeriodClosePanel";
+ import { Button } from "@/components/ui/button";
+@@ -207,7 +208,7 @@ export default function Finance() {
+       setJournalDialogOpen(false); setJournalError(null);
+       setJournalDraft({ entryDate: `${today}T12:00`, description: "", sourceType: "manual_journal", sourceId: "", lines: [emptyJournalLine(), emptyJournalLine()] });
+     },
+-    onError: (error) => setJournalError(error.message),
++    onError: (error) => setJournalError(formatFinancialMutationError(error, "Journal could not be posted")),
+   });
+ 
+   const isLoading = profitAndLoss.isLoading || agedReceivables.isLoading || agedPayables.isLoading || cashFlowStatement.isLoading || trialBalance.isLoading || balanceSheet.isLoading;
+diff --git a/client/src/pages/Invoices.tsx b/client/src/pages/Invoices.tsx
+index c83ec97..7b1883d 100644
+--- a/client/src/pages/Invoices.tsx
++++ b/client/src/pages/Invoices.tsx
+@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
+ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
++import { formatFinancialMutationError } from "@/lib/financial-period-errors";
+ import { toast } from "sonner";
+ import { BookOpenCheck, Download, Plus, Eye, Loader2, RefreshCw, Send, CreditCard, XCircle, Landmark } from "lucide-react";
+ import { format } from "date-fns";
+@@ -93,7 +94,7 @@ export function Invoices() {
+       utils.invoices.getAccountingPosting.invalidate();
+     },
+     onError: (error) => {
+-      toast.error(`Failed to mark as sent: ${error.message}`);
++      toast.error(formatFinancialMutationError(error, "Invoice could not be sent and posted"));
+     },
+   });
+ 
+@@ -118,7 +119,7 @@ export function Invoices() {
+       } : current);
+     },
+     onError: (error) => {
+-      toast.error(`Failed to record payment: ${error.message}`);
++      toast.error(formatFinancialMutationError(error, "Customer payment could not be recorded"));
+     },
+   });
+ 
+diff --git a/client/src/pages/MillInvoices.tsx b/client/src/pages/MillInvoices.tsx
+index c5512a7..c710420 100644
+--- a/client/src/pages/MillInvoices.tsx
++++ b/client/src/pages/MillInvoices.tsx
+@@ -2,6 +2,7 @@ import { useState } from "react";
+ import { trpc } from "@/lib/trpc";
+ import { useLocation } from "wouter";
+ import { resolveSupplierOptions } from "@/lib/supplier-options";
++import { formatFinancialMutationError } from "@/lib/financial-period-errors";
+ import DashboardLayout from "@/components/DashboardLayout";
+ import { Button } from "@/components/ui/button";
+ import { Badge } from "@/components/ui/badge";
+@@ -110,7 +111,7 @@ export default function MillInvoices() {
+ 	);
+ 	const recheckPostingMutation = trpc.invoices.postMillInvoiceToPayables.useMutation({
+ 		onSuccess: () => { void utils.invoices.getMillInvoiceAccountingPosting.invalidate(); toast.success("Payable journal confirmed"); },
+-		onError: (err) => toast.error(`Posting check failed: ${err.message}`),
++		onError: (err) => toast.error(formatFinancialMutationError(err, "Supplier invoice could not be posted")),
+ 	});
+ 
+   const createMutation = trpc.invoices.createMillInvoice.useMutation({
+@@ -118,22 +119,22 @@ export default function MillInvoices() {
+       toast.success("Mill invoice recorded");
+       utils.invoices.listMillInvoices.invalidate();
+ 		void utils.financialReports.agedPayables.invalidate();
+-      setCreateOpen(false);
+-      resetCreateForm();
+-    },
+-    onError: (err) => toast.error(`Failed: ${err.message}`),
+-  });
++	  setCreateOpen(false);
++	  resetCreateForm();
++	},
++		onError: (err) => toast.error(formatFinancialMutationError(err, "Supplier invoice could not be recorded")),
++	});
+ 
+   const payMutation = trpc.invoices.recordMillInvoicePayment.useMutation({
+     onSuccess: () => {
+       toast.success("Payment recorded");
+       utils.invoices.listMillInvoices.invalidate();
+ 		void utils.invoices.getMillInvoicePaymentPostings.invalidate();
+-		void utils.financialReports.agedPayables.invalidate();
+-      setPayOpen(false);
+-    },
+-    onError: (err) => toast.error(`Failed: ${err.message}`),
+-  });
++	  void utils.financialReports.agedPayables.invalidate();
++	  setPayOpen(false);
++	},
++		onError: (err) => toast.error(formatFinancialMutationError(err, "Supplier payment could not be recorded")),
++	});
+ 
+   function resetCreateForm() {
+     setCreateForm({
+diff --git a/server/db.ts b/server/db.ts
+index 813ef44..669cfb8 100644
+--- a/server/db.ts
++++ b/server/db.ts
+@@ -94,6 +94,7 @@ import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCust
+ import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, resolveCustomerPaymentOutcome } from "./payment-posting";
+ import { buildSupplierInvoicePosting, buildSupplierPaymentPosting, getSupplierInvoiceJournalNumber, getSupplierPaymentJournalNumber, SUPPLIER_PAYABLE_POSTING_ACCOUNTS, validateSupplierPaymentAgainstBalance } from "./supplier-payable-posting";
+ import { normalizeLegacyInvoiceAmounts, normalizeLegacyInvoiceRecord } from "./invoice-amount-integrity";
++import { buildClosedFinancialPeriodError } from "../shared/financial-period-errors";
+ import {
+   calculateReconciliationControls,
+   createStatementLineKey,
+@@ -1474,7 +1475,7 @@ export async function postJournalEntry(input: {
+   }
+ 
+ 	const entryDate = input.entryDate.toISOString().slice(0, 19).replace("T", " ");
+-	await assertFinancialDateOpen(entryDate);
++	await assertFinancialDateOpen(entryDate, "Posting this manual journal");
+ 	const journalNumber = `JNL-${input.entryDate.toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`;
+ 	return await (db as any).transaction(async (tx: any) => {
+     const created = await tx.insert(journalEntries).values({
+@@ -1603,7 +1604,10 @@ export async function markInvoiceAsSent(invoiceId: number, sentAt: string, creat
+ 	const invoice = invoiceRows[0];
+ 	if (!invoice) throw new Error("Invoice not found");
+ 	if (invoice.status === "cancelled") throw new Error("Cancelled invoices cannot be sent or posted.");
+-	await assertFinancialDateOpen(new Date(invoice.invoiceDate).toISOString().slice(0, 19).replace("T", " "));
++	await assertFinancialDateOpen(
++		new Date(invoice.invoiceDate).toISOString().slice(0, 19).replace("T", " "),
++		`Sending and posting invoice ${invoice.invoiceNumber}`,
++	);
+ 
+ 	const revenueAccountNumber = resolveCustomerInvoiceRevenueAccountNumber(invoice.feedOrderId);
+ 	const requiredAccountNumbers = [
+@@ -2105,12 +2109,17 @@ async function findClosedFinancialPeriod(database: any, date: Date | string) {
+ 	return rows[0] ?? null;
+ }
+ 
+-export async function assertFinancialDateOpen(date: Date | string) {
++export async function assertFinancialDateOpen(date: Date | string, action = "Posting this transaction") {
+ 	const db = await getDb();
+ 	if (!db) throw new Error("Database not available");
+ 	const closedPeriod = await findClosedFinancialPeriod(db, date);
+ 	if (closedPeriod) {
+-		throw new Error(`Financial period ${closedPeriod.periodName} (${closedPeriod.startDate} to ${closedPeriod.endDate}) is closed. Reopen the period with an audit reason before posting.`);
++		throw new Error(buildClosedFinancialPeriodError({
++			action,
++			periodName: closedPeriod.periodName,
++			startDate: closedPeriod.startDate,
++			endDate: closedPeriod.endDate,
++		}));
+ 	}
+ }
+ 
+@@ -2124,7 +2133,12 @@ async function assertFinancialRangeOpenWithDatabase(database: any, startDate: st
+ 		lte(financialPeriods.startDate, endDate.slice(0, 10)),
+ 		gte(financialPeriods.endDate, startDate.slice(0, 10)),
+ 	)).limit(1);
+-	if (rows[0]) throw new Error(`Financial period ${rows[0].periodName} (${rows[0].startDate} to ${rows[0].endDate}) is closed. Reopen it with an audit reason before changing Bank Reconciliation evidence.`);
++	if (rows[0]) throw new Error(buildClosedFinancialPeriodError({
++		action: "Changing Bank Reconciliation evidence",
++		periodName: rows[0].periodName,
++		startDate: rows[0].startDate,
++		endDate: rows[0].endDate,
++	}));
+ }
+ 
+ async function getFinancialPeriodById(database: any, periodId: number) {
+@@ -2311,7 +2325,7 @@ export async function reverseManualJournal(input: { periodId: number; journalEnt
+ 	if (!db) throw new Error("Database not available");
+ 	const reason = input.reason.trim();
+ 	if (reason.length < 10) throw new Error("Provide a reversal reason of at least 10 characters for the audit record.");
+-	await assertFinancialDateOpen(`${input.reversalDate} 00:00:00`);
++	await assertFinancialDateOpen(`${input.reversalDate} 00:00:00`, "Posting this journal reversal");
+ 	return await (db as any).transaction(async (tx: any) => {
+ 		const period = await getFinancialPeriodById(tx, input.periodId);
+ 		const sourceRows = await tx.select().from(journalEntries).where(eq(journalEntries.id, input.journalEntryId)).limit(1);
+@@ -4216,7 +4230,7 @@ export async function recordInvoicePayment(invoiceId: number, data: {
+ 	const invoiceRows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
+ 	const invoice = invoiceRows[0];
+ 	if (!invoice) throw new Error("Invoice not found");
+-	await assertFinancialDateOpen(data.paymentDate);
++	await assertFinancialDateOpen(data.paymentDate, `Recording payment for invoice ${invoice.invoiceNumber}`);
+ 	if (normalizeLegacyInvoiceAmounts(invoice).hasLegacyHundredfoldHeader) {
+ 		throw new Error("This invoice has a legacy 100× header amount mismatch. Run migration 0049 before recording another payment.");
+ 	}
+@@ -6034,7 +6048,7 @@ export async function postMillInvoiceToPayables(millInvoiceId: number, createdBy
+ 	const invoice = await getMillInvoiceById(millInvoiceId);
+ 	if (!invoice) throw new Error("Mill invoice not found.");
+ 	if (invoice.status === "disputed") throw new Error("A disputed mill invoice cannot be posted to Trade Payables.");
+-	await assertFinancialDateOpen(millInvoiceEntryDate(invoice.invoiceDate));
++	await assertFinancialDateOpen(millInvoiceEntryDate(invoice.invoiceDate), `Posting supplier invoice ${invoice.invoiceNumber} to Trade Payables`);
+ 
+   const requiredAccountNumbers = [
+     SUPPLIER_PAYABLE_POSTING_ACCOUNTS.feedAndProductionInventory,
+@@ -6098,7 +6112,7 @@ export async function createMillInvoice(data: {
+ 	const db = await getDb();
+ 	if (!db) throw new Error("Database not available");
+ 	if (!data.createdBy) throw new Error("An authenticated user is required to post a supplier invoice.");
+-	await assertFinancialDateOpen(millInvoiceEntryDate(data.invoiceDate));
++	await assertFinancialDateOpen(millInvoiceEntryDate(data.invoiceDate), `Recording supplier invoice ${data.invoiceNumber}`);
+ 
+   const created = await db.insert(millInvoices).values({
+     feedOrderId: data.feedOrderId,
+@@ -6143,7 +6157,7 @@ export async function recordMillInvoicePayment(id: number, data: {
+ 
+ 	const invoice = await getMillInvoiceById(id);
+ 	if (!invoice) throw new Error("Mill invoice not found.");
+-	await assertFinancialDateOpen(data.paidDate);
++	await assertFinancialDateOpen(data.paidDate, `Recording payment for supplier invoice ${invoice.invoiceNumber}`);
+ 	if (!await getMillInvoicePosting(id)) throw new Error("The supplier invoice must be posted to Trade Payables before recording a payment.");
+   const { payment } = validateSupplierPaymentAgainstBalance({ amount: data.paidAmount, balanceDue: invoice.balanceDue });
+   const requiredAccountNumbers = [SUPPLIER_PAYABLE_POSTING_ACCOUNTS.bank, SUPPLIER_PAYABLE_POSTING_ACCOUNTS.tradePayables];
+diff --git a/server/financial-period-errors.test.ts b/server/financial-period-errors.test.ts
+new file mode 100644
+index 0000000..464966c
+--- /dev/null
++++ b/server/financial-period-errors.test.ts
+@@ -0,0 +1,63 @@
++import { readFileSync } from "node:fs";
++import { resolve } from "node:path";
++import { describe, expect, it } from "vitest";
++import {
++  CLOSED_FINANCIAL_PERIOD_ERROR_PREFIX,
++  buildClosedFinancialPeriodError,
++  isClosedFinancialPeriodError,
++  removeFinancialPeriodErrorPrefix,
++} from "../shared/financial-period-errors";
++import {
++  formatFinancialMutationError,
++  presentFinancialMutationError,
++} from "../client/src/lib/financial-period-errors";
++
++const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
++const invoiceSource = readFileSync(resolve(process.cwd(), "client/src/pages/Invoices.tsx"), "utf8");
++const financeSource = readFileSync(resolve(process.cwd(), "client/src/pages/Finance.tsx"), "utf8");
++const millInvoiceSource = readFileSync(resolve(process.cwd(), "client/src/pages/MillInvoices.tsx"), "utf8");
++const bankReconciliationSource = readFileSync(resolve(process.cwd(), "client/src/components/BankReconciliationPanel.tsx"), "utf8");
++const periodCloseSource = readFileSync(resolve(process.cwd(), "client/src/components/PeriodClosePanel.tsx"), "utf8");
++
++describe("closed financial period guidance", () => {
++  const closedPeriodMessage = buildClosedFinancialPeriodError({
++    action: "Sending and posting invoice INV-202609-005",
++    periodName: "September 2026",
++    startDate: "2026-09-01",
++    endDate: "2026-09-30",
++  });
++
++  it("gives an actionable, non-destructive financial-period explanation", () => {
++    expect(closedPeriodMessage).toContain(CLOSED_FINANCIAL_PERIOD_ERROR_PREFIX);
++    expect(closedPeriodMessage).toContain("Sending and posting invoice INV-202609-005");
++    expect(closedPeriodMessage).toContain("No financial records were changed.");
++    expect(closedPeriodMessage).toContain("Choose a date outside this period");
++    expect(isClosedFinancialPeriodError(closedPeriodMessage)).toBe(true);
++    expect(removeFinancialPeriodErrorPrefix(closedPeriodMessage)).not.toContain(CLOSED_FINANCIAL_PERIOD_ERROR_PREFIX);
++  });
++
++  it("distinguishes a closed-period block from ordinary mutation errors", () => {
++    expect(presentFinancialMutationError({ message: closedPeriodMessage }, "Invoice could not be posted")).toEqual({
++      title: "Posting blocked — financial period is closed",
++      description: removeFinancialPeriodErrorPrefix(closedPeriodMessage),
++    });
++    expect(formatFinancialMutationError({ message: "An ordinary validation error" }, "Journal could not be posted"))
++      .toBe("An ordinary validation error");
++  });
++
++  it("uses the shared contract for every protected accounting action and its main UI surfaces", () => {
++    expect(dbSource).toContain('from "../shared/financial-period-errors"');
++    expect(dbSource).toContain("buildClosedFinancialPeriodError");
++    expect(dbSource).toContain("Sending and posting invoice");
++    expect(dbSource).toContain("Recording payment for invoice");
++    expect(dbSource).toContain("Posting this manual journal");
++    expect(dbSource).toContain("Changing Bank Reconciliation evidence");
++    expect(dbSource).toContain("Posting supplier invoice");
++    expect(dbSource).toContain("Recording payment for supplier invoice");
++
++    for (const source of [invoiceSource, financeSource, millInvoiceSource, bankReconciliationSource, periodCloseSource]) {
++      expect(source).toContain("financial-period-errors");
++      expect(source).toContain("FinancialMutationError");
++    }
++  });
++});
+diff --git a/shared/financial-period-errors.ts b/shared/financial-period-errors.ts
+new file mode 100644
+index 0000000..4acbd38
+--- /dev/null
++++ b/shared/financial-period-errors.ts
+@@ -0,0 +1,20 @@
++export const CLOSED_FINANCIAL_PERIOD_ERROR_PREFIX = "[CLOSED_FINANCIAL_PERIOD]";
++
++export type ClosedFinancialPeriodErrorInput = {
++  action: string;
++  periodName: string;
++  startDate: string;
++  endDate: string;
++};
++
++export function buildClosedFinancialPeriodError(input: ClosedFinancialPeriodErrorInput) {
++  return `${CLOSED_FINANCIAL_PERIOD_ERROR_PREFIX} ${input.action} cannot be completed because financial period “${input.periodName}” (${input.startDate} to ${input.endDate}) is closed. No financial records were changed. Choose a date outside this period or ask a financial administrator to reopen it with an audit reason.`;
++}
++
++export function isClosedFinancialPeriodError(message: unknown) {
++  return typeof message === "string" && message.includes(CLOSED_FINANCIAL_PERIOD_ERROR_PREFIX);
++}
++
++export function removeFinancialPeriodErrorPrefix(message: string) {
++  return message.replace(`${CLOSED_FINANCIAL_PERIOD_ERROR_PREFIX} `, "").trim();
++}

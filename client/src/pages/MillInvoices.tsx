@@ -2,6 +2,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { resolveSupplierOptions } from "@/lib/supplier-options";
+import { formatFinancialMutationError } from "@/lib/financial-period-errors";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -110,7 +111,7 @@ export default function MillInvoices() {
 	);
 	const recheckPostingMutation = trpc.invoices.postMillInvoiceToPayables.useMutation({
 		onSuccess: () => { void utils.invoices.getMillInvoiceAccountingPosting.invalidate(); toast.success("Payable journal confirmed"); },
-		onError: (err) => toast.error(`Posting check failed: ${err.message}`),
+		onError: (err) => toast.error(formatFinancialMutationError(err, "Supplier invoice could not be posted")),
 	});
 
   const createMutation = trpc.invoices.createMillInvoice.useMutation({
@@ -118,22 +119,22 @@ export default function MillInvoices() {
       toast.success("Mill invoice recorded");
       utils.invoices.listMillInvoices.invalidate();
 		void utils.financialReports.agedPayables.invalidate();
-      setCreateOpen(false);
-      resetCreateForm();
-    },
-    onError: (err) => toast.error(`Failed: ${err.message}`),
-  });
+	  setCreateOpen(false);
+	  resetCreateForm();
+	},
+		onError: (err) => toast.error(formatFinancialMutationError(err, "Supplier invoice could not be recorded")),
+	});
 
   const payMutation = trpc.invoices.recordMillInvoicePayment.useMutation({
     onSuccess: () => {
       toast.success("Payment recorded");
       utils.invoices.listMillInvoices.invalidate();
 		void utils.invoices.getMillInvoicePaymentPostings.invalidate();
-		void utils.financialReports.agedPayables.invalidate();
-      setPayOpen(false);
-    },
-    onError: (err) => toast.error(`Failed: ${err.message}`),
-  });
+	  void utils.financialReports.agedPayables.invalidate();
+	  setPayOpen(false);
+	},
+		onError: (err) => toast.error(formatFinancialMutationError(err, "Supplier payment could not be recorded")),
+	});
 
   function resetCreateForm() {
     setCreateForm({

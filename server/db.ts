@@ -94,6 +94,7 @@ import { buildCustomerInvoicePosting, CUSTOMER_INVOICE_POSTING_ACCOUNTS, getCust
 import { buildCustomerPaymentPosting, CUSTOMER_PAYMENT_POSTING_ACCOUNTS, getCustomerPaymentJournalNumber, parseRandAmount, resolveCustomerPaymentOutcome } from "./payment-posting";
 import { buildSupplierInvoicePosting, buildSupplierPaymentPosting, getSupplierInvoiceJournalNumber, getSupplierPaymentJournalNumber, SUPPLIER_PAYABLE_POSTING_ACCOUNTS, validateSupplierPaymentAgainstBalance } from "./supplier-payable-posting";
 import { normalizeLegacyInvoiceAmounts, normalizeLegacyInvoiceRecord } from "./invoice-amount-integrity";
+import { buildClosedFinancialPeriodError } from "../shared/financial-period-errors";
 import {
   calculateReconciliationControls,
   createStatementLineKey,
@@ -1474,7 +1475,7 @@ export async function postJournalEntry(input: {
   }
 
 	const entryDate = input.entryDate.toISOString().slice(0, 19).replace("T", " ");
-	await assertFinancialDateOpen(entryDate);
+	await assertFinancialDateOpen(entryDate, "Posting this manual journal");
 	const journalNumber = `JNL-${input.entryDate.toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now()}`;
 	return await (db as any).transaction(async (tx: any) => {
     const created = await tx.insert(journalEntries).values({
@@ -1603,7 +1604,10 @@ export async function markInvoiceAsSent(invoiceId: number, sentAt: string, creat
 	const invoice = invoiceRows[0];
 	if (!invoice) throw new Error("Invoice not found");
 	if (invoice.status === "cancelled") throw new Error("Cancelled invoices cannot be sent or posted.");
-	await assertFinancialDateOpen(new Date(invoice.invoiceDate).toISOString().slice(0, 19).replace("T", " "));
+	await assertFinancialDateOpen(
+		new Date(invoice.invoiceDate).toISOString().slice(0, 19).replace("T", " "),
+		`Sending and posting invoice ${invoice.invoiceNumber}`,
+	);
 
 	const revenueAccountNumber = resolveCustomerInvoiceRevenueAccountNumber(invoice.feedOrderId);
 	const requiredAccountNumbers = [
@@ -2105,12 +2109,17 @@ async function findClosedFinancialPeriod(database: any, date: Date | string) {
 	return rows[0] ?? null;
 }
 
-export async function assertFinancialDateOpen(date: Date | string) {
+export async function assertFinancialDateOpen(date: Date | string, action = "Posting this transaction") {
 	const db = await getDb();
 	if (!db) throw new Error("Database not available");
 	const closedPeriod = await findClosedFinancialPeriod(db, date);
 	if (closedPeriod) {
-		throw new Error(`Financial period ${closedPeriod.periodName} (${closedPeriod.startDate} to ${closedPeriod.endDate}) is closed. Reopen the period with an audit reason before posting.`);
+		throw new Error(buildClosedFinancialPeriodError({
+			action,
+			periodName: closedPeriod.periodName,
+			startDate: closedPeriod.startDate,
+			endDate: closedPeriod.endDate,
+		}));
 	}
 }
 
@@ -2124,7 +2133,12 @@ async function assertFinancialRangeOpenWithDatabase(database: any, startDate: st
 		lte(financialPeriods.startDate, endDate.slice(0, 10)),
 		gte(financialPeriods.endDate, startDate.slice(0, 10)),
 	)).limit(1);
-	if (rows[0]) throw new Error(`Financial period ${rows[0].periodName} (${rows[0].startDate} to ${rows[0].endDate}) is closed. Reopen it with an audit reason before changing Bank Reconciliation evidence.`);
+	if (rows[0]) throw new Error(buildClosedFinancialPeriodError({
+		action: "Changing Bank Reconciliation evidence",
+		periodName: rows[0].periodName,
+		startDate: rows[0].startDate,
+		endDate: rows[0].endDate,
+	}));
 }
 
 async function getFinancialPeriodById(database: any, periodId: number) {
@@ -2311,7 +2325,7 @@ export async function reverseManualJournal(input: { periodId: number; journalEnt
 	if (!db) throw new Error("Database not available");
 	const reason = input.reason.trim();
 	if (reason.length < 10) throw new Error("Provide a reversal reason of at least 10 characters for the audit record.");
-	await assertFinancialDateOpen(`${input.reversalDate} 00:00:00`);
+	await assertFinancialDateOpen(`${input.reversalDate} 00:00:00`, "Posting this journal reversal");
 	return await (db as any).transaction(async (tx: any) => {
 		const period = await getFinancialPeriodById(tx, input.periodId);
 		const sourceRows = await tx.select().from(journalEntries).where(eq(journalEntries.id, input.journalEntryId)).limit(1);
@@ -4216,7 +4230,7 @@ export async function recordInvoicePayment(invoiceId: number, data: {
 	const invoiceRows = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
 	const invoice = invoiceRows[0];
 	if (!invoice) throw new Error("Invoice not found");
-	await assertFinancialDateOpen(data.paymentDate);
+	await assertFinancialDateOpen(data.paymentDate, `Recording payment for invoice ${invoice.invoiceNumber}`);
 	if (normalizeLegacyInvoiceAmounts(invoice).hasLegacyHundredfoldHeader) {
 		throw new Error("This invoice has a legacy 100× header amount mismatch. Run migration 0049 before recording another payment.");
 	}
@@ -6034,7 +6048,7 @@ export async function postMillInvoiceToPayables(millInvoiceId: number, createdBy
 	const invoice = await getMillInvoiceById(millInvoiceId);
 	if (!invoice) throw new Error("Mill invoice not found.");
 	if (invoice.status === "disputed") throw new Error("A disputed mill invoice cannot be posted to Trade Payables.");
-	await assertFinancialDateOpen(millInvoiceEntryDate(invoice.invoiceDate));
+	await assertFinancialDateOpen(millInvoiceEntryDate(invoice.invoiceDate), `Posting supplier invoice ${invoice.invoiceNumber} to Trade Payables`);
 
   const requiredAccountNumbers = [
     SUPPLIER_PAYABLE_POSTING_ACCOUNTS.feedAndProductionInventory,
@@ -6098,7 +6112,7 @@ export async function createMillInvoice(data: {
 	const db = await getDb();
 	if (!db) throw new Error("Database not available");
 	if (!data.createdBy) throw new Error("An authenticated user is required to post a supplier invoice.");
-	await assertFinancialDateOpen(millInvoiceEntryDate(data.invoiceDate));
+	await assertFinancialDateOpen(millInvoiceEntryDate(data.invoiceDate), `Recording supplier invoice ${data.invoiceNumber}`);
 
   const created = await db.insert(millInvoices).values({
     feedOrderId: data.feedOrderId,
@@ -6143,7 +6157,7 @@ export async function recordMillInvoicePayment(id: number, data: {
 
 	const invoice = await getMillInvoiceById(id);
 	if (!invoice) throw new Error("Mill invoice not found.");
-	await assertFinancialDateOpen(data.paidDate);
+	await assertFinancialDateOpen(data.paidDate, `Recording payment for supplier invoice ${invoice.invoiceNumber}`);
 	if (!await getMillInvoicePosting(id)) throw new Error("The supplier invoice must be posted to Trade Payables before recording a payment.");
   const { payment } = validateSupplierPaymentAgainstBalance({ amount: data.paidAmount, balanceDue: invoice.balanceDue });
   const requiredAccountNumbers = [SUPPLIER_PAYABLE_POSTING_ACCOUNTS.bank, SUPPLIER_PAYABLE_POSTING_ACCOUNTS.tradePayables];

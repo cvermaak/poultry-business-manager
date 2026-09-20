@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatFinancialMutationError } from "@/lib/financial-period-errors";
 import { toast } from "sonner";
 import { BookOpenCheck, Download, Plus, Eye, Loader2, RefreshCw, Send, CreditCard, XCircle, Landmark } from "lucide-react";
 import { format } from "date-fns";
@@ -93,7 +94,7 @@ export function Invoices() {
       utils.invoices.getAccountingPosting.invalidate();
     },
     onError: (error) => {
-      toast.error(`Failed to mark as sent: ${error.message}`);
+      toast.error(formatFinancialMutationError(error, "Invoice could not be sent and posted"));
     },
   });
 
@@ -118,7 +119,7 @@ export function Invoices() {
       } : current);
     },
     onError: (error) => {
-      toast.error(`Failed to record payment: ${error.message}`);
+      toast.error(formatFinancialMutationError(error, "Customer payment could not be recorded"));
     },
   });
 

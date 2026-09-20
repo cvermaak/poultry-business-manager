@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { formatFinancialMutationError } from "@/lib/financial-period-errors";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,7 +81,7 @@ export function BankReconciliationPanel({ accounts }: { accounts: AccountOption[
   };
   const mutationOptions = {
     onSuccess: () => { setError(null); refresh(); },
-    onError: (mutationError: Error) => setError(mutationError.message),
+    onError: (mutationError: Error) => setError(formatFinancialMutationError(mutationError, "Bank Reconciliation action could not be completed")),
   };
   const create = trpc.bankReconciliation.create.useMutation({
     ...mutationOptions,

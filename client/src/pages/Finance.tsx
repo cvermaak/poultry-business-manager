@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { buildJournalListInput, resolveFinanceNavigation } from "@/lib/finance-navigation";
+import { formatFinancialMutationError } from "@/lib/financial-period-errors";
 import { BankReconciliationPanel } from "@/components/BankReconciliationPanel";
 import { PeriodClosePanel } from "@/components/PeriodClosePanel";
 import { Button } from "@/components/ui/button";
@@ -207,7 +208,7 @@ export default function Finance() {
       setJournalDialogOpen(false); setJournalError(null);
       setJournalDraft({ entryDate: `${today}T12:00`, description: "", sourceType: "manual_journal", sourceId: "", lines: [emptyJournalLine(), emptyJournalLine()] });
     },
-    onError: (error) => setJournalError(error.message),
+    onError: (error) => setJournalError(formatFinancialMutationError(error, "Journal could not be posted")),
   });
 
   const isLoading = profitAndLoss.isLoading || agedReceivables.isLoading || agedPayables.isLoading || cashFlowStatement.isLoading || trialBalance.isLoading || balanceSheet.isLoading;

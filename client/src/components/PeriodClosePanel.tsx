@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { formatFinancialMutationError } from "@/lib/financial-period-errors";
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -76,7 +77,10 @@ export function PeriodClosePanel() {
   };
 	const mutationOptions = {
 		onSuccess: () => { setError(null); refresh(); },
-		onError: (mutationError: unknown) => setError(mutationError instanceof Error ? mutationError.message : "The financial control action could not be completed."),
+		onError: (mutationError: unknown) => setError(formatFinancialMutationError(
+			mutationError instanceof Error ? mutationError : undefined,
+			"Financial control action could not be completed",
+		)),
 	};
   const create = trpc.periodClose.create.useMutation({
     ...mutationOptions,
