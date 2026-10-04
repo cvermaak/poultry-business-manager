@@ -43,11 +43,11 @@ export default function Home() {
   return (
     <div className="space-y-6">
       {/* Hero Banner */}
-      <div className="relative w-full rounded-lg overflow-hidden shadow-sm border" style={{ aspectRatio: '6/1' }}>
-        <img 
-          src="https://files.manuscdn.com/user_upload_by_module/session_file/310419663029451273/fIAFAsFnFJkgBmHY.png" 
-          alt="AFGRO Poultry Manager - Modern chicken farm" 
-          className="w-full h-full object-cover object-left"
+      <div className="relative w-full rounded-lg overflow-hidden shadow-sm border" style={{ aspectRatio: '18/5' }}>
+        <img
+          src="/afgro-dashboard-commercial-chicken-houses_846bfbcf.png"
+          alt="AFGRO broiler chicken houses with mountains in the background"
+          className="block h-full w-full object-cover object-[center_40%]"
         />
       </div>
 
