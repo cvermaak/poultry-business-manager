@@ -48,7 +48,6 @@ interface InvoiceData {
   branchCode: string;
   accountName: string;
   accountNumber: string;
-  reference: string;
 }
 
 const styles = StyleSheet.create({

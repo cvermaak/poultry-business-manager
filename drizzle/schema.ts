@@ -439,9 +439,9 @@ export const generalLedgerEntries = mysqlTable("general_ledger_entries", {
 	createdAt: timestamp({ mode: 'string' }).default('CURRENT_TIMESTAMP').notNull(),
 	createdBy: int().references(() => users.id),
 },
-(table) => [
-	index("idx_general_ledger_entries_entry_number").on(table.entryNumber),
-	index("idx_general_ledger_entries_journal_entry_id").on(table.journalEntryId),
+	(table) => [
+		index("idx_general_ledger_entries_entry_number").on(table.entryNumber),
+		index("idx_general_ledger_entries_journal_entry_id").on(table.journalEntryId),
 	index("idx_general_ledger_entries_account_id").on(table.accountId),
 	index("idx_general_ledger_entries_entry_date").on(table.entryDate),
 ]);
@@ -1250,6 +1250,9 @@ export const users = mysqlTable("users", {
 	index("users_username_unique").on(table.username),
 	index("users_email_unique").on(table.email),
 ]);
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
 
 export const vaccinationSchedules = mysqlTable("vaccination_schedules", {
 	id: int().autoincrement().notNull(),

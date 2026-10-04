@@ -1,7 +1,6 @@
 export type SupplierOption = {
   id: number;
-  supplierNumber: string | null;
-  name: string;
+  label: string;
 };
 
 type SupplierCandidate = {
@@ -28,13 +27,13 @@ export function resolveSupplierOptions(payload: unknown): SupplierOption[] {
 
     if (!Number.isInteger(id) || id <= 0 || !name) return [];
 
+    const supplierNumber = typeof supplier.supplierNumber === "string"
+      ? supplier.supplierNumber.trim()
+      : "";
+
     return [{
       id,
-      name,
-      supplierNumber:
-        typeof supplier.supplierNumber === "string" && supplier.supplierNumber.trim()
-          ? supplier.supplierNumber.trim()
-          : null,
+      label: supplierNumber ? `${supplierNumber} — ${name}` : name,
     }];
   });
 }

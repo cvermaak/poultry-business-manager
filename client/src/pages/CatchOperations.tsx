@@ -150,13 +150,14 @@ export default function CatchOperations() {
     { status: "active" },
     { refetchOnMount: true, staleTime: 0 }
   );
+  const resumableActiveSession = activeSessions?.sessions?.[0];
 
   // Auto-resume: if there is an active session in the DB and none loaded in state, resume it
   useEffect(() => {
-    if (!activeSessionId && activeSessions?.sessions?.length > 0) {
-		setActiveSessionId(activeSessions.sessions[0].id);
-	}
-  }, [activeSessions, activeSessionId]);
+    if (!activeSessionId && resumableActiveSession) {
+			setActiveSessionId(resumableActiveSession.id);
+		}
+  }, [activeSessionId, resumableActiveSession]);
 
   // Auto-fill target birds, weight and override catching weight from catch plan or flock defaults
   useEffect(() => {

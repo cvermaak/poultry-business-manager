@@ -1,9 +1,13 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
+import { getDb, mysqlTimestamp } from "../db";
 import { harvestRecords, flocks } from "../../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
+
+function asMysqlTimestamp(value: Date | string) {
+  return mysqlTimestamp(value instanceof Date ? value : new Date(value));
+}
 
 /**
  * Calculate derived fields for harvest record
@@ -75,7 +79,7 @@ async function updateFlockAfterHarvest(flockId: number, chickenCountLoaded: numb
     .set({ 
       currentCount: Math.max(0, newCount),
       status: newStatus,
-      updatedAt: new Date(),
+      updatedAt: mysqlTimestamp(),
     })
     .where(eq(flocks.id, flockId));
 
@@ -118,16 +122,16 @@ export const harvestRouter = router({
       // Convert string dates to Date objects for database insertion
       const processedInput = {
         ...input,
-        harvestDate: input.harvestDate instanceof Date ? input.harvestDate : new Date(input.harvestDate),
-        harvestStartTime: input.harvestStartTime instanceof Date ? input.harvestStartTime : new Date(input.harvestStartTime),
+        harvestDate: asMysqlTimestamp(input.harvestDate),
+        harvestStartTime: asMysqlTimestamp(input.harvestStartTime),
         feedWithdrawalStartTime: input.feedWithdrawalStartTime 
-          ? (input.feedWithdrawalStartTime instanceof Date ? input.feedWithdrawalStartTime : new Date(input.feedWithdrawalStartTime))
+          ? asMysqlTimestamp(input.feedWithdrawalStartTime)
           : undefined,
         transportDepartTime: input.transportDepartTime
-          ? (input.transportDepartTime instanceof Date ? input.transportDepartTime : new Date(input.transportDepartTime))
+          ? asMysqlTimestamp(input.transportDepartTime)
           : undefined,
         transportArrivalTime: input.transportArrivalTime
-          ? (input.transportArrivalTime instanceof Date ? input.transportArrivalTime : new Date(input.transportArrivalTime))
+          ? asMysqlTimestamp(input.transportArrivalTime)
           : undefined,
       };
 
@@ -139,8 +143,8 @@ export const harvestRouter = router({
         ...processedInput,
         ...derived,
         recordedBy: ctx.user.id,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: mysqlTimestamp(),
+        updatedAt: mysqlTimestamp(),
       });
 
       // Update flock current count and status
@@ -175,19 +179,19 @@ export const harvestRouter = router({
       // Convert string dates to Date objects for database update
       const processedData: any = { ...input.data };
       if (processedData.harvestDate) {
-        processedData.harvestDate = processedData.harvestDate instanceof Date ? processedData.harvestDate : new Date(processedData.harvestDate);
+        processedData.harvestDate = asMysqlTimestamp(processedData.harvestDate);
       }
       if (processedData.harvestStartTime) {
-        processedData.harvestStartTime = processedData.harvestStartTime instanceof Date ? processedData.harvestStartTime : new Date(processedData.harvestStartTime);
+        processedData.harvestStartTime = asMysqlTimestamp(processedData.harvestStartTime);
       }
       if (processedData.feedWithdrawalStartTime) {
-        processedData.feedWithdrawalStartTime = processedData.feedWithdrawalStartTime instanceof Date ? processedData.feedWithdrawalStartTime : new Date(processedData.feedWithdrawalStartTime);
+        processedData.feedWithdrawalStartTime = asMysqlTimestamp(processedData.feedWithdrawalStartTime);
       }
       if (processedData.transportDepartTime) {
-        processedData.transportDepartTime = processedData.transportDepartTime instanceof Date ? processedData.transportDepartTime : new Date(processedData.transportDepartTime);
+        processedData.transportDepartTime = asMysqlTimestamp(processedData.transportDepartTime);
       }
       if (processedData.transportArrivalTime) {
-        processedData.transportArrivalTime = processedData.transportArrivalTime instanceof Date ? processedData.transportArrivalTime : new Date(processedData.transportArrivalTime);
+        processedData.transportArrivalTime = asMysqlTimestamp(processedData.transportArrivalTime);
       }
 
       // Calculate derived fields
@@ -200,7 +204,7 @@ export const harvestRouter = router({
         .set({
           ...processedData,
           ...derived,
-          updatedAt: new Date(),
+          updatedAt: mysqlTimestamp(),
         })
         .where(eq(harvestRecords.id, input.id));
       console.log('[Harvest Update] Database update completed');
@@ -213,7 +217,7 @@ export const harvestRouter = router({
           await db.update(flocks)
             .set({ 
               currentCount: Math.max(0, flock.currentCount - countDiff),
-              updatedAt: new Date(),
+              updatedAt: mysqlTimestamp(),
             })
             .where(eq(flocks.id, original.flockId));
         }
@@ -265,7 +269,7 @@ export const harvestRouter = router({
           .set({ 
             currentCount: restoredCount,
             status: newStatus,
-            updatedAt: new Date(),
+            updatedAt: mysqlTimestamp(),
           })
           .where(eq(flocks.id, record.flockId));
       }

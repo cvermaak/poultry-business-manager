@@ -81,7 +81,7 @@ export function BankReconciliationPanel({ accounts }: { accounts: AccountOption[
   };
   const mutationOptions = {
     onSuccess: () => { setError(null); refresh(); },
-    onError: (mutationError: Error) => setError(formatFinancialMutationError(mutationError, "Bank Reconciliation action could not be completed")),
+    onError: (mutationError: unknown) => setError(formatFinancialMutationError(mutationError, "Bank Reconciliation action could not be completed")),
   };
   const create = trpc.bankReconciliation.create.useMutation({
     ...mutationOptions,

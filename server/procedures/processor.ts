@@ -19,7 +19,7 @@ export const processorRouter = router({
     return db!
       .select()
       .from(processors)
-      .where(eq(processors.isActive, true))
+      .where(eq(processors.isActive, 1))
       .orderBy(desc(processors.name));
   }),
 
@@ -62,7 +62,7 @@ export const processorRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       
-      const [newProcessor] = await db!
+      const result = await db!
         .insert(processors)
         .values({
           ...input,
@@ -73,6 +73,7 @@ export const processorRouter = router({
           createdBy: ctx.user.id,
         })
         .$returningId();
+      const newProcessor = (result as unknown as Array<{ id: number }>)[0];
 
       return { id: newProcessor.id, success: true };
     }),
@@ -133,7 +134,7 @@ export const processorRouter = router({
 
       await db!
         .update(processors)
-        .set({ isActive: false })
+        .set({ isActive: 0 })
         .where(eq(processors.id, input.id));
 
       return { success: true };

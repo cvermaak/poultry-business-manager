@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { useAuth } from "@/lib/auth";
 
 const TIMEZONES = [
   { value: "UTC", label: "UTC (Coordinated Universal Time)" },
@@ -37,6 +38,7 @@ const TIMEZONES = [
 ];
 
 export function CompanySettings() {
+  const { user, loading: isAuthLoading } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     companyName: "",
@@ -55,7 +57,10 @@ export function CompanySettings() {
   });
 
   // Fetch company settings
-  const { data: settings, isLoading: isLoadingSettings } = trpc.companySettings.get.useQuery();
+  const canManageCompanySettings = user?.role === "admin";
+  const { data: settings, isLoading: isLoadingSettings } = trpc.companySettings.get.useQuery(undefined, {
+    enabled: canManageCompanySettings,
+  });
   
   // Update company settings mutation
   const updateMutation = trpc.companySettings.update.useMutation({
@@ -106,10 +111,25 @@ export function CompanySettings() {
     }
   };
 
-  if (isLoadingSettings) {
+  if (isAuthLoading || isLoadingSettings) {
     return (
       <div className="flex items-center justify-center h-screen">
         <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!canManageCompanySettings) {
+    return (
+      <div className="container mx-auto py-8 px-4">
+        <Card className="max-w-2xl mx-auto">
+          <CardHeader>
+            <CardTitle>Administrator access required</CardTitle>
+            <CardDescription>
+              Company identity, banking details, and timezone settings are restricted to administrators.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     );
   }

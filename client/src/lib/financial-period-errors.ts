@@ -3,22 +3,30 @@ import {
   removeFinancialPeriodErrorPrefix,
 } from "@shared/financial-period-errors";
 
-type ErrorWithMessage = {
-  message?: unknown;
-};
-
 export type FinancialMutationErrorPresentation = {
   title: string;
   description: string;
 };
 
+function getErrorMessage(error: unknown): string {
+  if (
+    typeof error === "object"
+    && error !== null
+    && "message" in error
+    && typeof error.message === "string"
+    && error.message.trim()
+  ) {
+    return error.message.trim();
+  }
+
+  return "Please try again or contact an administrator if the problem continues.";
+}
+
 export function presentFinancialMutationError(
-  error: ErrorWithMessage | null | undefined,
+  error: unknown,
   fallbackTitle: string,
 ): FinancialMutationErrorPresentation {
-  const message = typeof error?.message === "string" && error.message.trim()
-    ? error.message.trim()
-    : "Please try again or contact an administrator if the problem continues.";
+  const message = getErrorMessage(error);
 
   if (isClosedFinancialPeriodError(message)) {
     return {
@@ -34,7 +42,7 @@ export function presentFinancialMutationError(
 }
 
 export function formatFinancialMutationError(
-  error: ErrorWithMessage | null | undefined,
+  error: unknown,
   fallbackTitle: string,
 ) {
   const presentation = presentFinancialMutationError(error, fallbackTitle);

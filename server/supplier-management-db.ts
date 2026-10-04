@@ -25,7 +25,7 @@ export async function listSuppliers(filters?: { category?: string; isActive?: bo
 
   const conditions = [
     filters?.category ? eq(suppliers.category, filters.category) : undefined,
-    filters?.isActive === undefined ? undefined : eq(suppliers.isActive, filters.isActive),
+    filters?.isActive === undefined ? undefined : eq(suppliers.isActive, filters.isActive ? 1 : 0),
   ].filter((condition): condition is NonNullable<typeof condition> => Boolean(condition));
 
   return db

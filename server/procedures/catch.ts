@@ -785,13 +785,13 @@ export const syncOfflineBatches = protectedProcedure
         
         // Update session totals
         const updatedSession = session[0];
-        const currentBirdsCaught = parseInt(updatedSession.totalBirdsCaught || '0') + totalBirds;
-        const currentWeightCaught = parseFloat(updatedSession.totalWeightCaught || '0') + totalNetWeight;
+        const currentBirdsCaught = Number(updatedSession.totalBirdsCaught ?? 0) + totalBirds;
+        const currentWeightCaught = parseFloat(String(updatedSession.totalNetWeight ?? 0)) + totalNetWeight;
         
         await db.update(catchSessions)
           .set({
-            totalBirdsCaught: currentBirdsCaught.toString(),
-            totalWeightCaught: currentWeightCaught.toString(),
+            totalBirdsCaught: currentBirdsCaught,
+            totalNetWeight: currentWeightCaught.toString(),
           })
           .where(eq(catchSessions.id, batch.sessionId));
         
@@ -803,7 +803,7 @@ export const syncOfflineBatches = protectedProcedure
     }
     
     // Recalculate totals for all affected sessions
-    for (const sessionId of sessionIds) {
+    for (const sessionId of Array.from(sessionIds)) {
       try {
         const allBatches = await db
           .select({
@@ -827,8 +827,8 @@ export const syncOfflineBatches = protectedProcedure
         
         await db.update(catchSessions)
           .set({
-            totalBirdsCaught: totalBirdsCaught.toString(),
-            totalWeightCaught: totalWeightCaught.toString(),
+            totalBirdsCaught,
+            totalNetWeight: totalWeightCaught.toString(),
           })
           .where(eq(catchSessions.id, sessionId));
       } catch (error) {
@@ -931,7 +931,7 @@ export const syncOfflineCrates = protectedProcedure
     }
 
     // Recalculate totals for all affected sessions
-    for (const sessionId of sessionIds) {
+    for (const sessionId of Array.from(sessionIds)) {
       try {
         const allCrates = await db
           .select({

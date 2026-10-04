@@ -8,13 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Plus, Download, Eye, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { Checkbox } from "@/components/ui/checkbox";
 
 export default function Sales() {
   const [isOpen, setIsOpen] = useState(false);
-  const [useMultiSelect, setUseMultiSelect] = useState(false);
-  const [selectedSessions, setSelectedSessions] = useState<number[]>([]);
-  const [sessionPrices, setSessionPrices] = useState<{ [key: number]: string }>({});
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
 
@@ -24,22 +20,7 @@ export default function Sales() {
   const catchSessions = catchSessionsResponse?.sessions;
   const { data: processors } = trpc.processor.list.useQuery(undefined, { retry: 1 });
   const createMutation = trpc.invoices.create.useMutation();
-  const createMultipleMutation = trpc.invoices.createMultiple.useMutation();
   const generatePDFMutation = trpc.invoices.generatePDF.useMutation();
-
-  const handleToggleSession = (sessionId: number) => {
-    setSelectedSessions(prev => {
-      if (prev.includes(sessionId)) {
-        return prev.filter(id => id !== sessionId);
-      } else {
-        return [...prev, sessionId];
-      }
-    });
-  };
-
-  const handleSessionPriceChange = (sessionId: number, price: string) => {
-    setSessionPrices(prev => ({ ...prev, [sessionId]: price }));
-  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -60,53 +41,19 @@ export default function Sales() {
         return;
       }
 
-      if (useMultiSelect) {
-        // Multi-select mode
-        if (selectedSessions.length === 0) {
-          alert("Please select at least one catch session");
-          return;
-        }
-
-        // Validate all prices are filled
-        for (const sessionId of selectedSessions) {
-          if (!sessionPrices[sessionId]) {
-            alert(`Please enter price for session ${sessionId}`);
-            return;
-          }
-        }
-
-        const pricesRecord: { [key: string]: number } = {};
-        for (const [key, value] of Object.entries(sessionPrices)) {
-          if (selectedSessions.includes(parseInt(key))) {
-            pricesRecord[key] = parseFloat(value);
-          }
-        }
-
-        await createMultipleMutation.mutateAsync({
-          customerId: parseInt(customerId),
-          catchSessionIds: selectedSessions,
-          processorId: parseInt(processorId),
-          catchSessionPrices: pricesRecord,
-        });
-      } else {
-        // Single select mode
-        if (!catchSessionId) {
-          alert("Please select a catch session");
-          return;
-        }
-
-        await createMutation.mutateAsync({
-          customerId: parseInt(customerId),
-          catchSessionId: parseInt(catchSessionId),
-          processorId: parseInt(processorId),
-          pricePerKgExcl: parseFloat(pricePerKgExcl),
-        });
+      if (!catchSessionId) {
+        alert("Please select a catch session");
+        return;
       }
 
+      await createMutation.mutateAsync({
+        customerId: parseInt(customerId),
+        catchSessionId: parseInt(catchSessionId),
+        processorId: parseInt(processorId),
+        pricePerKgExcl: parseFloat(pricePerKgExcl),
+      });
+
       setIsOpen(false);
-      setSelectedSessions([]);
-      setSessionPrices({});
-      setUseMultiSelect(false);
       refetch();
     } catch (error) {
       console.error("Error creating invoice:", error);
@@ -196,22 +143,6 @@ export default function Sales() {
               <DialogTitle>Create New Invoice</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4 p-2">
-              {/* Toggle between single and multi-select */}
-              <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-md">
-                <Checkbox
-                  id="multiSelect"
-                  checked={useMultiSelect}
-                  onCheckedChange={(checked) => {
-                    setUseMultiSelect(checked as boolean);
-                    setSelectedSessions([]);
-                    setSessionPrices({});
-                  }}
-                />
-                <Label htmlFor="multiSelect" className="cursor-pointer">
-                  Select multiple catch sessions for this invoice
-                </Label>
-              </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="customerId">Customer *</Label>
@@ -248,9 +179,7 @@ export default function Sales() {
                 </div>
               </div>
 
-              {/* Single select mode */}
-              {!useMultiSelect && (
-                <div className="grid grid-cols-2 gap-4">
+			  <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label htmlFor="catchSessionId">Catch Session *</Label>
                     <select
@@ -278,51 +207,7 @@ export default function Sales() {
                       required
                     />
                   </div>
-                </div>
-              )}
-
-              {/* Multi-select mode */}
-              {useMultiSelect && (
-                <div className="space-y-3">
-                  <Label>Select Catch Sessions & Set Prices *</Label>
-                  <div className="border rounded-md p-3 max-h-64 overflow-y-auto space-y-2">
-                    {(catchSessions ?? []).map((session: any) => (
-                      <div key={session.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded">
-                        <Checkbox
-                          id={`session-${session.id}`}
-                          checked={selectedSessions.includes(session.id)}
-                          onCheckedChange={() => handleToggleSession(session.id)}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <label
-                            htmlFor={`session-${session.id}`}
-                            className="text-sm cursor-pointer truncate block"
-                          >
-                            {formatCatchSessionDisplay(session)}
-                          </label>
-                        </div>
-                        {selectedSessions.includes(session.id) && (
-                          <Input
-                            type="number"
-                            step="0.01"
-                            placeholder="Price"
-                            value={sessionPrices[session.id] || ""}
-                            onChange={(e) => handleSessionPriceChange(session.id, e.target.value)}
-                            className="w-24"
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {selectedSessions.length > 0 && (
-                    <div className="bg-blue-50 p-3 rounded-md">
-                      <p className="text-sm text-blue-900">
-                        Selected {selectedSessions.length} session(s)
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+			  </div>
 
               <div className="bg-blue-50 p-4 rounded-md">
                 <p className="text-sm text-blue-900">
@@ -336,9 +221,9 @@ export default function Sales() {
                 </Button>
                 <Button 
                   type="submit" 
-                  disabled={createMutation.isPending || createMultipleMutation.isPending}
+                  disabled={createMutation.isPending}
                 >
-                  {createMutation.isPending || createMultipleMutation.isPending ? "Generating..." : "Generate Invoice"}
+				  {createMutation.isPending ? "Generating..." : "Generate Invoice"}
                 </Button>
               </div>
             </form>

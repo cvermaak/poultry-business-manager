@@ -693,6 +693,7 @@ export default function FeedInvoices() {
                   amount: parseFloat(payForm.amount),
                   paymentMethod: payForm.paymentMethod,
                   paymentDate: payForm.paymentDate,
+                  idempotencyKey: `mill-invoice-${payInvoice.id}-${payForm.paymentDate}-${payForm.amount}-${payForm.paymentMethod}`,
                 });
               }}
               disabled={payMutation.isPending}

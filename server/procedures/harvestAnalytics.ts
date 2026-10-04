@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { harvestRecords, flocks } from "../../drizzle/schema";
-import { getDb } from "../db";
+import { getDb, mysqlTimestamp } from "../db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
 /**
@@ -116,10 +116,10 @@ export const harvestAnalyticsRouter = router({
       // Apply date filters if provided
       const conditions: any[] = [];
       if (input.startDate) {
-        conditions.push(gte(harvestRecords.harvestDate, new Date(input.startDate)));
+        conditions.push(gte(harvestRecords.harvestDate, mysqlTimestamp(new Date(input.startDate))));
       }
       if (input.endDate) {
-        conditions.push(lte(harvestRecords.harvestDate, new Date(input.endDate)));
+        conditions.push(lte(harvestRecords.harvestDate, mysqlTimestamp(new Date(input.endDate))));
       }
       
       if (conditions.length > 0) {

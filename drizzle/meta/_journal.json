@@ -197,6 +197,13 @@
       "when": 1775452355484,
       "tag": "0027_friendly_ego",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "5",
+      "when": 1790568359708,
+      "tag": "0057_company_settings_timezone_compatibility",
+      "breakpoints": true
     }
   ]
 }

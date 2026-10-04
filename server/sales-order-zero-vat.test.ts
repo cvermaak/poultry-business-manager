@@ -33,6 +33,6 @@ describe("Sales Order invoice zero-VAT handling", () => {
     expect(invoicePageSource).toContain("formatVatRate(item.taxRate)");
     expect(invoicePageSource).toContain("getInvoiceVatLabel(viewInvoice)");
     expect(invoicePageSource).not.toContain("item.taxRate || '15'");
-    expect(routerSource).toContain("invoice.vatPercentage !== null && invoice.vatPercentage !== undefined");
+    expect(routerSource).toContain("invoiceForPdf.vatPercentage !== null && invoiceForPdf.vatPercentage !== undefined");
   });
 });

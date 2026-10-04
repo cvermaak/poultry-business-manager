@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { getDb, mysqlTimestamp } from "./db";
 import { inventoryItems, inventoryLocations, inventoryStock, inventoryTransactions } from "../drizzle/schema";
 import { eq, and, sql, desc, gte, lte, like, gt } from "drizzle-orm";
 import { formatSKU } from "../shared/sku-constants";
@@ -19,7 +19,7 @@ export async function listUnitsOfMeasure() {
     WHERE is_active = 1
     ORDER BY uom_type, name
   `);
-  return (rows[0] as any[]).map((r: any) => ({
+  return (rows[0] as unknown as any[]).map((r: any) => ({
     code: r.code as string,
     name: r.name as string,
     symbol: r.symbol as string,
@@ -42,7 +42,7 @@ export async function listItemUnitConversions(itemId: number) {
     WHERE item_id = ${itemId}
     ORDER BY from_uom_code
   `);
-  return (rows[0] as any[]).map((r: any) => ({
+  return (rows[0] as unknown as any[]).map((r: any) => ({
     id: r.id as number,
     itemId: r.item_id as number,
     fromUomCode: r.from_uom_code as string,
@@ -109,7 +109,7 @@ export async function convertQuantity(
     WHERE item_id = ${itemId} AND from_uom_code = ${fromUomCode} AND to_uom_code = ${toUomCode}
     LIMIT 1
   `);
-  const itemRows = (itemConv[0] as any[]);
+  const itemRows = itemConv[0] as unknown as any[];
   if (itemRows.length > 0) {
     return quantity * parseFloat(itemRows[0].conversion_factor);
   }
@@ -120,7 +120,7 @@ export async function convertQuantity(
     WHERE item_id = ${itemId} AND from_uom_code = ${toUomCode} AND to_uom_code = ${fromUomCode}
     LIMIT 1
   `);
-  const itemRowsRev = (itemConvRev[0] as any[]);
+  const itemRowsRev = itemConvRev[0] as unknown as any[];
   if (itemRowsRev.length > 0) {
     return quantity / parseFloat(itemRowsRev[0].conversion_factor);
   }
@@ -130,7 +130,7 @@ export async function convertQuantity(
     SELECT code, base_uom_code, conversion_factor FROM unit_of_measures
     WHERE code IN (${fromUomCode}, ${toUomCode})
   `);
-  const uomRows = (uoms[0] as any[]);
+  const uomRows = uoms[0] as unknown as any[];
   const fromUom = uomRows.find((r: any) => r.code === fromUomCode);
   const toUom = uomRows.find((r: any) => r.code === toUomCode);
 
@@ -207,7 +207,7 @@ export async function listInventoryItems(filters?: {
     conditions.push(eq(inventoryItems.category, filters.category as any));
   }
   if (filters?.isActive !== undefined) {
-    conditions.push(eq(inventoryItems.isActive, filters.isActive));
+    conditions.push(eq(inventoryItems.isActive, filters.isActive ? 1 : 0));
   }
 
   if (conditions.length > 0) {
@@ -358,7 +358,7 @@ export async function createInventoryItem(data: {
           name: "Main Warehouse",
           locationType: "warehouse",
           description: "Default storage location",
-          isActive: true,
+          isActive: 1,
         });
         defaultLocation = await db
           .select()
@@ -390,11 +390,11 @@ export async function createInventoryItem(data: {
       locationId,
       transactionType: "receipt",
       quantity: data.currentStock.toString(),
-      unitCost: initialUnitCost !== null ? initialUnitCost.toString() : null,
-      totalCost: initialTotalCost !== null ? initialTotalCost.toString() : null,
+      unitCost: initialUnitCost,
+      totalCost: initialTotalCost,
       referenceType: "initial_stock",
       notes: "Initial stock on item creation",
-      transactionDate: new Date(),
+      transactionDate: mysqlTimestamp(),
       createdBy: 1,
     });
   }
@@ -476,7 +476,7 @@ export async function deleteInventoryItem(id: number) {
   const db = await getDb();
   if (!db) return false;
 
-  await db.update(inventoryItems).set({ isActive: false }).where(eq(inventoryItems.id, id));
+  await db.update(inventoryItems).set({ isActive: 0 }).where(eq(inventoryItems.id, id));
   return true;
 }
 
@@ -489,7 +489,7 @@ export async function listInventoryLocations(filters?: { isActive?: boolean }) {
   if (!db) return [];
 
   if (filters?.isActive !== undefined) {
-    return await db.select().from(inventoryLocations).where(eq(inventoryLocations.isActive, filters.isActive));
+    return await db.select().from(inventoryLocations).where(eq(inventoryLocations.isActive, filters.isActive ? 1 : 0));
   }
 
   return await db.select().from(inventoryLocations);
@@ -581,7 +581,7 @@ export async function getAllStockLevels() {
     .from(inventoryStock)
     .leftJoin(inventoryItems, eq(inventoryStock.itemId, inventoryItems.id))
     .leftJoin(inventoryLocations, eq(inventoryStock.locationId, inventoryLocations.id))
-    .where(eq(inventoryItems.isActive, true));
+    .where(eq(inventoryItems.isActive, 1));
 
   return stocks;
 }
@@ -775,7 +775,7 @@ export async function calculateFIFOCost(
     if (remainingQty <= 0) break;
 
     const receiptQty = parseFloat(receipt.quantity);
-    const receiptUnitCost = receipt.unitCost ? parseInt(receipt.unitCost) : 0;
+    const receiptUnitCost = receipt.unitCost ?? 0;
 
     // If no unit cost, skip (can't calculate cost)
     if (receiptUnitCost === 0) continue;
@@ -798,7 +798,7 @@ export async function calculateFIFOCost(
       .limit(1);
 
     if (item[0]?.unitCost) {
-      const defaultUnitCost = parseInt(item[0].unitCost);
+      const defaultUnitCost = item[0].unitCost;
       totalCost += remainingQty * defaultUnitCost;
     }
   }
@@ -877,14 +877,13 @@ export async function recordTransaction(data: {
     quantity: data.quantity.toString(),
     uomCode: data.uomCode ?? null,
     quantityInBaseUnit: quantityInBaseUnit !== null ? quantityInBaseUnit.toString() : null,
-    unitCost: data.unitCost?.toString(),
-    totalCost: calculatedTotalCost?.toString(),
-    referenceNumber: data.referenceNumber,
+    unitCost: data.unitCost,
+    totalCost: calculatedTotalCost,
+    referenceType: data.referenceNumber,
     notes: data.notes,
-    transactionDate: data.transactionDate,
+    transactionDate: mysqlTimestamp(data.transactionDate),
     createdBy: data.createdBy,
-    flockId: data.flockId,
-  } as any);
+  });
 
   const transactionId = Number(result[0].insertId);
 
@@ -910,13 +909,13 @@ export async function recordTransaction(data: {
         locationId: data.toLocationId,
         transactionType: "receipt",
         quantity: data.quantity.toString(),
-        unitCost: calculatedTotalCost ? (calculatedTotalCost / data.quantity).toString() : undefined,
-        totalCost: calculatedTotalCost?.toString(),
-        referenceNumber: `TRANSFER-${transactionId}`,
+        unitCost: calculatedTotalCost ? calculatedTotalCost / data.quantity : undefined,
+        totalCost: calculatedTotalCost,
+        referenceType: `TRANSFER-${transactionId}`,
         notes: `Transfer from location ${data.locationId}${data.notes ? ': ' + data.notes : ''}`,
-        transactionDate: data.transactionDate,
+        transactionDate: mysqlTimestamp(data.transactionDate),
         createdBy: data.createdBy,
-      } as any);
+      });
       break;
 
     case "adjustment":
@@ -961,8 +960,8 @@ export async function getTransactionHistory(
   const conditions = [];
   if (itemId) conditions.push(eq(inventoryTransactions.itemId, itemId));
   if (locationId) conditions.push(eq(inventoryTransactions.locationId, locationId));
-  if (startDate) conditions.push(gte(inventoryTransactions.transactionDate, startDate));
-  if (endDate) conditions.push(lte(inventoryTransactions.transactionDate, endDate));
+  if (startDate) conditions.push(gte(inventoryTransactions.transactionDate, mysqlTimestamp(startDate)));
+  if (endDate) conditions.push(lte(inventoryTransactions.transactionDate, mysqlTimestamp(endDate)));
 
   if (conditions.length > 0) {
     return await baseQuery.where(and(...conditions)).orderBy(desc(inventoryTransactions.transactionDate));
@@ -994,7 +993,7 @@ export async function getReorderAlerts() {
     .leftJoin(inventoryStock, eq(inventoryItems.id, inventoryStock.itemId))
     .where(
       and(
-        eq(inventoryItems.isActive, true),
+        eq(inventoryItems.isActive, 1),
         sql`${inventoryItems.reorderPoint} IS NOT NULL`
       )
     )
@@ -1199,7 +1198,7 @@ export async function getStockValuation() {
 
   for (const stock of stockWithDetails) {
     const qty = parseFloat(stock.quantity);
-    const cost = stock.unitCost ? parseFloat(stock.unitCost) / 100 : 0; // unitCost stored in cents, convert to Rand
+    const cost = stock.unitCost ? stock.unitCost / 100 : 0; // unitCost stored in cents, convert to Rand
     const value = qty * cost;
 
     totalValue += value;
@@ -1227,7 +1226,7 @@ export async function getStockValuation() {
       locationName: stock.locationName,
       quantity: stock.quantity,
       unit: stock.unit,
-      unitCost: stock.unitCost,
+      unitCost: stock.unitCost === null ? null : String(stock.unitCost),
       totalValue: value,
     });
   }

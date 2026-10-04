@@ -21,6 +21,7 @@ import { harvestAnalyticsRouter } from "./procedures/harvestAnalytics";
 import { catchRouter } from "./procedures/catch";
 import { densityRouter } from "./procedures/density";
 import { validateStressPackAdministration } from "./stress-pack-administration";
+import { calculateInvoiceTotals } from "./invoice-money";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -32,7 +33,7 @@ function serializeCookie(name: string, value: string, options: any) {
 // Admin-only procedure
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin") {
-    throw new Error("Forbidden: Admin access required");
+    throw new TRPCError({ code: "FORBIDDEN", message: "Admin access is required." });
   }
   return next({ ctx });
 });
@@ -93,13 +94,7 @@ export const appRouter = router({
         
         const cookieOptions = getSessionCookieOptions(ctx.req);
         ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
-        
-        // Also generate a JWT and return it to the client so it can be
-        // stored client-side (localStorage/sessionStorage) and sent via the
-        // Authorization header. This is required for environments like
-        // incognito/private browsing where cookies may be blocked or
-        // cleared, which would otherwise leave the user unauthenticated
-        // even though login succeeded.
+
         const token = generateJWT({
           userId: user.id,
           email: user.email || "",
@@ -108,8 +103,8 @@ export const appRouter = router({
         
         return {
           success: true,
-          mustChangePassword: user.mustChangePassword,
           token,
+          mustChangePassword: user.mustChangePassword,
           user: {
             id: user.id,
             name: user.name,
@@ -334,7 +329,7 @@ export const appRouter = router({
           houseNumber: z.string().optional(),
           length: z.number().positive(),
           width: z.number().positive(),
-          capacity: z.number().int().positive(),
+          capacity: z.number().int().positive().optional(),
           houseType: z.enum(["open_sided", "closed", "semi_closed"]).default("closed"),
           breed: z.enum(["ross_308", "cobb_500", "arbor_acres"]).default("ross_308"),
           farmName: z.string().optional(),
@@ -390,7 +385,7 @@ export const appRouter = router({
           targetSlaughterWeight: input.targetSlaughterWeight.toString(),
           densityKgPerSqm: densityToUse.toString(),
           // Use calculated capacity if not manually overridden
-          capacity: input.capacity || capacityCalculation.placementCapacity,
+          capacity: input.capacity ?? capacityCalculation.placementCapacity,
           createdBy: ctx.user.id 
         });
         await db.logUserActivity(ctx.user.id, "create_house", "house", undefined, `Created house: ${input.name}`);
@@ -399,7 +394,7 @@ export const appRouter = router({
           capacityCalculation: {
             ...capacityCalculation,
             calculatedCapacity: capacityCalculation.placementCapacity,
-            usedCapacity: input.capacity || capacityCalculation.placementCapacity,
+            usedCapacity: input.capacity ?? capacityCalculation.placementCapacity,
           },
         };
       }),
@@ -434,13 +429,61 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
-        const { id, length, width, ...rest } = input;
+        const { id, length, width, capacity, houseType, mortalityRate, targetSlaughterWeight, densityKgPerSqm, ...rest } = input;
+        const existingHouse = await db.getHouseById(id);
+        if (!existingHouse) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "House not found" });
+        }
+
+        const effectiveHouseType = houseType ?? existingHouse.houseType;
+        const effectiveLength = length ?? Number(existingHouse.length);
+        const effectiveWidth = width ?? Number(existingHouse.width);
+        const effectiveMortalityRate = mortalityRate ?? Number(existingHouse.mortalityRate);
+        const effectiveTargetSlaughterWeight = targetSlaughterWeight ?? Number(existingHouse.targetSlaughterWeight);
+        const { calculateHouseCapacity, getRecommendedDensity, validateDensity } = await import("./house-capacity");
+        const effectiveDensity = densityKgPerSqm ?? Number(existingHouse.densityKgPerSqm ?? getRecommendedDensity(effectiveHouseType));
+        const densityValidation = validateDensity(effectiveHouseType, effectiveDensity);
+        if (!densityValidation.valid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: densityValidation.message });
+        }
+
+        const recalculationRequired = length !== undefined
+          || width !== undefined
+          || houseType !== undefined
+          || mortalityRate !== undefined
+          || targetSlaughterWeight !== undefined
+          || densityKgPerSqm !== undefined;
+        const capacityCalculation = recalculationRequired
+          ? calculateHouseCapacity({
+              floorArea: effectiveLength * effectiveWidth,
+              houseType: effectiveHouseType,
+              densityKgPerSqm: effectiveDensity,
+              targetSlaughterWeight: effectiveTargetSlaughterWeight,
+              mortalityRate: effectiveMortalityRate,
+            })
+          : undefined;
+
         const data: any = { ...rest };
         if (length !== undefined) data.length = length.toString();
         if (width !== undefined) data.width = width.toString();
+        if (houseType !== undefined) data.houseType = houseType;
+        if (mortalityRate !== undefined) data.mortalityRate = mortalityRate.toString();
+        if (targetSlaughterWeight !== undefined) data.targetSlaughterWeight = targetSlaughterWeight.toString();
+        if (densityKgPerSqm !== undefined || houseType !== undefined) data.densityKgPerSqm = effectiveDensity.toString();
+        if (capacity !== undefined) data.capacity = capacity;
+        else if (capacityCalculation) data.capacity = capacityCalculation.placementCapacity;
         await db.updateHouse(id, data);
         await db.logUserActivity(ctx.user.id, "update_house", "house", id, `Updated house: ${id}`);
-        return { success: true };
+        return {
+          success: true,
+          capacityCalculation: capacityCalculation
+            ? {
+                ...capacityCalculation,
+                calculatedCapacity: capacityCalculation.placementCapacity,
+                usedCapacity: capacity ?? capacityCalculation.placementCapacity,
+              }
+            : undefined,
+        };
       }),
 
     delete: adminProcedure
@@ -523,6 +566,7 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const result = await db.createFlock({
           ...input,
+          placementDate: db.mysqlTimestamp(input.placementDate),
           targetSlaughterWeight: input.targetSlaughterWeight.toString(),
           targetDeliveredWeight: input.targetDeliveredWeight?.toString(),
           targetCatchingWeight: input.targetCatchingWeight?.toString(),
@@ -726,6 +770,7 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         await db.createFlockDailyRecord({ 
           ...input, 
+          recordDate: db.mysqlTimestamp(input.recordDate),
           feedConsumed: input.feedConsumed.toString(),
           waterConsumed: input.waterConsumed?.toString(),
           averageWeight: input.averageWeight?.toString(),
@@ -820,7 +865,9 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         await db.createHealthRecord({
           ...input,
-          cost: input.cost || null,
+          recordDate: db.mysqlTimestamp(input.recordDate),
+          followUpDate: input.followUpDate ? db.mysqlTimestamp(input.followUpDate) : undefined,
+          cost: input.cost ?? null,
           recordedBy: ctx.user.id,
         });
         await db.logUserActivity(
@@ -850,10 +897,12 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
-        const { id, ...data } = input;
+        const { id, recordDate, followUpDate, ...data } = input;
         await db.updateHealthRecord(id, {
           ...data,
           cost: data.cost !== undefined ? data.cost : undefined,
+          recordDate: recordDate ? db.mysqlTimestamp(recordDate) : undefined,
+          followUpDate: followUpDate ? db.mysqlTimestamp(followUpDate) : undefined,
         });
         await db.logUserActivity(
           ctx.user.id,
@@ -880,6 +929,7 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         await db.createVaccinationSchedule({
           ...input,
+          scheduledDate: db.mysqlTimestamp(input.scheduledDate),
           status: "scheduled",
         });
         await db.logUserActivity(
@@ -1816,7 +1866,7 @@ export const appRouter = router({
   // COMPANY SETTINGS
   // ============================================================================
   companySettings: router({
-    get: protectedProcedure.query(async () => {
+    get: adminProcedure.query(async () => {
       return await db.getCompanySettings();
     }),
 
@@ -1854,6 +1904,7 @@ export const appRouter = router({
         totalBirds: z.number().nonnegative().optional(),
         totalWeight: z.number().nonnegative().optional(),
         vatPercentage: z.number().default(15),
+        notes: z.string().max(5000).optional(),
         lineItems: z.array(z.object({
           description: z.string(),
           quantity: z.number().nonnegative(),
@@ -1883,17 +1934,15 @@ export const appRouter = router({
         let vatAmount = 0;
         let inclusiveTotal = 0;
         let pricePerKgExcl = input.pricePerKgExcl ?? 0;
+        let headerVatPercentage: number | null = input.vatPercentage;
 
         if (input.lineItems && input.lineItems.length > 0) {
-          for (const item of input.lineItems) {
-            const lineSubtotal = item.quantity * item.unitPrice;
-            const lineDiscount = lineSubtotal * (item.discountPercent / 100);
-            const lineExclusive = lineSubtotal - lineDiscount;
-            const lineVat = lineExclusive * (item.vatPercent / 100);
-            exclusiveTotal += lineExclusive;
-            vatAmount += lineVat;
-          }
-          inclusiveTotal = exclusiveTotal + vatAmount;
+          const totals = calculateInvoiceTotals(input.lineItems);
+          exclusiveTotal = totals.exclusiveCents / 100;
+          vatAmount = totals.vatCents / 100;
+          inclusiveTotal = totals.inclusiveCents / 100;
+          const vatRates = new Set(input.lineItems.map((item) => item.vatPercent));
+          headerVatPercentage = vatRates.size === 1 ? input.lineItems[0].vatPercent : null;
           // Derive pricePerKgExcl for poultry invoices
           if (totalWeight > 0) {
             pricePerKgExcl = exclusiveTotal / totalWeight;
@@ -1915,7 +1964,8 @@ export const appRouter = router({
           pricePerKgExcl,
           totalBirds,
           totalWeight,
-          vatPercentage: input.vatPercentage,
+          vatPercentage: headerVatPercentage,
+          notes: input.notes?.trim() || undefined,
           createdBy: ctx.user.id,
           // Pass pre-computed totals so db helper doesn't recalculate from weight × price
           exclusiveTotal,
@@ -1994,22 +2044,43 @@ export const appRouter = router({
           if (!invoice) {
             throw new Error('Invoice not found');
           }
+          const invoiceForPdf = invoice as Record<string, any>;
+          const customerId = Number(invoiceForPdf.customerId);
 
-          const [customer, companySettings] = await Promise.all([
-            db.getCustomerById(invoice.customerId),
+          const [customer, companySettings, customerAddresses] = await Promise.all([
+            db.getCustomerById(customerId),
             db.getCompanySettings(),
+            db.getCustomerAddresses(customerId),
           ]);
 
-          // Build company info from settings
-          const companyInfo = companySettings ? {
+          if (!companySettings?.companyName?.trim() || !companySettings.address?.trim()) {
+            throw new Error("Company Settings is incomplete. Set the company name and business address before downloading an invoice PDF.");
+          }
+
+          const billingAddress = customerAddresses.find((address: any) =>
+            (address.addressType === "billing" || address.addressType === "both") && Boolean(address.isDefault),
+          ) ?? customerAddresses.find((address: any) => address.addressType === "billing" || address.addressType === "both");
+          const customerAddress = billingAddress
+            ? [
+                billingAddress.addressLine1,
+                billingAddress.addressLine2,
+                billingAddress.city,
+                billingAddress.province,
+                billingAddress.postalCode,
+                billingAddress.country,
+              ].filter(Boolean).join(", ")
+            : undefined;
+
+          // Company Settings is the authoritative issuer identity for regulated PDF output.
+          const companyInfo = {
             name: companySettings.companyName,
             vatNumber: companySettings.vatNumber || undefined,
             registrationNumber: companySettings.registrationNumber || undefined,
-            address: companySettings.address || undefined,
+            address: companySettings.address,
             phone: companySettings.phone || undefined,
             email: companySettings.email || undefined,
             website: companySettings.website || undefined,
-          } : undefined;
+          };
 
           // Build bank details from company settings if available
           const bankDetails = (companySettings?.bankName && companySettings?.accountNumber)
@@ -2018,7 +2089,7 @@ export const appRouter = router({
                 branchCode: companySettings.branchCode || '',
                 accountName: companySettings.accountName || companySettings.companyName,
                 accountNumber: companySettings.accountNumber,
-                reference: companySettings.accountReference || invoice.invoiceNumber,
+                reference: companySettings.accountReference || invoiceForPdf.invoiceNumber,
               }
             : undefined;
           
@@ -2026,42 +2097,59 @@ export const appRouter = router({
           const storedItems = await db.getInvoiceItems(invoiceId);
 
           // Build line items for PDF: use stored items if available, otherwise fall back to catch session data
-          type PDFLineItem = { description: string; quantity: number; pricePerUnit: number; weight?: number; vatPercentage?: number; discount?: number };
+          type PDFLineItem = {
+            description: string;
+            quantity: number;
+            pricePerUnit: number;
+            vatPercentage?: number;
+            discount?: number;
+            discountAmount?: number;
+            exclusiveAmount?: number;
+            vatAmount?: number;
+            totalAmount?: number;
+          };
           const pdfLineItems: PDFLineItem[] = storedItems.length > 0
             ? storedItems.map((item) => ({
                 description: item.description ?? '',
                 quantity: typeof item.quantity === 'number' ? item.quantity : parseFloat(String(item.quantity || '1')),
-                pricePerUnit: (item.unitPrice || 0) / 100,
-                weight: typeof item.quantity === 'number' ? item.quantity : parseFloat(String(item.quantity || '0')),
+                pricePerUnit: Number(item.unitPrice ?? 0) / 100,
                 vatPercentage: item.taxRate !== null && item.taxRate !== undefined ? parseFloat(item.taxRate.toString()) : 0,
-                discount: item.discountPercent || 0,
+                discount: Number(item.discountPercent ?? 0),
+                discountAmount: Number(item.discountAmount ?? 0) / 100,
+                exclusiveAmount: Number(item.subtotal ?? 0) / 100,
+                vatAmount: Number(item.taxAmount ?? 0) / 100,
+                totalAmount: Number(item.totalAmount ?? 0) / 100,
               }))
             : [
                 {
-                  description: invoice.catchSessionId
-                    ? `${invoice.totalBirds || 0} Broiler Chickens @ R${parseFloat(invoice.pricePerKgExcl?.toString() || '0').toFixed(2)} per kg`
+                  description: invoiceForPdf.catchSessionId
+                    ? `${invoiceForPdf.totalBirds || 0} Broiler Chickens @ R${parseFloat(invoiceForPdf.pricePerKgExcl?.toString() || '0').toFixed(2)} per kg`
                     : 'Invoice item',
-                  quantity: Number(invoice.totalBirds || 1),
-                  pricePerUnit: parseFloat(invoice.pricePerKgExcl?.toString() || '0'),
-                  weight: parseFloat(invoice.totalWeight?.toString() || '0'),
-                  vatPercentage: invoice.vatPercentage !== null && invoice.vatPercentage !== undefined
-                    ? parseFloat(invoice.vatPercentage.toString())
+                  quantity: Number(invoiceForPdf.totalBirds || 1),
+                  pricePerUnit: parseFloat(invoiceForPdf.pricePerKgExcl?.toString() || '0'),
+                  vatPercentage: invoiceForPdf.vatPercentage !== null && invoiceForPdf.vatPercentage !== undefined
+                    ? parseFloat(invoiceForPdf.vatPercentage.toString())
                     : 15,
+                  exclusiveAmount: parseFloat(invoiceForPdf.exclusiveTotal?.toString() || '0'),
+                  vatAmount: parseFloat(invoiceForPdf.vatAmount?.toString() || '0'),
+                  totalAmount: parseFloat(invoiceForPdf.inclusiveTotal?.toString() || '0'),
                 },
               ];
 
           const pdfBuffer = await generatePremiumInvoicePDF({
-            invoiceNumber: invoice.invoiceNumber,
-            invoiceDate: new Date(invoice.invoiceDate),
-            dueDate: new Date(invoice.dueDate),
+            invoiceNumber: String(invoiceForPdf.invoiceNumber),
+            invoiceDate: new Date(String(invoiceForPdf.invoiceDate)),
+            dueDate: new Date(String(invoiceForPdf.dueDate)),
             customerName: customer?.name || 'Unknown Customer',
             customerVATNo: customer?.vatNumber || undefined,
             customerRegNo: customer?.taxNumber || undefined,
-            customerAddress: customer?.companyName || undefined,
+            customerAddress,
             lineItems: pdfLineItems,
-            totalExclusive: parseFloat(invoice.exclusiveTotal?.toString() || '0'),
-            totalVAT: parseFloat(invoice.vatAmount?.toString() || '0'),
-            totalInclusive: parseFloat(invoice.inclusiveTotal?.toString() || '0'),
+            totalDiscount: pdfLineItems.reduce((sum, item) => sum + (item.discountAmount ?? 0), 0),
+            totalExclusive: parseFloat(invoiceForPdf.exclusiveTotal?.toString() || '0'),
+            totalVAT: parseFloat(invoiceForPdf.vatAmount?.toString() || '0'),
+            totalInclusive: parseFloat(invoiceForPdf.inclusiveTotal?.toString() || '0'),
+            notes: invoiceForPdf.notes || undefined,
             bankDetails,
             companyInfo,
           });
@@ -2069,7 +2157,7 @@ export const appRouter = router({
           return {
             success: true,
             pdfBuffer: pdfBuffer.toString('base64'),
-            filename: `invoice-${invoice.invoiceNumber}.pdf`,
+            filename: `invoice-${String(invoiceForPdf.invoiceNumber)}.pdf`,
           };
         } catch (error) {
           console.error('Error generating PDF:', error);

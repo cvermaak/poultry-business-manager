@@ -235,6 +235,16 @@ export function Invoices() {
     return Number.isFinite(rate) ? `${rate.toFixed(2)}%` : fallback;
   };
 
+  const hasMixedVatRates = (lineItems?: any[]) => {
+    const lineRates = new Set(
+      (lineItems ?? [])
+        .map((item) => item.taxRate)
+        .filter((rate) => rate !== null && rate !== undefined && rate !== "")
+        .map((rate) => Number(rate)),
+    );
+    return lineRates.size > 1;
+  };
+
   const getInvoiceVatLabel = (invoice: any) =>
     invoice.vatPercentage === null || invoice.vatPercentage === undefined
       ? "Mixed rates"
@@ -725,7 +735,7 @@ export function Invoices() {
                     <span>{formatCurrency(viewInvoice.exclusiveTotal || 0)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">VAT ({getInvoiceVatLabel(viewInvoice)})</span>
+                    <span className="text-muted-foreground">VAT ({hasMixedVatRates(viewInvoiceItems) ? "Mixed rates" : getInvoiceVatLabel(viewInvoice)})</span>
                     <span>{formatCurrency(viewInvoice.vatAmount || 0)}</span>
                   </div>
                   <Separator />

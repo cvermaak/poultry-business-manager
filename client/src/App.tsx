@@ -18,7 +18,6 @@ import Harvests from "./pages/Harvests";
 import Processors from "./pages/Processors";
 import CrateTypes from "./pages/CrateTypes";
 import CatchOperations from "./pages/CatchOperations";
-import SlaughterManagement from "./pages/SlaughterManagement";
 import Customers from "./pages/Customers";
 import Sales from "./pages/Sales";
 import SalesOrders from "./pages/SalesOrders";
@@ -100,12 +99,6 @@ function Router() {
       <Route path="/catch-operations">
         <DashboardLayout>
           <CatchOperations />
-        </DashboardLayout>
-      </Route>
-
-      <Route path="/flocks/:flockId/slaughter">
-        <DashboardLayout>
-          <SlaughterManagement />
         </DashboardLayout>
       </Route>
 

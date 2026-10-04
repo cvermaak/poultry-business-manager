@@ -2,10 +2,9 @@ import jwt from "jsonwebtoken";
 import type { Request } from "express";
 import { parse } from "cookie";
 import * as db from "../db";
+import { COOKIE_NAME } from "@shared/const";
 
 const { verify, sign } = jwt;
-
-const COOKIE_NAME = "session";
 
 export const sdk = {
   // 🔐 Used by TRPC context for every request

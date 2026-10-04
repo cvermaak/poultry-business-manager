@@ -171,9 +171,9 @@ export default function FeedOrders() {
       setForm((prev) => ({
         ...prev,
         formulationId,
-        macroKgPerTon: formulation.macroInclusionKgPerTon || "",
-        soyaOilKgPerTon: formulation.soyaOilInclusionKgPerTon || "",
-        probioticKgPerTon: formulation.probioticInclusionKgPerTon || "",
+        macroKgPerTon: formulation.macroKgPerTon || "",
+        soyaOilKgPerTon: formulation.soyaOilKgPerTon || "",
+        probioticKgPerTon: formulation.probioticKgPerTon || "",
       }));
     } else {
       setForm((prev) => ({ ...prev, formulationId }));

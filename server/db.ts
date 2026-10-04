@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, asc, sql, or, like, inArray, isNotNull, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, lt, desc, asc, sql, or, like, inArray, isNotNull, isNull, getTableColumns } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertUser,
@@ -72,6 +72,7 @@ import {
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
+import { calculateInvoiceLineMoney, calculateInvoiceTotals, formatCents } from "./invoice-money";
 import {
 	calculateAgedPayablesReport,
 	calculateAgedReceivablesReport,
@@ -113,84 +114,35 @@ import {
 	type CloseReviewType,
 } from "./period-close";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+const dbSchema = {
+	users, houses, flocks, flockDailyRecords, vaccinationSchedules, healthRecords,
+	mortalityRecords, feedFormulations, feedBatches, rawMaterials, rawMaterialTransactions,
+	qualityControlRecords, customers, customerAddresses, salesOrders, salesOrderItems,
+	invoices, invoiceItems, invoiceLineItems, payments, paymentAllocations, suppliers,
+	itemTemplates, procurementSchedules, procurementOrders, procurementOrderItems,
+	chartOfAccounts, generalLedgerEntries, journalEntries, inventoryItems,
+	inventoryLocations, inventoryTransactions, documents, userActivityLogs, reminders,
+	vaccines, stressPacks, flockVaccinationSchedules, flockStressPackSchedules,
+	reminderTemplates, healthProtocolTemplates, harvestRecords, processors, catchSessions,
+	companySettings, expenseCategories, expenses, cashFlowForecasts, cashFlowItems,
+	millCosts, customerFeedPrices, feedOrders, feedOrderDeliveries, additivePurchaseOrders,
+	additiveInventoryMappings, inventoryStock, millInvoices, preTransportProtocols,
+	accountingSourcePostings, customerInvoicePayments, supplierInvoicePayments,
+	bankReconciliations, bankStatementLines, bankReconciliationMatches, financialPeriods,
+	financialControlReviews, financialPeriodActions,
+} as const;
+
+type AppDatabase = ReturnType<typeof drizzle<typeof dbSchema>>;
+let _db: AppDatabase | null = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL, {
-        mode: "default",
-        schema: {
-          users,
-          houses,
-          flocks,
-          flockDailyRecords,
-          vaccinationSchedules,
-          healthRecords,
-          mortalityRecords,
-          feedFormulations,
-          feedBatches,
-          rawMaterials,
-          rawMaterialTransactions,
-          qualityControlRecords,
-          customers,
-          customerAddresses,
-          salesOrders,
-          salesOrderItems,
-          invoices,
-          invoiceItems,
-          invoiceLineItems,
-          payments,
-          paymentAllocations,
-          suppliers,
-          itemTemplates,
-          procurementSchedules,
-          procurementOrders,
-          procurementOrderItems,
-          chartOfAccounts,
-          generalLedgerEntries,
-          journalEntries,
-          inventoryItems,
-          inventoryLocations,
-          inventoryTransactions,
-          documents,
-          userActivityLogs,
-          reminders,
-          vaccines,
-          stressPacks,
-          flockVaccinationSchedules,
-          flockStressPackSchedules,
-          reminderTemplates,
-          healthProtocolTemplates,
-          harvestRecords,
-          processors,
-          catchSessions,
-          companySettings,
-          expenseCategories,
-          expenses,
-          cashFlowForecasts,
-          cashFlowItems,
-          millCosts,
-          customerFeedPrices,
-          feedOrders,
-          feedOrderDeliveries,
-          additivePurchaseOrders,
-          additiveInventoryMappings,
-		  inventoryStock,
-		  millInvoices,
-			  preTransportProtocols,
-			  accountingSourcePostings,
-			  customerInvoicePayments,
-			  supplierInvoicePayments,
-			  bankReconciliations,
-			  bankStatementLines,
-			  bankReconciliationMatches,
-			  financialPeriods,
-			  financialControlReviews,
-			  financialPeriodActions,
-			},
-      });
+	try {
+	  _db = drizzle(process.env.DATABASE_URL, {
+	    mode: "default",
+	    schema: dbSchema,
+	  });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -246,11 +198,11 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     }
 
     if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
+      values.lastSignedIn = mysqlTimestamp();
     }
 
     if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
+      updateSet.lastSignedIn = mysqlTimestamp();
     }
 
     await db.insert(users).values(values).onDuplicateKeyUpdate({
@@ -285,7 +237,7 @@ export async function listUsers() {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(users).where(eq(users.isActive, true)).orderBy(asc(users.name));
+  return await db.select().from(users).where(eq(users.isActive, 1)).orderBy(asc(users.name));
 }
 
 export async function updateUserRole(userId: number, role: string) {
@@ -363,8 +315,8 @@ export async function createEmailUser(data: {
     passwordHash: data.passwordHash,
     loginMethod: "email",
     role: data.role,
-    isActive: true,
-    mustChangePassword: false,
+    isActive: 1,
+    mustChangePassword: 0,
     createdBy: data.createdBy,
   });
 
@@ -377,8 +329,8 @@ export async function updateUserPassword(userId: number, passwordHash: string, m
 
   await db.update(users).set({ 
     passwordHash, 
-    mustChangePassword,
-    updatedAt: new Date() 
+    mustChangePassword: mustChangePassword ? 1 : 0,
+    updatedAt: mysqlTimestamp(),
   }).where(eq(users.id, userId));
   return true;
 }
@@ -387,7 +339,7 @@ export async function updateUserLastSignIn(userId: number) {
   const db = await getDb();
   if (!db) return false;
 
-  await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, userId));
+  await db.update(users).set({ lastSignedIn: mysqlTimestamp() }).where(eq(users.id, userId));
   return true;
 }
 
@@ -395,7 +347,7 @@ export async function deactivateUser(userId: number) {
   const db = await getDb();
   if (!db) return false;
 
-  await db.update(users).set({ isActive: false }).where(eq(users.id, userId));
+  await db.update(users).set({ isActive: 0 }).where(eq(users.id, userId));
   return true;
 }
 
@@ -403,7 +355,7 @@ export async function activateUser(userId: number) {
   const db = await getDb();
   if (!db) return false;
 
-  await db.update(users).set({ isActive: true }).where(eq(users.id, userId));
+  await db.update(users).set({ isActive: 1 }).where(eq(users.id, userId));
   return true;
 }
 
@@ -424,7 +376,7 @@ export async function updateUser(userId: number, data: {
   const db = await getDb();
   if (!db) return false;
 
-  await db.update(users).set({ ...data, updatedAt: new Date() }).where(eq(users.id, userId));
+  await db.update(users).set({ ...data, updatedAt: mysqlTimestamp() }).where(eq(users.id, userId));
   return true;
 }
 
@@ -437,7 +389,7 @@ export async function listHouses() {
   if (!db) return [];
 
   // Get houses with active flock count for status indication
-  const houseList = await db.select().from(houses).where(eq(houses.isActive, true)).orderBy(asc(houses.name));
+  const houseList = await db.select().from(houses).where(eq(houses.isActive, 1)).orderBy(asc(houses.name));
   
   // Get active/planned flock counts per house
   const flockCounts = await db
@@ -514,7 +466,7 @@ export async function deleteHouse(id: number) {
       throw new Error(`Cannot delete house: ${activeFlocks.length} active/planned flock(s) are using this house`);
     }
     // Soft delete - mark as inactive instead of hard delete if there are historical flocks
-    await db.update(houses).set({ isActive: false }).where(eq(houses.id, id));
+    await db.update(houses).set({ isActive: 0 }).where(eq(houses.id, id));
     return { softDeleted: true, message: "House marked as inactive due to historical flocks" };
   }
 
@@ -757,7 +709,7 @@ export async function updateFlockReminderDates(flockId: number, daysDiff: number
     const newDueDate = new Date(reminder.dueDate);
     newDueDate.setDate(newDueDate.getDate() + daysDiff);
     await dbConn.update(reminders)
-      .set({ dueDate: newDueDate })
+      .set({ dueDate: mysqlTimestamp(newDueDate) })
       .where(eq(reminders.id, reminder.id));
   }
   return true;
@@ -827,7 +779,7 @@ export async function updateFlockDailyRecord(id: number, data: Partial<typeof fl
   if (!db) throw new Error("Database not available");
 
   await db.update(flockDailyRecords)
-    .set({ ...data, updatedAt: new Date() })
+    .set({ ...data, updatedAt: mysqlTimestamp() })
     .where(eq(flockDailyRecords.id, id));
   return { success: true };
 }
@@ -918,7 +870,7 @@ export async function listRawMaterials() {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(rawMaterials).where(eq(rawMaterials.isActive, true)).orderBy(asc(rawMaterials.name));
+  return await db.select().from(rawMaterials).where(eq(rawMaterials.isActive, 1)).orderBy(asc(rawMaterials.name));
 }
 
 export async function getRawMaterialById(id: number) {
@@ -943,7 +895,7 @@ export async function listCustomers(filters?: { segment?: string; isActive?: boo
     query = query.where(eq(customers.segment, filters.segment as any));
   }
   if (filters?.isActive !== undefined) {
-    query = query.where(eq(customers.isActive, filters.isActive));
+    query = query.where(eq(customers.isActive, filters.isActive ? 1 : 0));
   }
 
   return await query.orderBy(asc(customers.name));
@@ -1007,7 +959,12 @@ export async function updateCustomer(
 ) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(customers).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(customers.id, id));
+  const { isActive, ...customerData } = data;
+  await db.update(customers).set({
+    ...customerData,
+    ...(isActive === undefined ? {} : { isActive: isActive ? 1 : 0 }),
+    updatedAt: mysqlTimestamp(),
+  }).where(eq(customers.id, id));
   const updated = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
   return updated[0];
 }
@@ -1015,7 +972,7 @@ export async function updateCustomer(
 export async function deleteCustomer(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.update(customers).set({ isActive: false, updatedAt: new Date().toISOString() }).where(eq(customers.id, id));
+  await db.update(customers).set({ isActive: 0, updatedAt: mysqlTimestamp() }).where(eq(customers.id, id));
   const updated = await db.select().from(customers).where(eq(customers.id, id)).limit(1);
   return updated[0];
 }
@@ -1030,7 +987,7 @@ export async function listInvoices(filters?: { customerId?: number; status?: str
 
   let query = db
     .select({
-      ...invoices,
+      ...getTableColumns(invoices),
       customerName: customers.name,
       orderNumber: salesOrders.orderNumber,
     })
@@ -1056,7 +1013,7 @@ export async function getInvoiceById(id: number) {
 
   const result = await db
     .select({
-      ...invoices,
+      ...getTableColumns(invoices),
       customerName: customers.name,
       orderNumber: salesOrders.orderNumber,
     })
@@ -1096,13 +1053,12 @@ export async function getInvoiceItems(invoiceId: number) {
       const quantity = parseFloat(item.quantity?.toString() || '0');
       const discountPct = parseFloat(item.discount?.toString() || '0');
       const vatPct = parseFloat(item.vatPercentage?.toString() || '15');
-
-      const subtotal = quantity * pricePerUnit;
-      const discountAmount = subtotal * (discountPct / 100);
-
-      const subtotalExcl = subtotal - discountAmount;
-      const taxAmt = subtotalExcl * (vatPct / 100);
-      const total = subtotalExcl + taxAmt;
+      const amounts = calculateInvoiceLineMoney({
+        quantity,
+        unitPrice: pricePerUnit,
+        discountPercent: discountPct,
+        vatPercent: vatPct,
+      });
 
       return {
         id: item.id,
@@ -1114,13 +1070,13 @@ export async function getInvoiceItems(invoiceId: number) {
 
         unit: 'unit',
         unitPrice: Math.round(pricePerUnit * 100),
-        subtotal: Math.round(subtotalExcl * 100),
+        subtotal: amounts.exclusiveCents,
         taxRate: vatPct,
-        taxAmount: Math.round(taxAmt * 100),
-        totalAmount: Math.round(total * 100),
+        taxAmount: amounts.vatCents,
+        totalAmount: amounts.inclusiveCents,
 
         discountPercent: discountPct,
-        discountAmount: Math.round(discountAmount * 100),
+        discountAmount: amounts.discountCents,
 
         createdAt: item.createdAt,
       };
@@ -1144,9 +1100,12 @@ export async function createInvoiceLineItem(data: {
 
   const discount = data.discountPercent ?? 0;
   const vatPct = data.vatPercentage ?? 15;
-  const subtotal = data.quantity * data.pricePerUnit;
-  const discountAmount = subtotal * (discount / 100);
-  const amount = (subtotal - discountAmount) * (1 + vatPct / 100);
+  const amounts = calculateInvoiceLineMoney({
+    quantity: data.quantity,
+    unitPrice: data.pricePerUnit,
+    discountPercent: discount,
+    vatPercent: vatPct,
+  });
 
   await db.insert(invoiceLineItems).values({
     invoiceId: data.invoiceId,
@@ -1154,9 +1113,9 @@ export async function createInvoiceLineItem(data: {
     quantity: data.quantity.toString(),
     pricePerUnit: data.pricePerUnit.toString(),
     discount: discount.toString(),
-    discountAmount: discountAmount.toFixed(2),
+    discountAmount: formatCents(amounts.discountCents),
     vatPercentage: vatPct.toString(),
-    amount: amount.toFixed(2),
+    amount: formatCents(amounts.inclusiveCents),
   });
 }
 
@@ -1221,7 +1180,7 @@ export async function listSuppliers(filters?: { category?: string; isActive?: bo
     query = query.where(eq(suppliers.category, filters.category));
   }
   if (filters?.isActive !== undefined) {
-    query = query.where(eq(suppliers.isActive, filters.isActive));
+    query = query.where(eq(suppliers.isActive, filters.isActive ? 1 : 0));
   }
 
   return await query.orderBy(asc(suppliers.name));
@@ -1340,7 +1299,7 @@ export async function listItemTemplates(filters?: { category?: string; isActive?
     query = query.where(eq(itemTemplates.category, filters.category));
   }
   if (filters?.isActive !== undefined) {
-    query = query.where(eq(itemTemplates.isActive, filters.isActive));
+    query = query.where(eq(itemTemplates.isActive, filters.isActive ? 1 : 0));
   }
 
   return await query.orderBy(asc(itemTemplates.name));
@@ -1378,8 +1337,8 @@ export async function listUpcomingProcurementSchedules(days = 7) {
     .from(procurementSchedules)
     .where(
       and(
-        gte(procurementSchedules.scheduledOrderDate, today),
-        lte(procurementSchedules.scheduledOrderDate, futureDate),
+        gte(procurementSchedules.scheduledOrderDate, financialBusinessDate(today)),
+        lte(procurementSchedules.scheduledOrderDate, financialBusinessDate(futureDate)),
         eq(procurementSchedules.status, "pending")
       )
     )
@@ -1400,7 +1359,7 @@ export async function listChartOfAccounts(accountType?: string) {
     query = query.where(eq(chartOfAccounts.accountType, accountType as any));
   }
 
-  return await query.where(eq(chartOfAccounts.isActive, true)).orderBy(asc(chartOfAccounts.accountNumber));
+  return await query.where(eq(chartOfAccounts.isActive, 1)).orderBy(asc(chartOfAccounts.accountNumber));
 }
 
 export async function getChartOfAccountById(id: number) {
@@ -1741,10 +1700,10 @@ export async function listGeneralLedgerEntries(filters?: {
     query = query.where(eq(generalLedgerEntries.accountId, filters.accountId));
   }
   if (filters?.startDate) {
-    query = query.where(gte(generalLedgerEntries.entryDate, filters.startDate));
+    query = query.where(gte(generalLedgerEntries.entryDate, financialBusinessDate(filters.startDate)));
   }
   if (filters?.endDate) {
-    query = query.where(lte(generalLedgerEntries.entryDate, filters.endDate));
+    query = query.where(lte(generalLedgerEntries.entryDate, financialBusinessDate(filters.endDate)));
   }
 
   return await query.orderBy(desc(generalLedgerEntries.entryDate));
@@ -2080,9 +2039,9 @@ export function resolveInvoiceVatRate(value: unknown, fallback = 15) {
 }
 
 export function getUniformInvoiceVatPercentage(items: Array<{ taxRate?: unknown }>) {
-	if (items.length === 0) return "15.00";
-	const rates = new Set(items.map((item) => resolveInvoiceVatRate(item.taxRate).toFixed(2)));
-	return rates.size === 1 ? [...rates][0] : null;
+  if (items.length === 0) return "15.00";
+  const rates = new Set(items.map((item) => resolveInvoiceVatRate(item.taxRate).toFixed(2)));
+  return rates.size === 1 ? Array.from(rates)[0] : null;
 }
 
 function financialTimestamp() {
@@ -2379,7 +2338,7 @@ export async function listInventoryItems(category?: string) {
     query = query.where(eq(inventoryItems.category, category as any));
   }
 
-  return await query.where(eq(inventoryItems.isActive, true)).orderBy(asc(inventoryItems.name));
+  return await query.where(eq(inventoryItems.isActive, 1)).orderBy(asc(inventoryItems.name));
 }
 
 export async function getInventoryItemById(id: number) {
@@ -2394,7 +2353,7 @@ export async function listInventoryLocations() {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(inventoryLocations).where(eq(inventoryLocations.isActive, true)).orderBy(asc(inventoryLocations.name));
+  return await db.select().from(inventoryLocations).where(eq(inventoryLocations.isActive, 1)).orderBy(asc(inventoryLocations.name));
 }
 
 // ============================================================================
@@ -2457,7 +2416,7 @@ export async function getTotalCustomerCount() {
   const result = await db
     .select({ count: sql<number>`count(*)` })
     .from(customers)
-    .where(eq(customers.isActive, true));
+    .where(eq(customers.isActive, 1));
 
   return result[0]?.count || 0;
 }
@@ -2474,8 +2433,8 @@ export async function getMonthlyRevenue(year: number, month: number) {
     .from(invoices)
     .where(
       and(
-        gte(invoices.invoiceDate, startDate),
-        lte(invoices.invoiceDate, endDate),
+        gte(invoices.invoiceDate, mysqlTimestamp(startDate)),
+        lte(invoices.invoiceDate, mysqlTimestamp(endDate)),
         or(eq(invoices.status, "paid"), eq(invoices.status, "partial"))
       )
     );
@@ -2997,16 +2956,16 @@ export async function listReminders(filters?: {
     conditions.push(eq(reminders.priority, filters.priority as any));
   }
   if (filters?.startDate) {
-    conditions.push(gte(reminders.dueDate, filters.startDate));
+    conditions.push(gte(reminders.dueDate, mysqlTimestamp(filters.startDate)));
   }
   if (filters?.endDate) {
-    conditions.push(lte(reminders.dueDate, filters.endDate));
+    conditions.push(lte(reminders.dueDate, mysqlTimestamp(filters.endDate)));
   }
   if (filters?.completedStartDate) {
-    conditions.push(gte(reminders.completedAt, filters.completedStartDate));
+    conditions.push(gte(reminders.completedAt, mysqlTimestamp(filters.completedStartDate)));
   }
   if (filters?.completedEndDate) {
-    conditions.push(lte(reminders.completedAt, filters.completedEndDate));
+    conditions.push(lte(reminders.completedAt, mysqlTimestamp(filters.completedEndDate)));
   }
 
   // Apply all conditions with and()
@@ -3055,8 +3014,8 @@ export async function getUpcomingReminders(days: number = 7) {
     .leftJoin(houses, eq(reminders.houseId, houses.id))
     .where(
       and(
-        gte(reminders.dueDate, todayStart),
-        lte(reminders.dueDate, futureDate),
+        gte(reminders.dueDate, mysqlTimestamp(todayStart)),
+        lte(reminders.dueDate, mysqlTimestamp(futureDate)),
         eq(reminders.status, "pending")
       )
     )
@@ -3097,8 +3056,8 @@ export async function getTodayReminders() {
     .leftJoin(houses, eq(reminders.houseId, houses.id))
     .where(
       and(
-        gte(reminders.dueDate, todayStart),
-        lte(reminders.dueDate, todayEnd),
+        gte(reminders.dueDate, mysqlTimestamp(todayStart)),
+        lte(reminders.dueDate, mysqlTimestamp(todayEnd)),
         eq(reminders.status, "pending")
       )
     )
@@ -3256,7 +3215,7 @@ export async function generateFlockReminders(flockId: number) {
     reminderType: "house_preparation",
     title: `House Cleaning - ${house.name}`,
     description: `Clean and wash house ${house.name} in preparation for flock ${flock.flockNumber}`,
-    dueDate: cleaningDate,
+    dueDate: mysqlTimestamp(cleaningDate),
     priority: "high",
   });
 
@@ -3268,7 +3227,7 @@ export async function generateFlockReminders(flockId: number) {
     reminderType: "house_preparation",
     title: `Disinfection - ${house.name}`,
     description: `Disinfect house ${house.name} for flock ${flock.flockNumber}`,
-    dueDate: disinfectionDate,
+    dueDate: mysqlTimestamp(disinfectionDate),
     priority: "high",
   });
 
@@ -3280,7 +3239,7 @@ export async function generateFlockReminders(flockId: number) {
     reminderType: "house_preparation",
     title: `Pine Shavings Delivery - ${house.name}`,
     description: `Ensure pine shavings are delivered for house ${house.name}`,
-    dueDate: beddingDate,
+    dueDate: mysqlTimestamp(beddingDate),
     priority: "high",
   });
 
@@ -3291,11 +3250,11 @@ export async function generateFlockReminders(flockId: number) {
     remindersToCreate.push({
       flockId,
       houseId: flock.houseId,
-      reminderType: "feed_transition",
-      title: `Feed Transition: Starter → Grower`,
-      description: `Change from ${flock.starterFeedType} starter to ${flock.growerFeedType} grower feed for flock ${flock.flockNumber}`,
-      dueDate: starterToGrowerDate,
-      priority: "high",
+        reminderType: "feed_transition",
+        title: `Feed Transition: Starter → Grower`,
+        description: `Change from ${flock.starterFeedType} starter to ${flock.growerFeedType} grower feed for flock ${flock.flockNumber}`,
+        dueDate: mysqlTimestamp(starterToGrowerDate),
+        priority: "high",
     });
   }
 
@@ -3305,11 +3264,11 @@ export async function generateFlockReminders(flockId: number) {
     remindersToCreate.push({
       flockId,
       houseId: flock.houseId,
-      reminderType: "feed_transition",
-      title: `Feed Transition: Grower → Finisher`,
-      description: `Change from ${flock.growerFeedType} grower to ${flock.finisherFeedType} finisher feed for flock ${flock.flockNumber}`,
-      dueDate: growerToFinisherDate,
-      priority: "high",
+        reminderType: "feed_transition",
+        title: `Feed Transition: Grower → Finisher`,
+        description: `Change from ${flock.growerFeedType} grower to ${flock.finisherFeedType} finisher feed for flock ${flock.flockNumber}`,
+        dueDate: mysqlTimestamp(growerToFinisherDate),
+        priority: "high",
     });
   }
 
@@ -3341,7 +3300,7 @@ export async function generateFlockReminders(flockId: number) {
         reminderType: "routine_task",
         title: `Weight Sampling - Day ${day}`,
         description: `Conduct weight sampling for flock ${flock.flockNumber} (Day ${day})`,
-        dueDate: samplingDate,
+        dueDate: mysqlTimestamp(samplingDate),
         priority: "medium",
       });
     }
@@ -3356,7 +3315,7 @@ export async function generateFlockReminders(flockId: number) {
     reminderType: "milestone",
     title: `Expected Slaughter Date`,
     description: `Flock ${flock.flockNumber} reaches target age (${flock.growingPeriod || 42} days)`,
-    dueDate: slaughterDate,
+    dueDate: mysqlTimestamp(slaughterDate),
     priority: "high",
   });
 
@@ -3370,7 +3329,7 @@ export async function generateFlockReminders(flockId: number) {
       reminderType: "biosecurity",
       title: `Footbath Solution Change`,
       description: `Change footbath solution for house ${house.name}`,
-      dueDate: footbathDate,
+      dueDate: mysqlTimestamp(footbathDate),
       priority: "low",
     });
   }
@@ -3385,7 +3344,7 @@ export async function generateFlockReminders(flockId: number) {
       reminderType: "environmental_check",
       title: `Environmental Check - Week ${week}`,
       description: `Check temperature, humidity, and CO2 levels for house ${house.name}`,
-      dueDate: checkDate,
+      dueDate: mysqlTimestamp(checkDate),
       priority: "medium",
     });
   }
@@ -3446,7 +3405,7 @@ export async function generateRemindersFromTemplates(flockId: number, templateId
               reminderType: reminderType,
               title: reminderTitle,
               description: reminderDef.description || `${reminderTitle} for flock ${flock.flockNumber}`,
-              dueDate,
+              dueDate: mysqlTimestamp(dueDate),
               priority: reminderDef.priority,
               templateId: template.id,
             });
@@ -3464,7 +3423,7 @@ export async function generateRemindersFromTemplates(flockId: number, templateId
         reminderType: template.reminderType,
         title: template.name,
         description: template.description || `${template.name} for flock ${flock.flockNumber}`,
-        dueDate,
+        dueDate: mysqlTimestamp(dueDate),
         priority: template.priority,
         templateId: template.id,
       });
@@ -3533,7 +3492,7 @@ export async function generateRemindersFromTemplatesWithFilter(
               reminderType: reminderType,
               title: reminderTitle,
               description: reminderDef.description || `${reminderTitle} for flock ${flock.flockNumber}`,
-              dueDate,
+              dueDate: mysqlTimestamp(dueDate),
               priority: reminderDef.priority,
               templateId: template.id,
             });
@@ -3556,7 +3515,7 @@ export async function generateRemindersFromTemplatesWithFilter(
         reminderType: template.reminderType,
         title: template.name,
         description: template.description || `${template.name} for flock ${flock.flockNumber}`,
-        dueDate,
+        dueDate: mysqlTimestamp(dueDate),
         priority: template.priority,
         templateId: template.id,
       });
@@ -3647,7 +3606,7 @@ export async function deleteStressPack(id: number) {
 export async function listReminderTemplates() {
   const db = await getDb();
   if (!db) return [];
-  return await db.select().from(reminderTemplates).where(eq(reminderTemplates.isActive, true));
+  return await db.select().from(reminderTemplates).where(eq(reminderTemplates.isActive, 1));
 }
 
 export async function createReminderTemplate(data: typeof reminderTemplates.$inferInsert) {
@@ -3720,9 +3679,9 @@ export async function createBundleTemplate(name: string, description: string | u
     reminderType: "routine_task", // Default type for bundles
     priority: "medium",
     dayOffset: 0,
-    isBundle: true,
+    isBundle: 1,
     bundleConfig,
-    isActive: true,
+    isActive: 1,
   });
 
   // MySQL returns insertId in the result array
@@ -3766,9 +3725,9 @@ export async function copyAndCustomizeTemplate(sourceTemplateId: number, newName
     reminderType: sourceTemplate.reminderType,
     priority: sourceTemplate.priority,
     dayOffset: sourceTemplate.dayOffset,
-    isBundle: true,
+    isBundle: 1,
     bundleConfig: customBundleConfig,
-    isActive: true,
+    isActive: 1,
   });
 
   // Return the newly created template
@@ -3801,7 +3760,7 @@ export async function updateFeedTransitionReminderDates(
 
       await db
         .update(reminders)
-        .set({ dueDate: newDueDate })
+        .set({ dueDate: mysqlTimestamp(newDueDate) })
         .where(
           and(
             eq(reminders.flockId, flockId),
@@ -3821,7 +3780,7 @@ export async function updateFeedTransitionReminderDates(
 
       await db
         .update(reminders)
-        .set({ dueDate: newDueDate })
+        .set({ dueDate: mysqlTimestamp(newDueDate) })
         .where(
           and(
             eq(reminders.flockId, flockId),
@@ -3853,7 +3812,7 @@ export async function autoActivateFlocks() {
     .where(
       and(
         eq(flocks.status, "planned"),
-        lte(flocks.placementDate, now)
+        lte(flocks.placementDate, financialBusinessDate(now))
       )
     );
 
@@ -3862,7 +3821,7 @@ export async function autoActivateFlocks() {
       .update(flocks)
       .set({
         status: "active",
-        statusChangedAt: now,
+        statusChangedAt: mysqlTimestamp(now),
         isManualStatusChange: 0, // automatic
         statusChangeReason: "Automatic activation on placement date",
       })
@@ -3888,7 +3847,7 @@ export async function manuallyChangeFlockStatus(
     .update(flocks)
     .set({
       status: newStatus,
-      statusChangedAt: new Date(),
+      statusChangedAt: mysqlTimestamp(),
       statusChangedBy: userId,
       statusChangeReason: reason,
       isManualStatusChange: 1, // manual
@@ -3947,7 +3906,7 @@ export async function getHealthProtocolTemplates() {
   return db
     .select()
     .from(healthProtocolTemplates)
-    .where(eq(healthProtocolTemplates.isActive, true))
+    .where(eq(healthProtocolTemplates.isActive, 1))
     .orderBy(desc(healthProtocolTemplates.createdAt));
 }
 
@@ -3993,7 +3952,7 @@ export async function deleteHealthProtocolTemplate(id: number) {
   
   await db
     .update(healthProtocolTemplates)
-    .set({ isActive: false })
+    .set({ isActive: 0 })
     .where(eq(healthProtocolTemplates.id, id));
   
   return true;
@@ -4024,7 +3983,7 @@ export async function syncFlockRemindersFromTemplate(flockId: number, templateId
   // Create a set of existing reminder keys (title + dueDate as date-only) for quick lookup
   const existingKeys = new Set(
     existingReminders.map(r => {
-      const dateStr = r.dueDate ? r.dueDate.toISOString().split('T')[0] : '';
+      const dateStr = r.dueDate ? r.dueDate.slice(0, 10) : '';
       return `${r.title}|${dateStr}`;
     })
   );
@@ -4129,7 +4088,8 @@ export async function createInvoice(data: {
   pricePerKgExcl: number;
   totalBirds: number;
   totalWeight: number;
-  vatPercentage: number;
+  vatPercentage: number | null;
+  notes?: string;
   createdBy?: number;
   // Optional pre-computed totals (from line items); if provided, skip weight × price calculation
   exclusiveTotal?: number;
@@ -4137,36 +4097,39 @@ export async function createInvoice(data: {
   inclusiveTotal?: number;
 }): Promise<{ insertId: number }> {
   const db = await getDb();
+  if (!db) throw new Error("Database not available");
 
   // Use pre-computed totals if provided, otherwise calculate from weight × price
   const exclusiveTotal = data.exclusiveTotal ?? (data.totalWeight * data.pricePerKgExcl);
-  const vatAmount = data.vatAmount ?? (exclusiveTotal * (data.vatPercentage / 100));
+  const vatAmount = data.vatAmount ?? (exclusiveTotal * ((data.vatPercentage ?? 0) / 100));
   const inclusiveTotal = data.inclusiveTotal ?? (exclusiveTotal + vatAmount);
 
-  const result = await db.insert(invoices).values({
+  const invoiceValues: typeof invoices.$inferInsert = {
     invoiceNumber: data.invoiceNumber,
     customerId: data.customerId,
-    invoiceDate: data.invoiceDate instanceof Date ? data.invoiceDate.toISOString().slice(0, 19).replace('T', ' ') : data.invoiceDate,
-    dueDate: data.dueDate instanceof Date ? data.dueDate.toISOString().slice(0, 19).replace('T', ' ') : data.dueDate,
+    invoiceDate: mysqlTimestamp(data.invoiceDate),
+    dueDate: mysqlTimestamp(data.dueDate),
     subtotal: exclusiveTotal.toFixed(2),
     taxAmount: vatAmount.toFixed(2),
     totalAmount: inclusiveTotal.toFixed(2),
     paidAmount: '0.00',
     balanceDue: inclusiveTotal.toFixed(2),
     status: "draft",
+    notes: data.notes,
     createdBy: data.createdBy,
     catchSessionId: data.catchSessionId,
     processorId: data.processorId,
-    pricePerKgExcl: data.pricePerKgExcl,
+    pricePerKgExcl: currencyDecimal(data.pricePerKgExcl),
     totalBirds: data.totalBirds,
-    totalWeight: data.totalWeight,
-    exclusiveTotal,
-    vatAmount,
-    inclusiveTotal,
-    vatPercentage: data.vatPercentage,
-  });
+    totalWeight: data.totalWeight.toFixed(3),
+    exclusiveTotal: currencyDecimal(exclusiveTotal),
+    vatAmount: currencyDecimal(vatAmount),
+    inclusiveTotal: currencyDecimal(inclusiveTotal),
+    vatPercentage: data.vatPercentage === null ? null : data.vatPercentage.toFixed(2),
+  };
+  const result = await db.insert(invoices).values(invoiceValues);
 
-  return { insertId: Number(result.insertId) };
+  return { insertId: Number(result[0]?.insertId ?? 0) };
 }
 
 
@@ -4391,6 +4354,7 @@ export async function cancelInvoice(invoiceId: number) {
 
 export async function getCatchSessionById(catchSessionId: number) {
   const db = await getDb();
+  if (!db) return null;
   const result = await db
     .select()
     .from(catchSessions)
@@ -4407,12 +4371,14 @@ export async function getCatchSessionById(catchSessionId: number) {
 
 export async function getCompanySettings() {
   const db = await getDb();
+  if (!db) return null;
   const result = await db.query.companySettings.findFirst();
   return result || null;
 }
 
 export async function updateCompanySettings(data: any, userId: number) {
   const db = await getDb();
+  if (!db) throw new Error("Database not available");
   const existing = await db.query.companySettings.findFirst();
   
   // Build explicit update payload from known schema fields
@@ -4474,7 +4440,7 @@ export async function flagOverdueInvoices(now: Date): Promise<number> {
       )
     );
   
-  return result.rowsAffected || 0;
+  return Number(result[0]?.affectedRows ?? 0);
 }
 
 /**
@@ -6295,28 +6261,24 @@ export async function createFeedDeliveryInvoice(data: {
 
   const invoiceNumber = `FEED-${Date.now()}`;
   const vatPct = 15;
-
-  let exclusiveTotal = 0;
-  let vatAmount = 0;
-
-  for (const item of data.lineItems) {
-    const subtotal = item.quantity * item.unitPrice;
-    const discount = subtotal * ((item.discountPercent ?? 0) / 100);
-    const excl = subtotal - discount;
-    const vat = excl * ((item.vatPercent ?? vatPct) / 100);
-    exclusiveTotal += excl;
-    vatAmount += vat;
-  }
-  const inclusiveTotal = exclusiveTotal + vatAmount;
+  const totals = calculateInvoiceTotals(data.lineItems.map((item) => ({
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    discountPercent: item.discountPercent,
+    vatPercent: item.vatPercent ?? vatPct,
+  })));
+  const exclusiveTotal = totals.exclusiveCents / 100;
+  const vatAmount = totals.vatCents / 100;
+  const inclusiveTotal = totals.inclusiveCents / 100;
 
   const invDate = new Date(data.invoiceDate);
   const dueDate = new Date(data.dueDate);
 
-  await db.insert(invoices).values({
+  const invoiceValues: typeof invoices.$inferInsert = {
     invoiceNumber,
     customerId: data.customerId,
-    invoiceDate: invDate,
-    dueDate: dueDate,
+    invoiceDate: mysqlTimestamp(invDate),
+    dueDate: mysqlTimestamp(dueDate),
     subtotal: exclusiveTotal.toFixed(2),
     taxAmount: vatAmount.toFixed(2),
     totalAmount: inclusiveTotal.toFixed(2),
@@ -6325,12 +6287,13 @@ export async function createFeedDeliveryInvoice(data: {
     status: 'draft',
     notes: data.notes,
     createdBy: data.createdBy,
-    exclusiveTotal: String(exclusiveTotal.toFixed(2)),
-    vatAmount: String(vatAmount.toFixed(2)),
-    inclusiveTotal: String(inclusiveTotal.toFixed(2)),
-    vatPercentage: String(vatPct),
+    exclusiveTotal: currencyDecimal(exclusiveTotal),
+    vatAmount: currencyDecimal(vatAmount),
+    inclusiveTotal: currencyDecimal(inclusiveTotal),
+    vatPercentage: vatPct.toFixed(2),
     feedOrderId: data.feedOrderId,
-  });
+  };
+  await db.insert(invoices).values(invoiceValues);
 
   // Retrieve the saved invoice
   const saved = await db.select().from(invoices).where(eq(invoices.invoiceNumber, invoiceNumber)).limit(1);
@@ -6339,19 +6302,21 @@ export async function createFeedDeliveryInvoice(data: {
   if (invoiceId) {
     // Save line items
     for (const item of data.lineItems) {
-      const subtotal = item.quantity * item.unitPrice;
-      const discount = subtotal * ((item.discountPercent ?? 0) / 100);
-      const excl = subtotal - discount;
-      const vat = excl * ((item.vatPercent ?? vatPct) / 100);
+      const amounts = calculateInvoiceLineMoney({
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountPercent: item.discountPercent,
+        vatPercent: item.vatPercent ?? vatPct,
+      });
       await db.insert(invoiceLineItems).values({
         invoiceId,
         description: item.description,
         quantity: String(item.quantity),
         pricePerUnit: String(item.unitPrice),
         discount: String(item.discountPercent ?? 0),
-        discountAmount: String((subtotal * ((item.discountPercent ?? 0) / 100)).toFixed(2)),
+        discountAmount: formatCents(amounts.discountCents),
         vatPercentage: String(item.vatPercent ?? vatPct),
-        amount: String((excl + vat).toFixed(2)),
+        amount: formatCents(amounts.inclusiveCents),
       });
     }
 
@@ -6585,6 +6550,7 @@ export async function createSalesOrder(data: {
     subtotal: currencyDecimal(subtotal),
     taxAmount: currencyDecimal(taxAmount),
     totalAmount: currencyDecimal(totalAmount),
+    deliveryDate: orderData.deliveryDate || null,
     status: orderData.status ?? "draft",
   });
   const insertId = Number((result as any)[0]?.insertId ?? (result as any).insertId ?? 0);
@@ -6625,9 +6591,10 @@ export async function updateSalesOrder(
 ) {
   const db = await getDb();
   if (!db) return undefined;
-  const { subtotal, taxAmount, totalAmount, ...orderData } = data;
+  const { subtotal, taxAmount, totalAmount, deliveryDate, ...orderData } = data;
   await db.update(salesOrders).set({
     ...orderData,
+    ...(deliveryDate === undefined ? {} : { deliveryDate: deliveryDate === "" ? null : deliveryDate }),
     ...(subtotal === undefined ? {} : { subtotal: currencyDecimal(subtotal) }),
     ...(taxAmount === undefined ? {} : { taxAmount: currencyDecimal(taxAmount) }),
     ...(totalAmount === undefined ? {} : { totalAmount: currencyDecimal(totalAmount) }),
@@ -6696,7 +6663,7 @@ export async function getSalesOrderStats() {
   const db = await getDb();
   if (!db) return { total: 0, draft: 0, confirmed: 0, processing: 0, delivered: 0, cancelled: 0, totalValue: 0 };
   const rows = await db.select({ status: salesOrders.status, totalAmount: salesOrders.totalAmount }).from(salesOrders);
-  const stats = { total: rows.length, draft: 0, confirmed: 0, processing: 0, delivered: 0, cancelled: 0, totalValue: 0 };
+  const stats = { total: 0, draft: 0, confirmed: 0, processing: 0, delivered: 0, cancelled: 0, totalValue: 0 };
   for (const r of rows) {
     const amt = Number(r.totalAmount) || 0;
     if (r.status !== "cancelled") stats.totalValue += amt;
