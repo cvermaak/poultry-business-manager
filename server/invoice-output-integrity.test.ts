@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { calculateInvoiceLineMoney, calculateInvoiceTotals } from "./invoice-money";
 import {
   generatePremiumInvoicePDF,
+  getFirstPageContentLayout,
+  getFirstPageHeaderLayout,
   getInvoicePdfLineAmounts,
   getInvoicePdfRoundingAdjustment,
 } from "./pdf-generator-premium";
@@ -55,6 +57,30 @@ describe("invoice money and output integrity", () => {
     expect(getInvoicePdfLineAmounts(line).total).toBe(0.06);
     expect(getInvoicePdfRoundingAdjustment({ lineItems: [line], totalInclusive: 0.05 })).toBe(-0.01);
     expect(getInvoicePdfRoundingAdjustment({ lineItems: [line], totalInclusive: 0.06 })).toBe(0);
+  });
+
+  it("keeps the company-information panel clear of the full embedded AFGRO logo canvas", () => {
+    const layout = getFirstPageHeaderLayout(225);
+    const noLogoLayout = getFirstPageHeaderLayout();
+
+    expect(layout.companyBoxX).toBeGreaterThan(40 + 225);
+    expect(layout.companyBoxWidth).toBeGreaterThan(270);
+    expect(layout.companyBoxY).toBe(685);
+    expect(layout.companyBoxHeight).toBe(65);
+    expect(noLogoLayout.companyBoxX).toBe(40);
+    expect(noLogoLayout.companyBoxWidth).toBe(515);
+  });
+
+  it("places invoice details below the logo with a wider description column and balanced content block", () => {
+    const layout = getFirstPageContentLayout();
+
+    expect(layout.detailsY).toBe(574);
+    expect(layout.separatorY).toBe(522);
+    expect(layout.tableY).toBe(506);
+    expect(layout.summaryTopY).toBe(300);
+    expect(layout.detailsY).toBeLessThan(589);
+    expect(layout.descriptionColumnWidth).toBe(180);
+    expect(layout.descriptionTextLimit).toBe(42);
   });
 
   it("paginates long invoice tables instead of dropping line items", async () => {

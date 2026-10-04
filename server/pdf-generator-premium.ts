@@ -56,6 +56,28 @@ type PdfLineAmounts = {
   total: number;
 };
 
+type EmbeddedLogo = {
+  image: Awaited<ReturnType<PDFDocument["embedPng"]>>;
+  width: number;
+  height: number;
+};
+
+export type FirstPageHeaderLayout = {
+  companyBoxX: number;
+  companyBoxWidth: number;
+  companyBoxY: number;
+  companyBoxHeight: number;
+};
+
+export type FirstPageContentLayout = {
+  detailsY: number;
+  separatorY: number;
+  tableY: number;
+  summaryTopY: number;
+  descriptionColumnWidth: number;
+  descriptionTextLimit: number;
+};
+
 const PAGE_WIDTH = 595;
 const PAGE_HEIGHT = 842;
 const LEFT = 40;
@@ -65,6 +87,46 @@ const ROW_HEIGHT = 18;
 const TABLE_HEADER_HEIGHT = 16;
 const CONTINUATION_TOP = PAGE_HEIGHT - 62;
 const FINAL_CONTENT_MIN_Y = 222;
+// Keep the original top edge while adding room for a wrapped contact line.
+const COMPANY_BOX_Y = PAGE_HEIGHT - 157;
+const COMPANY_BOX_HEIGHT = 65;
+const LOGO_TO_COMPANY_BOX_GAP = 12;
+// The logo's transparent canvas extends below the visible wordmark. Keep a
+// deliberate visual gap before the invoice-detail block starts.
+const FIRST_PAGE_DETAILS_Y = PAGE_HEIGHT - 268;
+const FIRST_PAGE_SEPARATOR_Y = PAGE_HEIGHT - 320;
+const FIRST_PAGE_TABLE_Y = PAGE_HEIGHT - 336;
+// Use the lower A4 area for totals and payment information whenever the table
+// is short, but never overlap a longer line-item table.
+const PREFERRED_SUMMARY_TOP_Y = 300;
+const DESCRIPTION_COLUMN_WIDTH = 180;
+const DESCRIPTION_TEXT_LIMIT = 42;
+
+/**
+ * Keeps the square logo canvas and the company-information panel apart.
+ * The supplied AFGRO logo has transparent padding, so the panel must clear the
+ * full embedded canvas rather than only the visible wordmark.
+ */
+export function getFirstPageHeaderLayout(logoWidth?: number): FirstPageHeaderLayout {
+  const companyBoxX = logoWidth ? LEFT + logoWidth + LOGO_TO_COMPANY_BOX_GAP : LEFT;
+  return {
+    companyBoxX,
+    companyBoxWidth: PAGE_WIDTH - RIGHT - companyBoxX,
+    companyBoxY: COMPANY_BOX_Y,
+    companyBoxHeight: COMPANY_BOX_HEIGHT,
+  };
+}
+
+export function getFirstPageContentLayout(): FirstPageContentLayout {
+  return {
+    detailsY: FIRST_PAGE_DETAILS_Y,
+    separatorY: FIRST_PAGE_SEPARATOR_Y,
+    tableY: FIRST_PAGE_TABLE_Y,
+    summaryTopY: PREFERRED_SUMMARY_TOP_Y,
+    descriptionColumnWidth: DESCRIPTION_COLUMN_WIDTH,
+    descriptionTextLimit: DESCRIPTION_TEXT_LIMIT,
+  };
+}
 
 const COLORS = {
   darkBlue: rgb(0.05, 0.35, 0.5),
@@ -78,13 +140,13 @@ const COLORS = {
 };
 
 const COLUMNS = [
-  { header: "Description", x: LEFT + 3, width: 130 },
-  { header: "Qty", x: LEFT + 133, width: 45 },
-  { header: "Unit Price", x: LEFT + 178, width: 65 },
-  { header: "Disc %", x: LEFT + 243, width: 55 },
-  { header: "Disc (R)", x: LEFT + 298, width: 70 },
-  { header: "VAT %", x: LEFT + 368, width: 50 },
-  { header: "Amount", x: LEFT + 440, width: 75 },
+  { header: "Description", x: LEFT + 3, width: DESCRIPTION_COLUMN_WIDTH },
+  { header: "Qty", x: LEFT + 184, width: 36 },
+  { header: "Unit Price", x: LEFT + 222, width: 63 },
+  { header: "Disc %", x: LEFT + 287, width: 42 },
+  { header: "Disc (R)", x: LEFT + 331, width: 61 },
+  { header: "VAT %", x: LEFT + 395, width: 42 },
+  { header: "Amount", x: LEFT + 439, width: 73 },
 ];
 
 function money(value: number): string {
@@ -184,7 +246,7 @@ function drawLineItem(page: PDFPage, item: InvoicePdfLineItem, index: number, y:
   });
 
   const values = [
-    truncate(item.description, 25),
+    truncate(item.description, DESCRIPTION_TEXT_LIMIT),
     Number(item.quantity || 0).toFixed(2),
     money(item.pricePerUnit),
     `${discount.toFixed(2)}%`,
@@ -242,9 +304,10 @@ function drawContinuationHeading(page: PDFPage, data: InvoicePdfData) {
   });
 }
 
-function drawFirstPageHeading(page: PDFPage, data: InvoicePdfData, logo?: { image: Awaited<ReturnType<PDFDocument["embedPng"]>>; width: number; height: number }) {
+function drawFirstPageHeading(page: PDFPage, data: InvoicePdfData, logo?: EmbeddedLogo) {
   drawAccent(page);
   const topY = PAGE_HEIGHT - 36;
+  const headerLayout = getFirstPageHeaderLayout(logo?.width);
 
   if (logo) {
     page.drawImage(logo.image, { x: LEFT, y: topY - logo.height + 8, width: logo.width, height: logo.height });
@@ -255,24 +318,34 @@ function drawFirstPageHeading(page: PDFPage, data: InvoicePdfData, logo?: { imag
   page.drawText("INVOICE", { x: PAGE_WIDTH - RIGHT - 128, y: topY - 2, size: 24, color: COLORS.darkBlue });
   page.drawText(`#${data.invoiceNumber}`, { x: PAGE_WIDTH - RIGHT - 128, y: topY - 22, size: 10, color: COLORS.orange });
 
-  const companyBoxY = PAGE_HEIGHT - 145;
   page.drawRectangle({
-    x: LEFT,
-    y: companyBoxY,
-    width: CONTENT_WIDTH,
-    height: 53,
+    x: headerLayout.companyBoxX,
+    y: headerLayout.companyBoxY,
+    width: headerLayout.companyBoxWidth,
+    height: headerLayout.companyBoxHeight,
     color: COLORS.veryLightGray,
     borderColor: COLORS.borderGray,
     borderWidth: 0.5,
   });
-  page.drawText(data.companyInfo.name.toUpperCase(), { x: LEFT + 10, y: companyBoxY + 37, size: 9, color: COLORS.darkBlue });
+  const companyTextX = headerLayout.companyBoxX + 10;
+  page.drawText(truncate(data.companyInfo.name.toUpperCase(), logo ? 42 : 70), {
+    x: companyTextX,
+    y: headerLayout.companyBoxY + 49,
+    size: 9,
+    color: COLORS.darkBlue,
+  });
 
   const registrationParts = [
     data.companyInfo.vatNumber ? `VAT NO: ${data.companyInfo.vatNumber}` : undefined,
     data.companyInfo.registrationNumber ? `REG NO: ${data.companyInfo.registrationNumber}` : undefined,
     data.companyInfo.address,
   ].filter(Boolean);
-  page.drawText(truncate(registrationParts.join(" | "), 112), { x: LEFT + 10, y: companyBoxY + 23, size: 7.2, color: COLORS.gray });
+  page.drawText(truncate(registrationParts.join(" | "), logo ? 60 : 112), {
+    x: companyTextX,
+    y: headerLayout.companyBoxY + 35,
+    size: 7.2,
+    color: COLORS.gray,
+  });
 
   const contactParts = [
     data.companyInfo.phone ? `Phone: ${data.companyInfo.phone}` : undefined,
@@ -280,10 +353,17 @@ function drawFirstPageHeading(page: PDFPage, data: InvoicePdfData, logo?: { imag
     data.companyInfo.website ? `Web: ${data.companyInfo.website}` : undefined,
   ].filter(Boolean);
   if (contactParts.length > 0) {
-    page.drawText(truncate(contactParts.join(" | "), 118), { x: LEFT + 10, y: companyBoxY + 10, size: 7.2, color: COLORS.gray });
+    const contactLines = logo
+      ? wrapText(contactParts.join(" | "), 60).slice(0, 2)
+      : [truncate(contactParts.join(" | "), 118)];
+    let contactY = headerLayout.companyBoxY + 21;
+    for (const line of contactLines) {
+      page.drawText(line, { x: companyTextX, y: contactY, size: 7.2, color: COLORS.gray });
+      contactY -= 9;
+    }
   }
 
-  const detailsY = PAGE_HEIGHT - 178;
+  const detailsY = FIRST_PAGE_DETAILS_Y;
   page.drawText("INVOICE DETAILS", { x: LEFT, y: detailsY, size: 8, color: COLORS.darkBlue });
   page.drawText("Invoice Number:", { x: LEFT, y: detailsY - 13, size: 7.5, color: COLORS.gray });
   page.drawText(data.invoiceNumber, { x: LEFT + 90, y: detailsY - 13, size: 8.5, color: COLORS.black });
@@ -312,8 +392,8 @@ function drawFirstPageHeading(page: PDFPage, data: InvoicePdfData, logo?: { imag
   }
 
   page.drawLine({
-    start: { x: LEFT, y: PAGE_HEIGHT - 242 },
-    end: { x: PAGE_WIDTH - RIGHT, y: PAGE_HEIGHT - 242 },
+    start: { x: LEFT, y: FIRST_PAGE_SEPARATOR_Y },
+    end: { x: PAGE_WIDTH - RIGHT, y: FIRST_PAGE_SEPARATOR_Y },
     thickness: 1,
     color: COLORS.orange,
   });
@@ -352,10 +432,10 @@ function drawTotals(page: PDFPage, data: InvoicePdfData, y: number) {
   page.drawText("TOTAL DUE:", { x: x + 7, y: textY, size: 11, color: COLORS.darkBlue });
   page.drawText(money(data.totalInclusive), { x: x + 138, y: textY, size: 11, color: COLORS.orange });
 
-  return y - boxHeight;
+  return { topY: y, bottomY: y - boxHeight };
 }
 
-function drawPaymentAndNotes(page: PDFPage, data: InvoicePdfData, y: number) {
+function drawPaymentAndNotes(page: PDFPage, data: InvoicePdfData, y: number, maxWidth = CONTENT_WIDTH) {
   let currentY = y;
   page.drawText("PAYMENT INFORMATION", { x: LEFT, y: currentY, size: 8, color: COLORS.darkBlue });
   currentY -= 13;
@@ -368,11 +448,13 @@ function drawPaymentAndNotes(page: PDFPage, data: InvoicePdfData, y: number) {
       `Reference: ${data.bankDetails.reference || data.invoiceNumber}`,
     ].filter(Boolean) as string[];
     for (const line of bankLines) {
-      page.drawText(truncate(line, 95), { x: LEFT, y: currentY, size: 7.2, color: COLORS.black });
-      currentY -= 9;
+      for (const wrappedLine of wrapText(line, maxWidth >= 250 ? 50 : 36).slice(0, 2)) {
+        page.drawText(wrappedLine, { x: LEFT, y: currentY, size: 7.2, color: COLORS.black });
+        currentY -= 9;
+      }
     }
   } else {
-    page.drawText("Payment details are available from the issuer on request.", { x: LEFT, y: currentY, size: 7.2, color: COLORS.gray });
+    page.drawText(truncate("Payment details are available from the issuer on request.", maxWidth >= 250 ? 50 : 36), { x: LEFT, y: currentY, size: 7.2, color: COLORS.gray });
     currentY -= 9;
   }
 
@@ -380,7 +462,7 @@ function drawPaymentAndNotes(page: PDFPage, data: InvoicePdfData, y: number) {
   page.drawText(data.notes ? "NOTES" : "TERMS & CONDITIONS", { x: LEFT, y: currentY, size: 8, color: COLORS.darkBlue });
   currentY -= 11;
   const text = data.notes || "Payment is due by the due date shown on this invoice. Thank you for your business.";
-  for (const line of wrapText(text, 95).slice(0, 7)) {
+  for (const line of wrapText(text, maxWidth >= 250 ? 50 : 36).slice(0, 7)) {
     page.drawText(line, { x: LEFT, y: currentY, size: 6.8, color: COLORS.gray });
     currentY -= 8;
   }
@@ -419,7 +501,7 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoicePdfData): Pr
 
   let page = addPage();
   drawFirstPageHeading(page, invoiceData, logo);
-  let y = PAGE_HEIGHT - 258;
+  let y = FIRST_PAGE_TABLE_Y;
   drawTableHeader(page, y);
   y -= TABLE_HEADER_HEIGHT + 2;
 
@@ -441,8 +523,10 @@ export async function generatePremiumInvoicePDF(invoiceData: InvoicePdfData): Pr
     y = CONTINUATION_TOP;
   }
 
-  const afterTotalsY = drawTotals(page, invoiceData, y - 8);
-  drawPaymentAndNotes(page, invoiceData, Math.max(afterTotalsY - 24, 165));
+  const summaryTopY = Math.min(y - 8, PREFERRED_SUMMARY_TOP_Y);
+  const totalsLayout = drawTotals(page, invoiceData, summaryTopY);
+  const sideBySidePaymentWidth = PAGE_WIDTH - RIGHT - 24 - LEFT - 215;
+  drawPaymentAndNotes(page, invoiceData, totalsLayout.topY - 4, sideBySidePaymentWidth);
 
   for (let index = 0; index < pages.length; index += 1) {
     drawFooter(pages[index], index, pages.length);
