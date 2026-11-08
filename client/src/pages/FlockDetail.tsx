@@ -21,6 +21,7 @@ import { formatWeight, getWeightValue, getUnitLabel } from "@/lib/weightUtils";
 import { formatRand } from "@/lib/format";
 import { normalizeHealthRecordNotes } from "@/lib/health-record-notes";
 import { PlanCatchDialog } from "@/components/PlanCatchDialog";
+import { AuditTimestamp } from "@/components/AuditTimestamp";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
@@ -63,6 +64,7 @@ export default function FlockDetail() {
   const { data: appliedTemplates } = trpc.reminderTemplates.getAppliedTemplates.useQuery({ flockId });
   const { data: statusHistory } = trpc.flocks.getStatusHistory.useQuery({ flockId });
   const { data: activityLogs } = trpc.flocks.getActivityLogs.useQuery({ flockId });
+  const { data: displaySettings, isError: timezoneError } = trpc.system.getDisplayTimezone.useQuery();
   const { data: harvests } = trpc.harvest.getByFlock.useQuery({ flockId });
   const { data: catchPlan, refetch: refetchCatchPlan } = trpc.catch.getCatchPlan.useQuery({ flockId });
   const { data: house } = trpc.houses.getById.useQuery({ id: flock?.houseId ?? 0 }, { enabled: !!flock?.houseId });
@@ -2815,7 +2817,7 @@ export default function FlockDetail() {
                               <span className="font-semibold capitalize">{log.action.replace(/_/g, ' ')}</span>
                             </div>
                             <div className="text-sm text-muted-foreground">
-                              {format(new Date(log.createdAt), 'MMM d, yyyy \\at h:mm a')}
+                              <AuditTimestamp value={log.createdAt} timezone={displaySettings?.timezone} timezoneError={timezoneError} />
                             </div>
                             {log.details && (
                               <div className="text-sm">

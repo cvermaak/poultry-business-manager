@@ -72,6 +72,7 @@ import {
 } from "../drizzle/schema";
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
+import { normalizeAuditEpochMs } from "./audit-time";
 import { calculateInvoiceLineMoney, calculateInvoiceTotals, formatCents } from "./invoice-money";
 import {
 	calculateAgedPayablesReport,
@@ -4039,7 +4040,7 @@ export async function getFlockActivityLogs(flockId: number) {
       entityType: userActivityLogs.entityType,
       entityId: userActivityLogs.entityId,
       details: userActivityLogs.details,
-      createdAt: userActivityLogs.createdAt,
+      createdAt: sql<number | string | null>`CASE WHEN YEAR(${userActivityLogs.createdAt}) = 0 THEN NULL ELSE UNIX_TIMESTAMP(${userActivityLogs.createdAt}) * 1000 END`,
       userName: users.name,
     })
     .from(userActivityLogs)
@@ -4052,7 +4053,7 @@ export async function getFlockActivityLogs(flockId: number) {
     )
     .orderBy(desc(userActivityLogs.createdAt));
 
-  return logs;
+  return logs.map(log => ({ ...log, createdAt: normalizeAuditEpochMs(log.createdAt) }));
 }
 
 export async function getAllActivityLogs() {
@@ -4067,7 +4068,7 @@ export async function getAllActivityLogs() {
       entityType: userActivityLogs.entityType,
       entityId: userActivityLogs.entityId,
       details: userActivityLogs.details,
-      createdAt: userActivityLogs.createdAt,
+      createdAt: sql<number | string | null>`CASE WHEN YEAR(${userActivityLogs.createdAt}) = 0 THEN NULL ELSE UNIX_TIMESTAMP(${userActivityLogs.createdAt}) * 1000 END`,
       userName: users.name,
     })
     .from(userActivityLogs)
@@ -4075,7 +4076,7 @@ export async function getAllActivityLogs() {
     .orderBy(desc(userActivityLogs.createdAt))
     .limit(1000); // Limit to last 1000 logs for performance
 
-  return logs;
+  return logs.map(log => ({ ...log, createdAt: normalizeAuditEpochMs(log.createdAt) }));
 }
 
 export async function createInvoice(data: {
@@ -4368,6 +4369,19 @@ export async function getCatchSessionById(catchSessionId: number) {
 // ============================================================================
 // COMPANY SETTINGS
 // ============================================================================
+
+/** Read only the non-sensitive setting needed to display activity timestamps. */
+export async function getDisplayTimezone(): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const [settings] = await db
+    .select({ timezone: companySettings.timezone })
+    .from(companySettings)
+    .limit(1);
+
+  return settings?.timezone?.trim() || "UTC";
+}
 
 export async function getCompanySettings() {
   const db = await getDb();

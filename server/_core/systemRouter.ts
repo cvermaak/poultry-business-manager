@@ -31,4 +31,8 @@ export const systemRouter = router({
   getAllActivityLogs: protectedProcedure.query(async () => {
     return await db.getAllActivityLogs();
   }),
+
+  getDisplayTimezone: protectedProcedure.query(async () => {
+    return { timezone: await db.getDisplayTimezone() };
+  }),
 });

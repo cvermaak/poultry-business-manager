@@ -4,7 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { format } from "date-fns";
+import { AuditTimestamp } from "@/components/AuditTimestamp";
+import { auditTimezoneLabel, matchesAuditDateRange } from "@/lib/audit-time";
 import { Search } from "lucide-react";
 
 export default function AuditLogs() {
@@ -14,6 +15,9 @@ export default function AuditLogs() {
   const [dateRange, setDateRange] = useState<string>("all");
 
   const { data: allLogs, isLoading } = trpc.system.getAllActivityLogs.useQuery();
+  const { data: displaySettings, isError: timezoneError } = trpc.system.getDisplayTimezone.useQuery();
+  const timezoneUnavailable = timezoneError || (displaySettings != null && !auditTimezoneLabel(displaySettings.timezone));
+  const timezonePending = !displaySettings && !timezoneError;
 
   const filteredLogs = (allLogs || []).filter((log: any) => {
     // Search filter
@@ -42,13 +46,7 @@ export default function AuditLogs() {
 
     // Date range filter
     if (dateRange !== "all") {
-      const logDate = new Date(log.createdAt);
-      const now = new Date();
-      const daysDiff = Math.floor((now.getTime() - logDate.getTime()) / (1000 * 60 * 60 * 24));
-      
-      if (dateRange === "today" && daysDiff > 0) return false;
-      if (dateRange === "week" && daysDiff > 7) return false;
-      if (dateRange === "month" && daysDiff > 30) return false;
+      if (!displaySettings || timezoneError || !matchesAuditDateRange(log.createdAt, dateRange, displaySettings.timezone)) return false;
     }
 
     return true;
@@ -130,6 +128,13 @@ export default function AuditLogs() {
           <CardDescription>
             Showing {filteredLogs.length} of {allLogs?.length || 0} total logs
           </CardDescription>
+          <p className="text-sm text-muted-foreground" role={timezoneUnavailable ? "alert" : "status"}>
+            {timezoneUnavailable
+              ? "Company timezone unavailable. Timestamp display and date filters cannot be verified; audit records are unchanged."
+              : timezonePending
+                ? "Loading company timezone..."
+                : `Times shown in ${displaySettings?.timezone} (${auditTimezoneLabel(displaySettings!.timezone)}).`}
+          </p>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -158,7 +163,7 @@ export default function AuditLogs() {
                         )}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        {format(new Date(log.createdAt), 'MMM d, yyyy \\at h:mm a')}
+                        <AuditTimestamp value={log.createdAt} timezone={displaySettings?.timezone} timezoneError={timezoneError} />
                       </div>
                       {log.details && (
                         <div className="text-sm break-words">
@@ -177,8 +182,8 @@ export default function AuditLogs() {
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground">
-              <p>No audit logs found</p>
-              <p className="text-sm">Try adjusting your filters</p>
+              <p>{dateRange !== "all" && (timezonePending || timezoneUnavailable) ? "Date-filter results unavailable until the company timezone is loaded." : "No audit logs found"}</p>
+              <p className="text-sm">{dateRange !== "all" && (timezonePending || timezoneUnavailable) ? "Choose All Time to view the records without a date filter." : "Try adjusting your filters"}</p>
             </div>
           )}
         </CardContent>
