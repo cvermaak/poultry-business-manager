@@ -36,6 +36,8 @@ import Finance from "./pages/Finance";
 import Expenses from "./pages/Expenses";
 import CashFlow from "./pages/CashFlow";
 import FeedFormulations from "./pages/FeedFormulations";
+import FeedManagement from "./pages/FeedManagement";
+import Reports from "./pages/Reports";
 import MillCosts from "./pages/MillCosts";
 import CustomerFeedPrices from "./pages/CustomerFeedPrices";
 import FeedOrders from "./pages/FeedOrders";
@@ -186,6 +188,12 @@ function Router() {
         </DashboardLayout>
       </Route>
 
+      <Route path="/reports">
+        <DashboardLayout>
+          <Reports />
+        </DashboardLayout>
+      </Route>
+
       <Route path="/finance">
         <DashboardLayout>
           <Finance />
@@ -201,6 +209,12 @@ function Router() {
       <Route path="/finance/cash-flow">
         <DashboardLayout>
           <CashFlow />
+        </DashboardLayout>
+      </Route>
+
+      <Route path="/feed-management">
+        <DashboardLayout>
+          <FeedManagement />
         </DashboardLayout>
       </Route>
 

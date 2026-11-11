@@ -22,6 +22,7 @@ import { catchRouter } from "./procedures/catch";
 import { densityRouter } from "./procedures/density";
 import { validateStressPackAdministration } from "./stress-pack-administration";
 import { calculateInvoiceTotals } from "./invoice-money";
+import { productionReportsRouter } from "./production-reports-router";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -48,6 +49,7 @@ const accountantProcedure = protectedProcedure.use(({ ctx, next }) => {
 export const appRouter = router({
   system: systemRouter,
   inventory: inventoryRouter,
+  productionReports: productionReportsRouter,
 
   // ============================================================================
   // AUTHENTICATION
