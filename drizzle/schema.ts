@@ -327,7 +327,11 @@ export const flockDailyRecords = mysqlTable("flock_daily_records", {
 	flockId: int().notNull().references(() => flocks.id),
 	recordDate: timestamp({ mode: 'string' }).notNull(),
 	dayNumber: int().notNull(),
+	// Compatibility invariant: mortality stores TOTAL on-farm losses (found dead + culls).
 	mortality: int().default(0).notNull(),
+	// NULL means an unrecorded historical split; explicit zero means separately recorded zero culls.
+	culls: int(),
+	cullReason: text(),
 	feedConsumed: decimal({ precision: 10, scale: 2 }).default('0'),
 	feedType: mysqlEnum(['starter','grower','finisher']),
 	waterConsumed: decimal({ precision: 10, scale: 2 }),

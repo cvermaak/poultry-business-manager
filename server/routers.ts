@@ -1,6 +1,10 @@
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import {
+  dailyLossCountSchema, optionalDailyLossesSchema, optionalExpectedDailyLossesSchema,
+  refineDailyLossContract,
+} from "../shared/daily-losses";
 import { serialize } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { generateJWT } from "./_core/jwt";
@@ -758,7 +762,8 @@ export const appRouter = router({
           flockId: z.number(),
           recordDate: z.date(),
           dayNumber: z.number().int(),
-          mortality: z.number().int().default(0),
+          mortality: dailyLossCountSchema.optional(),
+          losses: optionalDailyLossesSchema,
           feedConsumed: z.number().default(0),
           feedType: z.enum(["starter", "grower", "finisher"]).optional(),
           waterConsumed: z.number().optional(),
@@ -767,7 +772,7 @@ export const appRouter = router({
           temperature: z.number().optional(),
           humidity: z.number().optional(),
           notes: z.string().optional(),
-        })
+        }).strict().superRefine((value, ctx) => refineDailyLossContract(value, ctx, "create"))
       )
       .mutation(async ({ input, ctx }) => {
         await db.createFlockDailyRecord({ 
@@ -795,7 +800,9 @@ export const appRouter = router({
         z.object({
           id: z.number(),
           flockId: z.number(),
-          mortality: z.number().int().optional(),
+          mortality: dailyLossCountSchema.optional(),
+          losses: optionalDailyLossesSchema,
+          expectedLosses: optionalExpectedDailyLossesSchema,
           feedConsumed: z.number().optional(),
           feedType: z.enum(["starter", "grower", "finisher"]).optional(),
           waterConsumed: z.number().optional(),
@@ -804,11 +811,11 @@ export const appRouter = router({
           temperature: z.number().optional(),
           humidity: z.number().optional(),
           notes: z.string().optional(),
-        })
+        }).strict().superRefine((value, ctx) => refineDailyLossContract(value, ctx, "update"))
       )
       .mutation(async ({ input, ctx }) => {
         const { id, flockId, ...updateData } = input;
-        await db.updateFlockDailyRecord(id, {
+        const result = await db.updateFlockDailyRecord(id, flockId, {
           ...updateData,
           feedConsumed: updateData.feedConsumed?.toString(),
           waterConsumed: updateData.waterConsumed?.toString(),
@@ -820,22 +827,22 @@ export const appRouter = router({
           ctx.user.id,
           "update_daily_record",
           "flock_daily_record",
-          flockId,
-          `Updated daily record ${id} for flock ${flockId}`
+          result.flockId,
+          `Updated daily record ${id} for flock ${result.flockId}`
         );
         return { success: true };
       }),
 
     deleteDailyRecord: adminProcedure
-      .input(z.object({ id: z.number(), flockId: z.number() }))
+      .input(z.object({ id: z.number(), flockId: z.number() }).strict())
       .mutation(async ({ input, ctx }) => {
-        await db.deleteFlockDailyRecord(input.id);
+        const result = await db.deleteFlockDailyRecord(input.id, input.flockId);
         await db.logUserActivity(
           ctx.user.id,
           "delete_daily_record",
           "flock_daily_record",
-          input.flockId,
-          `Deleted daily record ${input.id} from flock ${input.flockId}`
+          result.flockId,
+          `Deleted daily record ${input.id} from flock ${result.flockId}`
         );
         return { success: true };
       }),

@@ -73,6 +73,10 @@ import {
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
 import { normalizeAuditEpochMs } from "./audit-time";
+import {
+  createDailyRecordMutation, updateDailyRecordMutation, deleteDailyRecordMutation,
+  type DailyRecordCreateInput, type DailyRecordUpdatePatch,
+} from "./daily-record-mutations";
 import { calculateInvoiceLineMoney, calculateInvoiceTotals, formatCents } from "./invoice-money";
 import {
 	calculateAgedPayablesReport,
@@ -767,22 +771,18 @@ export async function getFlockDailyRecords(flockId: number) {
     .orderBy(asc(flockDailyRecords.recordDate));
 }
 
-export async function createFlockDailyRecord(data: typeof flockDailyRecords.$inferInsert) {
+export async function createFlockDailyRecord(data: DailyRecordCreateInput) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const result = await db.insert(flockDailyRecords).values(data);
-  return result;
+  return await createDailyRecordMutation(db, data);
 }
 
-export async function updateFlockDailyRecord(id: number, data: Partial<typeof flockDailyRecords.$inferInsert>) {
+export async function updateFlockDailyRecord(id: number, flockId: number, data: DailyRecordUpdatePatch) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.update(flockDailyRecords)
-    .set({ ...data, updatedAt: mysqlTimestamp() })
-    .where(eq(flockDailyRecords.id, id));
-  return { success: true };
+  return await updateDailyRecordMutation(db, { ...data, id, flockId }, mysqlTimestamp());
 }
 
 export async function getFlockDailyRecordById(id: number) {
@@ -793,12 +793,11 @@ export async function getFlockDailyRecordById(id: number) {
   return result.length > 0 ? result[0] : null;
 }
 
-export async function deleteFlockDailyRecord(id: number) {
+export async function deleteFlockDailyRecord(id: number, flockId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.delete(flockDailyRecords).where(eq(flockDailyRecords.id, id));
-  return { success: true };
+  return await deleteDailyRecordMutation(db, { id, flockId });
 }
 
 export async function getFlockVaccinationSchedule(flockId: number) {

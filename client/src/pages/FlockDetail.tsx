@@ -22,6 +22,8 @@ import { formatRand } from "@/lib/format";
 import { normalizeHealthRecordNotes } from "@/lib/health-record-notes";
 import { PlanCatchDialog } from "@/components/PlanCatchDialog";
 import { AuditTimestamp } from "@/components/AuditTimestamp";
+import { DailyLossFields, DailyLossHistoryCells } from "@/components/DailyLossFields";
+import { buildDailyLossUpdate, emptyDailyLossForm, hydrateDailyLossForm, validateDailyLossForm } from "@/lib/daily-loss-form";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
@@ -72,12 +74,20 @@ export default function FlockDetail() {
   const removeTemplate = trpc.reminderTemplates.removeFromFlock.useMutation();
   const syncFromTemplate = trpc.reminders.syncFromTemplate.useMutation();
 
+  const invalidateDailyRecordCaches = () => {
+    utils.flocks.getDailyRecords.invalidate({ flockId });
+    utils.flocks.getById.invalidate({ id: flockId });
+    utils.flocks.getPerformanceMetrics.invalidate({ flockId });
+    utils.flocks.list.invalidate();
+    utils.flocks.getAdvancedGrowthMetrics.invalidate({ flockId });
+    utils.flocks.getFeedEfficiencyMetrics.invalidate({ flockId });
+    utils.flocks.getActivityLogs.invalidate({ flockId });
+  };
+
   // Mutations
   const createDailyRecord = trpc.flocks.createDailyRecord.useMutation({
     onSuccess: () => {
-      utils.flocks.getDailyRecords.invalidate({ flockId });
-      utils.flocks.getPerformanceMetrics.invalidate({ flockId });
-      utils.flocks.getById.invalidate({ id: flockId });
+      invalidateDailyRecordCaches();
       toast.success("Daily record added successfully");
       setDailyRecordDialogOpen(false);
       resetDailyRecordForm();
@@ -89,9 +99,7 @@ export default function FlockDetail() {
 
   const updateDailyRecord = trpc.flocks.updateDailyRecord.useMutation({
     onSuccess: () => {
-      utils.flocks.getDailyRecords.invalidate({ flockId });
-      utils.flocks.getPerformanceMetrics.invalidate({ flockId });
-      utils.flocks.getById.invalidate({ id: flockId });
+      invalidateDailyRecordCaches();
       toast.success("Daily record updated successfully");
       setEditDailyRecordDialogOpen(false);
       setEditingRecordId(null);
@@ -104,9 +112,7 @@ export default function FlockDetail() {
 
   const deleteDailyRecord = trpc.flocks.deleteDailyRecord.useMutation({
     onSuccess: () => {
-      utils.flocks.getDailyRecords.invalidate({ flockId });
-      utils.flocks.getPerformanceMetrics.invalidate({ flockId });
-      utils.flocks.getById.invalidate({ id: flockId });
+      invalidateDailyRecordCaches();
       toast.success("Daily record deleted successfully");
       setDeleteConfirmDialogOpen(false);
       setRecordToDelete(null);
@@ -272,10 +278,10 @@ export default function FlockDetail() {
   const fcrBenchmarks = BREED_FCR_BENCHMARKS[breedKey] ?? BREED_FCR_BENCHMARKS["ross_308"]!;
 
   // Form states for daily record
+  const [dailyLossForm, setDailyLossForm] = useState(emptyDailyLossForm);
   const [dailyRecordForm, setDailyRecordForm] = useState({
     recordDate: format(new Date(), "yyyy-MM-dd"),
     dayNumber: 1,
-    mortality: 0,
     feedConsumed: 0,
     feedType: "starter" as "starter" | "grower" | "finisher",
     waterConsumed: 0,
@@ -351,13 +357,13 @@ export default function FlockDetail() {
   });
 
   const resetDailyRecordForm = () => {
+    setDailyLossForm(emptyDailyLossForm());
     const today = new Date();
     const placementDate = flock?.placementDate ? new Date(flock.placementDate) : today;
     const calculatedDayNumber = Math.floor((today.getTime() - placementDate.getTime()) / (1000 * 60 * 60 * 24));
     setDailyRecordForm({
       recordDate: format(today, "yyyy-MM-dd"),
       dayNumber: Math.max(0, calculatedDayNumber),
-      mortality: 0,
       feedConsumed: 0,
       feedType: "starter",
       waterConsumed: 0,
@@ -395,11 +401,20 @@ export default function FlockDetail() {
   };
 
   const handleSubmitDailyRecord = () => {
+    const validated = validateDailyLossForm(dailyLossForm);
+    if (!validated.ok) {
+      toast.error(validated.issue);
+      return;
+    }
+    if (dailyLossForm.mode !== "create" || !validated.losses) {
+      toast.error("Reopen Add Record to enter separately recorded losses.");
+      return;
+    }
     createDailyRecord.mutate({
       flockId,
       recordDate: new Date(dailyRecordForm.recordDate),
       dayNumber: dailyRecordForm.dayNumber,
-      mortality: dailyRecordForm.mortality,
+      losses: validated.losses,
       feedConsumed: dailyRecordForm.feedConsumed,
       feedType: dailyRecordForm.feedType,
       waterConsumed: dailyRecordForm.waterConsumed || undefined,
@@ -415,10 +430,10 @@ export default function FlockDetail() {
   const handleEditDailyRecord = (record: typeof dailyRecords extends (infer T)[] | undefined ? T : never) => {
     if (!record) return;
     setEditingRecordId(record.id);
+    setDailyLossForm(hydrateDailyLossForm(record));
     setDailyRecordForm({
       recordDate: format(new Date(record.recordDate), "yyyy-MM-dd"),
       dayNumber: record.dayNumber,
-      mortality: record.mortality || 0,
       feedConsumed: record.feedConsumed ? parseFloat(record.feedConsumed.toString()) : 0,
       feedType: (record.feedType as "starter" | "grower" | "finisher") || "starter",
       waterConsumed: record.waterConsumed ? parseFloat(record.waterConsumed.toString()) : 0,
@@ -433,10 +448,15 @@ export default function FlockDetail() {
 
   const handleUpdateDailyRecord = () => {
     if (!editingRecordId) return;
+    const lossUpdate = buildDailyLossUpdate(dailyLossForm);
+    if (!lossUpdate.ok) {
+      toast.error(lossUpdate.issue);
+      return;
+    }
     updateDailyRecord.mutate({
       id: editingRecordId,
       flockId,
-      mortality: dailyRecordForm.mortality,
+      ...lossUpdate.fields,
       feedConsumed: dailyRecordForm.feedConsumed,
       feedType: dailyRecordForm.feedType,
       waterConsumed: dailyRecordForm.waterConsumed || undefined,
@@ -682,14 +702,15 @@ export default function FlockDetail() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Current Count</CardTitle>
+            <CardTitle className="text-sm font-medium">Recorded-loss-based Count</CardTitle>
             <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{flock.currentCount.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">
-              Mortality: {performanceMetrics?.mortalityRate || 0}%
+              Total losses (mortality & culls): {performanceMetrics?.mortalityRate || 0}%
             </p>
+            <p className="text-xs text-muted-foreground">Not verified physical stock; harvest removals are not deducted.</p>
           </CardContent>
         </Card>
 
@@ -921,14 +942,14 @@ export default function FlockDetail() {
           <div className="grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Total Mortality</CardTitle>
+                <CardTitle className="text-sm font-medium">Total losses (mortality & culls)</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
                   {dailyRecords?.reduce((sum, r) => sum + (r.mortality || 0), 0).toLocaleString() || 0}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {((dailyRecords?.reduce((sum, r) => sum + (r.mortality || 0), 0) || 0) / (flock?.initialCount || 1) * 100).toFixed(2)}% mortality rate
+                  {((dailyRecords?.reduce((sum, r) => sum + (r.mortality || 0), 0) || 0) / (flock?.initialCount || 1) * 100).toFixed(2)}% total loss rate
                 </p>
               </CardContent>
             </Card>
@@ -1195,10 +1216,12 @@ export default function FlockDetail() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Daily Records</CardTitle>
-                <CardDescription>Track daily mortality, feed consumption, and weight samples</CardDescription>
+                <CardDescription>Track daily total losses, found dead, culls, feed consumption, and weight samples</CardDescription>
               </div>
               <Dialog open={dailyRecordDialogOpen} onOpenChange={(open) => {
                 setDailyRecordDialogOpen(open);
+                // Always clear loss state on Add open and dismissal, including after Edit.
+                setDailyLossForm(emptyDailyLossForm());
                 if (open) {
                   // Calculate day number when dialog opens
                   const today = new Date();
@@ -1259,28 +1282,12 @@ export default function FlockDetail() {
                       </div>
                     </div>
 
-                    <div className="border-t pt-4">
-                      <h4 className="font-medium mb-3">Mortality & Bird Count</h4>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="mortality">Mortality Count</Label>
-                          <Input
-                            id="mortality"
-                            type="number"
-                            min="0"
-                            value={dailyRecordForm.mortality}
-                            onChange={(e) => setDailyRecordForm({ ...dailyRecordForm, mortality: parseInt(e.target.value) || 0 })}
-                          />
-                          <p className="text-xs text-muted-foreground">Number of birds that died today</p>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Current Count After Mortality</Label>
-                          <div className="text-lg font-medium p-2 bg-muted rounded">
-                            {((flock?.currentCount || 0) - dailyRecordForm.mortality).toLocaleString()} birds
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    <DailyLossFields
+                      value={dailyLossForm}
+                      onChange={setDailyLossForm}
+                      currentCount={flock.currentCount}
+                      idPrefix="add-losses"
+                    />
 
                     <div className="border-t pt-4">
                       <h4 className="font-medium mb-3">Feed & Water Consumption</h4>
@@ -1423,8 +1430,11 @@ export default function FlockDetail() {
                     </div>
                   </div>
                   <DialogFooter>
-                    <Button variant="outline" onClick={() => setDailyRecordDialogOpen(false)}>Cancel</Button>
-                    <Button onClick={handleSubmitDailyRecord} disabled={createDailyRecord.isPending}>
+                    <Button variant="outline" onClick={() => {
+                      setDailyRecordDialogOpen(false);
+                      setDailyLossForm(emptyDailyLossForm());
+                    }}>Cancel</Button>
+                    <Button onClick={handleSubmitDailyRecord} disabled={createDailyRecord.isPending || !validateDailyLossForm(dailyLossForm).ok}>
                       {createDailyRecord.isPending ? "Saving..." : "Save Record"}
                     </Button>
                   </DialogFooter>
@@ -1439,7 +1449,11 @@ export default function FlockDetail() {
                       <TableRow>
                         <TableHead>Date</TableHead>
                         <TableHead>Day</TableHead>
-                        <TableHead>Mortality</TableHead>
+                        <TableHead>Total losses</TableHead>
+                        <TableHead>Found dead</TableHead>
+                        <TableHead>Culls</TableHead>
+                        <TableHead>Split status</TableHead>
+                        <TableHead>Culling reason</TableHead>
                         <TableHead>Feed (kg)</TableHead>
                         <TableHead>Feed Type</TableHead>
                         <TableHead>Water (L)</TableHead>
@@ -1455,11 +1469,7 @@ export default function FlockDetail() {
                         <TableRow key={record.id}>
                           <TableCell>{format(new Date(record.recordDate), "dd MMM yyyy")}</TableCell>
                           <TableCell>{record.dayNumber}</TableCell>
-                          <TableCell>
-                            <span className={record.mortality > 0 ? "text-red-600 font-medium" : ""}>
-                              {record.mortality}
-                            </span>
-                          </TableCell>
+                          <DailyLossHistoryCells record={record} />
                           <TableCell>{record.feedConsumed ? parseFloat(record.feedConsumed.toString()).toFixed(1) : "-"}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className="capitalize">{record.feedType || "-"}</Badge>
@@ -1534,17 +1544,13 @@ export default function FlockDetail() {
                     <Input type="number" value={dailyRecordForm.dayNumber} disabled />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-mortality">Mortality</Label>
-                    <Input
-                      id="edit-mortality"
-                      type="number"
-                      min="0"
-                      value={dailyRecordForm.mortality}
-                      onChange={(e) => setDailyRecordForm({ ...dailyRecordForm, mortality: parseInt(e.target.value) || 0 })}
-                    />
-                  </div>
+                <DailyLossFields
+                  value={dailyLossForm}
+                  onChange={setDailyLossForm}
+                  currentCount={flock.currentCount}
+                  idPrefix="edit-losses"
+                />
+                <div>
                   <div className="space-y-2">
                     <Label htmlFor="edit-feedConsumed">Feed Consumed (kg)</Label>
                     <Input
@@ -1646,8 +1652,12 @@ export default function FlockDetail() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setEditDailyRecordDialogOpen(false)}>Cancel</Button>
-                <Button onClick={handleUpdateDailyRecord} disabled={updateDailyRecord.isPending}>
+                <Button variant="outline" onClick={() => {
+                  setEditDailyRecordDialogOpen(false);
+                  setEditingRecordId(null);
+                  resetDailyRecordForm();
+                }}>Cancel</Button>
+                <Button onClick={handleUpdateDailyRecord} disabled={updateDailyRecord.isPending || !buildDailyLossUpdate(dailyLossForm).ok}>
                   {updateDailyRecord.isPending ? "Saving..." : "Save Changes"}
                 </Button>
               </DialogFooter>
@@ -2692,11 +2702,11 @@ export default function FlockDetail() {
                   </Card>
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium">Remaining Birds</CardTitle>
+                      <CardTitle className="text-sm font-medium">Recorded-loss-based Count</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">{flock?.currentCount.toLocaleString()}</div>
-                      <p className="text-xs text-muted-foreground">Still in house</p>
+                      <p className="text-xs text-muted-foreground">Not verified physical stock; harvest removals are not deducted</p>
                     </CardContent>
                   </Card>
                   <Card>
