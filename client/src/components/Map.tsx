@@ -87,6 +87,8 @@ declare global {
 }
 
 const API_KEY = import.meta.env.VITE_FRONTEND_FORGE_API_KEY;
+// Direct Google Maps key (used outside Manus, e.g. on Railway)
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const FORGE_BASE_URL =
   import.meta.env.VITE_FRONTEND_FORGE_API_URL ||
   "https://forge.butterfly-effect.dev";
@@ -95,7 +97,10 @@ const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
 function loadMapScript() {
   return new Promise(resolve => {
     const script = document.createElement("script");
-    script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
+    const libs = "v=weekly&libraries=marker,places,geocoding,geometry";
+    script.src = GOOGLE_MAPS_API_KEY
+      ? `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&${libs}`
+      : `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&${libs}`;
     script.async = true;
     script.crossOrigin = "anonymous";
     script.onload = () => {
