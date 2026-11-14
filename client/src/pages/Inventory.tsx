@@ -1429,6 +1429,7 @@ export default function Inventory() {
                         <SelectItem value="G">G - Granule</SelectItem>
                         <SelectItem value="D">D - Dust/Powder</SelectItem>
                         <SelectItem value="INJ">INJ - Injectable</SelectItem>
+                        <SelectItem value="LMP">LMP - Lump (pea coal)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
