@@ -6385,7 +6385,7 @@ export async function listFeedDeliveryInvoices(filters?: {
   return rows;
 }
 
-export async function getCustomerInvoiceAgingSummary() {
+export async function getCustomerInvoiceAgingSummary(excludeFeedInvoices = false) {
   const db = await getDb();
   if (!db) return { draft: 0, sent: 0, overdue: 0, paid: 0, dueSoonCount: 0, totalOutstanding: 0, totalOverdue: 0, dueSoonAmount: 0 };
 
@@ -6401,7 +6401,8 @@ export async function getCustomerInvoiceAgingSummary() {
       balanceDue: invoices.balanceDue,
       inclusiveTotal: invoices.inclusiveTotal,
     })
-    .from(invoices);
+    .from(invoices)
+    .where(excludeFeedInvoices ? isNull(invoices.feedOrderId) : undefined);
 
   let draft = 0, sent = 0, overdue = 0, paid = 0, dueSoonCount = 0;
   let totalOutstanding = 0, totalOverdue = 0, dueSoonAmount = 0;

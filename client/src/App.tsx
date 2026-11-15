@@ -1,6 +1,9 @@
+import { ModuleViewAccessGuard } from "@/hooks/useModuleViewAccess";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
+import type { ComponentType } from "react";
+import { FinancialAccessGuard } from "@/hooks/useFinancialVisibility";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -45,6 +48,25 @@ import FeedOrderDetail from "./pages/FeedOrderDetail";
 import AdditiveInventorySettings from "./pages/AdditiveInventorySettings";
 import FeedInvoices from "./pages/FeedInvoices";
 import MillInvoices from "./pages/MillInvoices";
+
+// Stable component identities: the guard resolves before a page's hooks mount.
+function withFinancialAccess(Page: ComponentType) {
+  return function FinancialPage() {
+    return <FinancialAccessGuard><Page /></FinancialAccessGuard>;
+  };
+}
+const FinancialSales = withFinancialAccess(Sales);
+const FinancialInvoices = withFinancialAccess(Invoices);
+const FinancialCreateInvoice = withFinancialAccess(CreateInvoice);
+const FinancialAuditLogs = withFinancialAccess(AuditLogs);
+const FinancialCompanySettings = withFinancialAccess(CompanySettings);
+const FinancialFinance = withFinancialAccess(Finance);
+const FinancialExpenses = withFinancialAccess(Expenses);
+const FinancialCashFlow = withFinancialAccess(CashFlow);
+const FinancialMillCosts = withFinancialAccess(MillCosts);
+const FinancialCustomerFeedPrices = withFinancialAccess(CustomerFeedPrices);
+const FinancialFeedInvoices = withFinancialAccess(FeedInvoices);
+const FinancialMillInvoices = withFinancialAccess(MillInvoices);
 
 function Router() {
   return (
@@ -106,13 +128,13 @@ function Router() {
 
       <Route path="/customers">
         <DashboardLayout>
-          <Customers />
+          <ModuleViewAccessGuard scope="customers"><Customers /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 
       <Route path="/sales">
         <DashboardLayout>
-          <Sales />
+          <FinancialSales />
         </DashboardLayout>
       </Route>
 
@@ -124,19 +146,19 @@ function Router() {
 
       <Route path="/sales/invoices">
         <DashboardLayout>
-          <Invoices />
+          <FinancialInvoices />
         </DashboardLayout>
       </Route>
 
       <Route path="/sales/invoices/create">
         <DashboardLayout>
-          <CreateInvoice />
+          <FinancialCreateInvoice />
         </DashboardLayout>
       </Route>
 
       <Route path="/suppliers">
         <DashboardLayout>
-          <Suppliers />
+          <ModuleViewAccessGuard scope="suppliers"><Suppliers /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 
@@ -172,7 +194,7 @@ function Router() {
 
       <Route path="/audit-logs">
         <DashboardLayout>
-          <AuditLogs />
+          <FinancialAuditLogs />
         </DashboardLayout>
       </Route>
 
@@ -184,7 +206,7 @@ function Router() {
 
       <Route path="/settings/company">
         <DashboardLayout>
-          <CompanySettings />
+          <FinancialCompanySettings />
         </DashboardLayout>
       </Route>
 
@@ -196,67 +218,67 @@ function Router() {
 
       <Route path="/finance">
         <DashboardLayout>
-          <Finance />
+          <FinancialFinance />
         </DashboardLayout>
       </Route>
 
       <Route path="/finance/expenses">
         <DashboardLayout>
-          <Expenses />
+          <FinancialExpenses />
         </DashboardLayout>
       </Route>
 
       <Route path="/finance/cash-flow">
         <DashboardLayout>
-          <CashFlow />
+          <FinancialCashFlow />
         </DashboardLayout>
       </Route>
 
       <Route path="/feed-management">
         <DashboardLayout>
-          <FeedManagement />
+          <ModuleViewAccessGuard scope="feed_management"><FeedManagement /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 
       <Route path="/feed-management/formulations">
         <DashboardLayout>
-          <FeedFormulations />
+          <ModuleViewAccessGuard scope="feed_management"><FeedFormulations /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 
       <Route path="/feed-management/mill-costs">
         <DashboardLayout>
-          <MillCosts />
+          <ModuleViewAccessGuard scope="feed_management"><FinancialMillCosts /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 
       <Route path="/feed-management/customer-pricing">
         <DashboardLayout>
-          <CustomerFeedPrices />
+          <ModuleViewAccessGuard scope="feed_management"><FinancialCustomerFeedPrices /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 
       <Route path="/feed-orders/:id">
-        <FeedOrderDetail />
+        <ModuleViewAccessGuard scope="feed_management"><FeedOrderDetail /></ModuleViewAccessGuard>
       </Route>
 
       <Route path="/feed-orders">
-        <FeedOrders />
+        <ModuleViewAccessGuard scope="feed_management"><FeedOrders /></ModuleViewAccessGuard>
       </Route>
 
       <Route path="/feed-management/additive-inventory">
-        <AdditiveInventorySettings />
+        <ModuleViewAccessGuard scope="feed_management"><AdditiveInventorySettings /></ModuleViewAccessGuard>
       </Route>
 
       <Route path="/invoicing/feed-invoices">
         <DashboardLayout>
-          <FeedInvoices />
+          <ModuleViewAccessGuard scope="feed_management"><FinancialFeedInvoices /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 
       <Route path="/invoicing/mill-invoices">
         <DashboardLayout>
-          <MillInvoices />
+          <ModuleViewAccessGuard scope="feed_management"><FinancialMillInvoices /></ModuleViewAccessGuard>
         </DashboardLayout>
       </Route>
 

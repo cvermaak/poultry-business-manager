@@ -1,3 +1,7 @@
+import { OPERATIONAL_PARAMS, CLIENT_PAYMENT_SCHEDULE } from "./cash-flow-private-parameters";
+import { getBusinessPermissionService, authorizeBusinessAction, canReadFinancialData } from "./business-permission-service";
+import { isBusinessScope } from "../shared/business-permission-definitions";
+import { moduleViewAccessRouter } from "./module-view-access-router";
 import { COOKIE_NAME } from "@shared/const";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
@@ -10,7 +14,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { generateJWT } from "./_core/jwt";
 import { systemRouter } from "./_core/systemRouter";
 import { inventoryRouter } from "./inventory-router";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { publicProcedure, router } from "./_core/trpc";
+import { financialProtectedProcedure as protectedProcedure } from "./financial-data-procedure";
 import * as db from "./db";
 
 import { createVaccinationSchedulesForFlock, createStressPackSchedulesForFlock, createFlockVaccinationSchedule } from "./db-health-helpers";
@@ -27,6 +32,7 @@ import { densityRouter } from "./procedures/density";
 import { validateStressPackAdministration } from "./stress-pack-administration";
 import { calculateInvoiceTotals } from "./invoice-money";
 import { productionReportsRouter } from "./production-reports-router";
+import { authorizeSupplierAction, getSupplierPermissionService } from "./supplier-permission-service";
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -50,10 +56,55 @@ const accountantProcedure = protectedProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
+/** Additional View-only module gate, before child input parsers and handlers.
+ * The existing protected/financial middleware and all handler safeguards remain. */
+const feedProtectedProcedure = protectedProcedure.use(async ({ ctx, path, next }) => {
+  await authorizeBusinessAction(ctx.user.id, "feed_management", path);
+  return next();
+});
+
+/** Shared invoice APIs also serve feed invoices. Classify only the stored
+ * feedOrderId, never a client-provided type/role, so sales invoices stay unchanged. */
+function isFeedInvoiceRecord(value: unknown): boolean {
+  return !!value && typeof value === "object" && (value as { feedOrderId?: unknown }).feedOrderId != null;
+}
+async function feedModuleVisible(actorId: number): Promise<boolean> {
+  try {
+    await getBusinessPermissionService("feed_management").authorize(actorId, ["feed.management.view.module"]);
+    return true;
+  } catch (error) {
+    if (error instanceof TRPCError && ["FORBIDDEN", "UNAUTHORIZED"].includes(error.code)) return false;
+    throw error;
+  }
+}
+async function authorizeStoredFeedInvoice(actorId: number, invoiceId: number): Promise<void> {
+  const invoice = await db.getInvoiceById(invoiceId);
+  if (isFeedInvoiceRecord(invoice)) {
+    await getBusinessPermissionService("feed_management").authorize(actorId, ["feed.management.view.module"]);
+  }
+}
+
 export const appRouter = router({
+  moduleViewAccess: moduleViewAccessRouter,
   system: systemRouter,
   inventory: inventoryRouter,
   productionReports: productionReportsRouter,
+  businessPermissions: router({
+    load: adminProcedure.input(z.object({scope:z.enum(['customers','sales_orders','invoices','financial_data','feed_management']),role:z.unknown()})).query(({ctx,input})=>getBusinessPermissionService(input.scope).load(ctx.user.id,input.role)),
+    save: adminProcedure.input(z.object({scope:z.enum(['customers','sales_orders','invoices','financial_data','feed_management']),request:z.unknown()})).mutation(({ctx,input})=>getBusinessPermissionService(input.scope).save(ctx.user.id,input.request)),
+  }),
+  financialVisibility: router({
+    get: protectedProcedure.input(z.object({viewerId:z.number().int().nonnegative()})).query(async({ctx,input})=>{
+      if(input.viewerId!==ctx.user.id)throw new TRPCError({code:'FORBIDDEN',message:'Financial visibility cannot be read for another user.'});
+      return {allowed:await canReadFinancialData(ctx.user.id)};
+    }),
+  }),
+  supplierPermissions: router({
+    load: adminProcedure.input(z.unknown()).query(({ ctx, input }) =>
+      getSupplierPermissionService().supplierPermissions.load({ actorId: ctx.user.id }, input)),
+    save: adminProcedure.input(z.unknown()).mutation(({ ctx, input }) =>
+      getSupplierPermissionService().supplierPermissions.save({ actorId: ctx.user.id }, input)),
+  }),
 
   // ============================================================================
   // AUTHENTICATION
@@ -1177,12 +1228,12 @@ export const appRouter = router({
             isActive: z.boolean().optional(),
           })
           .optional()
-      )
+      ).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "customers", "list", input); return next(); })
       .query(async ({ input }) => {
         return await db.listCustomers(input);
       }),
 
-    getById: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => {
+    getById: protectedProcedure.input(z.object({ id: z.number() })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "customers", "getById", input); return next(); }).query(async ({ input }) => {
       return await db.getCustomerById(input.id);
     }),
 
@@ -1203,18 +1254,18 @@ export const appRouter = router({
           vatNumber: z.string().optional(),
           notes: z.string().optional(),
         })
-      )
+      ).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "customers", "create", input); return next(); })
       .mutation(async ({ input, ctx }) => {
         await db.createCustomer({ ...input, createdBy: ctx.user.id });
         await db.logUserActivity(ctx.user.id, "create_customer", "customer", undefined, `Created customer: ${input.name}`);
         return { success: true };
       }),
 
-    getAddresses: protectedProcedure.input(z.object({ customerId: z.number() })).query(async ({ input }) => {
+    getAddresses: protectedProcedure.input(z.object({ customerId: z.number() })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "customers", "getAddresses", input); return next(); }).query(async ({ input }) => {
       return await db.getCustomerAddresses(input.customerId);
     }),
 
-    getNextNumber: protectedProcedure.query(async () => {
+    getNextNumber: protectedProcedure.use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "customers", "getNextNumber", input); return next(); }).query(async () => {
       return { customerNumber: await db.getNextCustomerNumber() };
     }),
 
@@ -1236,7 +1287,7 @@ export const appRouter = router({
           notes: z.string().optional().nullable(),
           isActive: z.boolean().optional(),
         })
-      )
+      ).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "customers", "update", input); return next(); })
       .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         const updated = await db.updateCustomer(id, data);
@@ -1245,7 +1296,7 @@ export const appRouter = router({
       }),
 
     delete: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.number() })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "customers", "delete", input); return next(); })
       .mutation(async ({ input, ctx }) => {
         const updated = await db.deleteCustomer(input.id);
         await db.logUserActivity(ctx.user.id, "deactivate_customer", "customer", input.id, `Deactivated customer: ${updated?.name}`);
@@ -1266,11 +1317,13 @@ export const appRouter = router({
           })
           .optional()
       )
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        await authorizeSupplierAction(ctx.user.id, "list", input);
         return await db.listSuppliers(input);
       }),
 
-    getById: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => {
+    getById: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ input, ctx }) => {
+      await authorizeSupplierAction(ctx.user.id, "getById", input);
       return await db.getSupplierById(input.id);
     }),
 
@@ -1291,7 +1344,8 @@ export const appRouter = router({
           notes: z.string().optional(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        await authorizeSupplierAction(ctx.user.id, "create", input);
         return await db.createSupplier({
           ...input,
           email: input.email || undefined,
@@ -1317,7 +1371,8 @@ export const appRouter = router({
           isActive: z.boolean().optional(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        await authorizeSupplierAction(ctx.user.id, "update", input);
         const { id, ...data } = input;
         return await db.updateSupplier(id, {
           ...data,
@@ -1327,7 +1382,8 @@ export const appRouter = router({
 
     delete: protectedProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        await authorizeSupplierAction(ctx.user.id, "delete", input);
         return await db.deleteSupplier(input.id);
       }),
   }),
@@ -1921,7 +1977,7 @@ export const appRouter = router({
           discountPercent: z.number().nonnegative().default(0),
           vatPercent: z.number().nonnegative().default(15),
         })).optional(),
-      }))
+      })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "invoices", "create", input); return next(); })
       .mutation(async ({ input, ctx }) => {
         // Optionally load catch session details if provided
         let catchSession: any = null;
@@ -2014,37 +2070,46 @@ export const appRouter = router({
       .input(z.object({
         customerId: z.number().optional(),
         status: z.string().optional(),
-      }).optional())
-      .query(async ({ input }) => {
-        return await db.listInvoices(input);
+      }).optional()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "invoices", "list", input); return next(); })
+      .query(async ({ input, ctx }) => {
+        const invoices = await db.listInvoices(input);
+        // A mixed sales list stays accessible, but cannot become a feed alias.
+        if (!invoices.some(isFeedInvoiceRecord) || await feedModuleVisible(ctx.user.id)) return invoices;
+        return invoices.filter(invoice => !isFeedInvoiceRecord(invoice));
       }),
 
     getById: protectedProcedure
-      .input(z.number())
-      .query(async ({ input }) => {
-        return await db.getInvoiceById(input);
+      .input(z.number()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "invoices", "getById", input); return next(); })
+      .query(async ({ input, ctx }) => {
+        const invoice = await db.getInvoiceById(input);
+        if (isFeedInvoiceRecord(invoice)) await getBusinessPermissionService("feed_management").authorize(ctx.user.id, ["feed.management.view.module"]);
+        return invoice;
       }),
 
     getAccountingPosting: protectedProcedure
       .input(z.number().int().positive())
+      .use(async ({ ctx, input, next }) => { await authorizeStoredFeedInvoice(ctx.user.id, input); return next(); })
       .query(async ({ input }) => {
         return await db.getCustomerInvoicePosting(input);
       }),
 
     getPaymentPostings: protectedProcedure
       .input(z.number().int().positive())
+      .use(async ({ ctx, input, next }) => { await authorizeStoredFeedInvoice(ctx.user.id, input); return next(); })
       .query(async ({ input }) => {
         return await db.getCustomerInvoicePaymentPostings(input);
       }),
 
     getItems: protectedProcedure
-      .input(z.number())
+      .input(z.number()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "invoices", "getItems", input); return next(); })
+      .use(async ({ ctx, input, next }) => { await authorizeStoredFeedInvoice(ctx.user.id, input); return next(); })
       .query(async ({ input }) => {
         return await db.getInvoiceItems(input);
       }),
 
     generatePDF: protectedProcedure
-      .input(z.number())
+      .input(z.number()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "invoices", "generatePDF", input); return next(); })
+      .use(async ({ ctx, input, next }) => { await authorizeStoredFeedInvoice(ctx.user.id, input); return next(); })
       .mutation(async ({ input: invoiceId }) => {
         try {
           const { generatePremiumInvoicePDF } = await import('./pdf-generator-premium');
@@ -2179,6 +2244,7 @@ export const appRouter = router({
         invoiceId: z.number(),
         sentAt: z.string(),
       }))
+      .use(async ({ ctx, input, next }) => { await authorizeStoredFeedInvoice(ctx.user.id, input.invoiceId); return next(); })
       .mutation(async ({ input, ctx }) => {
         const posting = await db.markInvoiceAsSent(input.invoiceId, input.sentAt, ctx.user.id);
         await db.logUserActivity(ctx.user.id, "post_customer_invoice", "invoice", input.invoiceId, `Posted invoice journal ${posting.journalNumber}`);
@@ -2194,6 +2260,7 @@ export const appRouter = router({
         paymentReference: z.string().trim().max(200).optional(),
         idempotencyKey: z.string().trim().min(8).max(100),
       }))
+      .use(async ({ ctx, input, next }) => { await authorizeStoredFeedInvoice(ctx.user.id, input.invoiceId); return next(); })
       .mutation(async ({ input, ctx }) => {
         return await db.recordInvoicePayment(input.invoiceId, {
           amount: input.amount,
@@ -2207,12 +2274,13 @@ export const appRouter = router({
 
     cancel: protectedProcedure
       .input(z.number())
+      .use(async ({ ctx, input, next }) => { await authorizeStoredFeedInvoice(ctx.user.id, input); return next(); })
       .mutation(async ({ input: invoiceId }) => {
         return await db.cancelInvoice(invoiceId);
       }),
 
     // Feed Delivery Invoices
-    createFeedDeliveryInvoice: protectedProcedure
+    createFeedDeliveryInvoice: feedProtectedProcedure
       .input(z.object({
         customerId: z.number(),
         deliveryId: z.number().optional(),
@@ -2232,7 +2300,7 @@ export const appRouter = router({
         return await db.createFeedDeliveryInvoice({ ...input, createdBy: ctx.user.id });
       }),
 
-    listFeedDeliveryInvoices: protectedProcedure
+    listFeedDeliveryInvoices: feedProtectedProcedure
       .input(z.object({
         customerId: z.number().optional(),
         feedOrderId: z.number().optional(),
@@ -2243,7 +2311,7 @@ export const appRouter = router({
       }),
 
     // Mill Invoices (mill bills AFGRO)
-    listMillInvoices: protectedProcedure
+    listMillInvoices: feedProtectedProcedure
       .input(z.object({
         status: z.string().optional(),
         feedOrderId: z.number().optional(),
@@ -2252,7 +2320,7 @@ export const appRouter = router({
         return await db.listMillInvoices(input ?? {});
       }),
 
-    createMillInvoice: protectedProcedure
+    createMillInvoice: feedProtectedProcedure
       .input(z.object({
         feedOrderId: z.number(),
 		supplierId: z.number().positive().optional(),
@@ -2268,7 +2336,7 @@ export const appRouter = router({
         return await db.createMillInvoice({ ...input, createdBy: ctx.user.id });
       }),
 
-    recordMillInvoicePayment: protectedProcedure
+    recordMillInvoicePayment: feedProtectedProcedure
       .input(z.object({
         id: z.number(),
         paidDate: z.string(),
@@ -2288,25 +2356,25 @@ export const appRouter = router({
       	});
       }),
 
-		getMillInvoiceAccountingPosting: protectedProcedure
+		getMillInvoiceAccountingPosting: feedProtectedProcedure
 			.input(z.object({ id: z.number().positive() }))
 			.query(async ({ input }) => db.getMillInvoicePosting(input.id)),
 
-		getMillInvoicePaymentPostings: protectedProcedure
+		getMillInvoicePaymentPostings: feedProtectedProcedure
 			.input(z.object({ id: z.number().positive() }))
 			.query(async ({ input }) => db.getMillInvoicePaymentPostings(input.id)),
 
-		postMillInvoiceToPayables: protectedProcedure
+		postMillInvoiceToPayables: feedProtectedProcedure
 			.input(z.object({ id: z.number().positive() }))
 			.mutation(async ({ input, ctx }) => db.postMillInvoiceToPayables(input.id, ctx.user.id)),
 
     getInvoiceAgingSummary: protectedProcedure
-      .query(async () => {
-        const [customer, mill] = await Promise.all([
-          db.getCustomerInvoiceAgingSummary(),
-          db.getMillInvoiceAgingSummary(),
-        ]);
-        return { customer, mill };
+      .query(async ({ ctx }) => {
+        const feedVisible = await feedModuleVisible(ctx.user.id);
+        const customer = await db.getCustomerInvoiceAgingSummary(!feedVisible);
+        if (!feedVisible) return { customer, feedViewAllowed: false };
+        const mill = await db.getMillInvoiceAgingSummary();
+        return { customer, mill, feedViewAllowed: true };
       }),
     generateFromOrder: protectedProcedure
       .input(z.object({
@@ -2314,7 +2382,7 @@ export const appRouter = router({
         invoiceDate: z.string(),
         dueDate: z.string(),
         notes: z.string().optional(),
-      }))
+      })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "invoices", "generateFromOrder", input); return next(); })
       .mutation(async ({ input, ctx }) => {
         return await db.createInvoiceFromSalesOrder({
           orderId: input.orderId,
@@ -2325,7 +2393,7 @@ export const appRouter = router({
         });
       }),
     checkOrderInvoice: protectedProcedure
-      .input(z.number().int().positive())
+      .input(z.number().int().positive()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "invoices", "checkOrderInvoice", input); return next(); })
       .query(async ({ input: orderId }) => {
         return await db.getInvoiceByOrderId(orderId);
       }),
@@ -2334,15 +2402,26 @@ export const appRouter = router({
   // ANALYTICS & DASHBOARDD
   // ============================================================================
   analytics: router({
-    dashboard: protectedProcedure.query(async () => {
+    dashboard: protectedProcedure.query(async ({ ctx }) => {
       const activeFlocks = await db.getActiveFlockCount();
-      const totalCustomers = await db.getTotalCustomerCount();
+      // Grouped Customers View is one module boundary. Do not query or disclose
+      // this module's count when any source-defined View key is blocked.
+      let customerView = true;
+      try {
+        for (const method of ["list", "getById", "getAddresses"]) {
+          await authorizeBusinessAction(ctx.user.id, "customers", method);
+        }
+      } catch (error) {
+        if (error instanceof TRPCError && ["FORBIDDEN", "UNAUTHORIZED"].includes(error.code)) customerView = false;
+        else throw error;
+      }
+      const totalCustomers = customerView ? await db.getTotalCustomerCount() : undefined;
       const now = new Date();
       const monthlyRevenue = await db.getMonthlyRevenue(now.getFullYear(), now.getMonth() + 1);
 
       return {
         activeFlocks,
-        totalCustomers,
+        ...(customerView ? { totalCustomers } : {}),
         monthlyRevenue,
         // Additional KPIs will be calculated here
       };
@@ -2420,6 +2499,7 @@ export const appRouter = router({
   // FINANCIAL MANAGEMENT: CASH FLOW FORECASTING
   // ============================================================================
   cashFlow: router({
+    getOperationalParameters: protectedProcedure.query(()=>({operationalParams:OPERATIONAL_PARAMS,clientPaymentSchedule:CLIENT_PAYMENT_SCHEDULE})),
     createForecast: protectedProcedure
       .input(z.object({
         startDate: z.string(),
@@ -2728,7 +2808,7 @@ export const appRouter = router({
   // ============================================================================
   feedManagement: router({
     // --- Formulations ---
-    listFormulations: protectedProcedure
+    listFormulations: feedProtectedProcedure
       .input(z.object({
         feedRange: z.enum(['premium','value','econo']).optional(),
         feedStage: z.enum(['starter','grower','finisher']).optional(),
@@ -2738,13 +2818,13 @@ export const appRouter = router({
         return await db.listFeedFormulations(opts.input ?? undefined);
       }),
 
-    getFormulation: protectedProcedure
+    getFormulation: feedProtectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async (opts) => {
         return await db.getFeedFormulationById(opts.input.id);
       }),
 
-    createFormulation: protectedProcedure
+    createFormulation: feedProtectedProcedure
       .input(z.object({
         name: z.string().min(1),
         feedRange: z.enum(['premium','value','econo']),
@@ -2770,7 +2850,7 @@ export const appRouter = router({
         return { id };
       }),
 
-    deactivateFormulation: protectedProcedure
+    deactivateFormulation: feedProtectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async (opts) => {
         await db.deactivateFeedFormulation(opts.input.id);
@@ -2778,7 +2858,7 @@ export const appRouter = router({
       }),
 
     // --- Mill Costs ---
-    listMillCosts: protectedProcedure
+    listMillCosts: feedProtectedProcedure
       .input(z.object({
         feedRange: z.enum(['premium','value','econo']).optional(),
         feedType: z.enum(['starter','grower','finisher']).optional(),
@@ -2787,7 +2867,7 @@ export const appRouter = router({
         return await db.listMillCosts(opts.input ?? undefined);
       }),
 
-    createMillCost: protectedProcedure
+    createMillCost: feedProtectedProcedure
       .input(z.object({
         feedRange: z.enum(['premium','value','econo']),
         feedType: z.enum(['starter','grower','finisher']),
@@ -2800,7 +2880,7 @@ export const appRouter = router({
         return { id };
       }),
 
-    updateMillCost: protectedProcedure
+    updateMillCost: feedProtectedProcedure
       .input(z.object({
         id: z.number(),
         costPerTon: z.string().optional(),
@@ -2813,7 +2893,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    deleteMillCost: protectedProcedure
+    deleteMillCost: feedProtectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async (opts) => {
         await db.deleteMillCost(opts.input.id);
@@ -2821,7 +2901,7 @@ export const appRouter = router({
       }),
 
     // --- Customer Feed Prices ---
-    listCustomerPrices: protectedProcedure
+    listCustomerPrices: feedProtectedProcedure
       .input(z.object({
         customerId: z.number().optional(),
         feedRange: z.enum(['premium','value','econo']).optional(),
@@ -2831,7 +2911,7 @@ export const appRouter = router({
         return await db.listCustomerFeedPrices(opts.input ?? undefined);
       }),
 
-    createCustomerPrice: protectedProcedure
+    createCustomerPrice: feedProtectedProcedure
       .input(z.object({
         customerId: z.number(),
         feedRange: z.enum(['premium','value','econo']),
@@ -2845,7 +2925,7 @@ export const appRouter = router({
         return { id };
       }),
 
-    updateCustomerPrice: protectedProcedure
+    updateCustomerPrice: feedProtectedProcedure
       .input(z.object({
         id: z.number(),
         pricePerTon: z.string().optional(),
@@ -2858,14 +2938,14 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    deleteCustomerPrice: protectedProcedure
+    deleteCustomerPrice: feedProtectedProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async (opts) => {
         await db.deleteCustomerFeedPrice(opts.input.id);
         return { success: true };
       }),
 
-    getCustomerFeedPrice: protectedProcedure
+    getCustomerFeedPrice: feedProtectedProcedure
       .input(z.object({
         customerId: z.number(),
         feedRange: z.enum(['premium','value','econo']),
@@ -2879,7 +2959,7 @@ export const appRouter = router({
         });
       }),
 
-    getMillCostForDate: protectedProcedure
+    getMillCostForDate: feedProtectedProcedure
       .input(z.object({
         feedRange: z.enum(['premium','value','econo']),
         feedType: z.enum(['starter','grower','finisher']),
@@ -2892,7 +2972,7 @@ export const appRouter = router({
   // FEED ORDER PLANNING
   // ============================================================================
   feedOrders: router({
-    listOrders: protectedProcedure
+    listOrders: feedProtectedProcedure
       .input(z.object({
         customerId: z.number().optional(),
         flockId: z.number().optional(),
@@ -2904,13 +2984,13 @@ export const appRouter = router({
         return await db.listFeedOrders(opts.input ?? undefined);
       }),
 
-    getOrder: protectedProcedure
+    getOrder: feedProtectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async (opts) => {
         return await db.getFeedOrderById(opts.input.id);
       }),
 
-    createOrder: protectedProcedure
+    createOrder: feedProtectedProcedure
       .input(z.object({
         customerId: z.number(),
         flockId: z.number().optional(),
@@ -2951,7 +3031,7 @@ export const appRouter = router({
         return { id };
       }),
 
-    updateStatus: protectedProcedure
+    updateStatus: feedProtectedProcedure
       .input(z.object({
         id: z.number(),
         status: z.enum(['draft', 'submitted_to_mill', 'in_production', 'ready_for_collection', 'partially_delivered', 'delivered', 'invoiced', 'cancelled']),
@@ -2961,7 +3041,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    recordMillInvoice: protectedProcedure
+    recordMillInvoice: feedProtectedProcedure
       .input(z.object({
         id: z.number(),
         millInvoiceNumber: z.string(),
@@ -2974,20 +3054,20 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    markMillInvoicePaid: protectedProcedure
+    markMillInvoicePaid: feedProtectedProcedure
       .input(z.object({ id: z.number(), paidDate: z.string() }))
       .mutation(async (opts) => {
         await db.markMillInvoicePaid(opts.input.id, opts.input.paidDate);
         return { success: true };
       }),
 
-    listDeliveries: protectedProcedure
+    listDeliveries: feedProtectedProcedure
       .input(z.number())
       .query(async ({ input: feedOrderId }) => {
         return await db.listFeedOrderDeliveries(feedOrderId);
       }),
 
-    addDelivery: protectedProcedure
+    addDelivery: feedProtectedProcedure
       .input(z.object({
         feedOrderId: z.number(),
         deliveryDate: z.string(),
@@ -3003,7 +3083,7 @@ export const appRouter = router({
         return { id };
       }),
 
-    updateDeliveryStatus: protectedProcedure
+    updateDeliveryStatus: feedProtectedProcedure
       .input(z.object({
         id: z.number(),
         status: z.enum(['scheduled', 'in_transit', 'delivered', 'invoiced']),
@@ -3014,7 +3094,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    listAdditivePOs: protectedProcedure
+    listAdditivePOs: feedProtectedProcedure
       .input(z.object({
         feedOrderId: z.number().optional(),
         status: z.string().optional(),
@@ -3025,7 +3105,7 @@ export const appRouter = router({
         return await db.listAdditivePOs(opts.input ?? undefined);
       }),
 
-    updateAdditivePO: protectedProcedure
+    updateAdditivePO: feedProtectedProcedure
       .input(z.object({
         id: z.number(),
         status: z.enum(['pending', 'ordered', 'confirmed', 'delivered', 'cancelled']).optional(),
@@ -3048,18 +3128,18 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    getAlerts: protectedProcedure
+    getAlerts: feedProtectedProcedure
       .query(async () => {
         return await db.getFeedOrderAlerts();
       }),
 
     // ── Additive Inventory Settings ──────────────────────────────────────────
-    getAdditiveMappings: protectedProcedure
+    getAdditiveMappings: feedProtectedProcedure
       .query(async () => {
         return await db.getAdditiveMappings();
       }),
 
-    setAdditiveMapping: protectedProcedure
+    setAdditiveMapping: feedProtectedProcedure
       .input(z.object({
         additiveType: z.enum(['macro', 'soya_oil', 'probiotic']),
         inventoryItemId: z.number(),
@@ -3075,7 +3155,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    checkAdditiveStock: protectedProcedure
+    checkAdditiveStock: feedProtectedProcedure
       .input(z.object({
         macroKgPerTon: z.number().optional(),
         soyaOilKgPerTon: z.number().optional(),
@@ -3091,7 +3171,7 @@ export const appRouter = router({
   // SALES ORDERS
   // ============================================================================
   salesOrders: router({
-    getNextNumber: protectedProcedure.query(async () => {
+    getNextNumber: protectedProcedure.use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "getNextNumber", input); return next(); }).query(async () => {
       return db.getNextSalesOrderNumber();
     }),
 
@@ -3101,24 +3181,24 @@ export const appRouter = router({
         status: z.enum(['draft','confirmed','processing','delivered','cancelled']).optional(),
         dateFrom: z.string().optional(),
         dateTo: z.string().optional(),
-      }).optional())
+      }).optional()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "list", input); return next(); })
       .query(async (opts) => {
         return db.listSalesOrders(opts.input ?? undefined);
       }),
 
     getById: protectedProcedure
-      .input(z.number())
+      .input(z.number()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "getById", input); return next(); })
       .query(async (opts) => {
         return db.getSalesOrderById(opts.input);
       }),
 
     getItems: protectedProcedure
-      .input(z.number())
+      .input(z.number()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "getItems", input); return next(); })
       .query(async (opts) => {
         return db.getSalesOrderItems(opts.input);
       }),
 
-    getStats: protectedProcedure.query(async () => {
+    getStats: protectedProcedure.use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "getStats", input); return next(); }).query(async () => {
       return db.getSalesOrderStats();
     }),
 
@@ -3142,7 +3222,7 @@ export const appRouter = router({
           taxAmount: z.number(),
           totalAmount: z.number(),
         })),
-      }))
+      })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "create", input); return next(); })
       .mutation(async (opts) => {
         const orderNumber = await db.getNextSalesOrderNumber();
         const subtotal = opts.input.items.reduce((s, i) => s + i.subtotal, 0);
@@ -3181,7 +3261,7 @@ export const appRouter = router({
           taxAmount: z.number(),
           totalAmount: z.number(),
         })).optional(),
-      }))
+      })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "update", input); return next(); })
       .mutation(async (opts) => {
         const { id, items, ...data } = opts.input;
         if (items) {
@@ -3201,14 +3281,14 @@ export const appRouter = router({
       .input(z.object({
         id: z.number(),
         status: z.enum(['draft','confirmed','processing','delivered','cancelled']),
-      }))
+      })).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "updateStatus", input); return next(); })
       .mutation(async (opts) => {
         await db.logUserActivity(opts.ctx.user.id, `sales_order_status_${opts.input.status}`, 'sales_order', opts.input.id);
         return db.updateSalesOrderStatus(opts.input.id, opts.input.status);
       }),
 
     cancel: protectedProcedure
-      .input(z.number())
+      .input(z.number()).use(async ({ ctx, input, next }) => { await authorizeBusinessAction(ctx.user.id, "sales_orders", "cancel", input); return next(); })
       .mutation(async (opts) => {
         await db.logUserActivity(opts.ctx.user.id, 'cancel_sales_order', 'sales_order', opts.input);
         return db.cancelSalesOrder(opts.input);

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { publicProcedure, router } from "../_core/trpc";
+import { financialProtectedProcedure as protectedProcedure } from "../financial-data-procedure";
 import { harvestRecords, flocks } from "../../drizzle/schema";
 import { getDb, mysqlTimestamp } from "../db";
 import { eq, desc, sql, and, gte, lte } from "drizzle-orm";

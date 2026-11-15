@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { publicProcedure, router } from "./_core/trpc";
+import { financialProtectedProcedure as protectedProcedure } from "./financial-data-procedure";
 import * as inventoryDb from "./db-inventory";
 
 export const inventoryRouter = router({

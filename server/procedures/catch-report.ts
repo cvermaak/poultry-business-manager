@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure } from "../_core/trpc";
+import { financialProtectedProcedure as protectedProcedure } from "../financial-data-procedure";
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, Table, TableRow, TableCell, WidthType, BorderStyle } from "docx";
 import { getDb } from "../db";
 import { catchSessions, catchBatches, flocks, houses } from "../../drizzle/schema";

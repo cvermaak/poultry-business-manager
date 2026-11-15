@@ -3,7 +3,14 @@ import type { TrpcContext } from "./_core/context";
 import { createDailyTestSource, type SyntheticDailyRow } from "./daily-record-test-source";
 
 // Real appRouter + real db.ts + real mutation helpers; ONLY the driver and
-// unrelated credential/media/auth adapters are mocked. No live connection.
+// unrelated credential/media/auth and financial-visibility adapters are mocked.
+// This suite isolates daily-loss persistence; role-policy boundaries have their own tests.
+// No live connection, policy write, or permission relaxation in application source.
+const storedActor = vi.hoisted(() => ({ role: "farm_manager" }));
+vi.mock("./business-permission-service", () => ({
+  canReadFinancialData: vi.fn(async () => true),
+  getBusinessStoredActor: vi.fn(async (id: number) => ({ id, role: storedActor.role, isActive: 1 })),
+}));
 const driver = vi.hoisted(() => ({ source: null as any, drizzle: vi.fn() }));
 vi.mock("drizzle-orm/mysql2", () => ({ drizzle: (...args: unknown[]) => {
   driver.drizzle(...args);
@@ -28,6 +35,7 @@ const date = new Date("2026-11-10T22:30:00-02:00");
 const createInput = () => ({ flockId: 42, recordDate: date, dayNumber: 1 });
 
 function caller(role: NonNullable<TrpcContext["user"]>["role"] | null = "farm_manager") {
+  storedActor.role = role ?? "farm_manager";
   const ctx = { user: role === null ? null : { id: 3, role }, req: { headers: {} }, res: {} } as TrpcContext;
   return appRouter.createCaller(ctx);
 }

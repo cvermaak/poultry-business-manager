@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ const emptyForm = (): CustomerForm => ({
 });
 
 export default function Customers() {
+  const { allowed } = useFinancialVisibility();
   const [search, setSearch] = useState("");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -87,9 +89,10 @@ export default function Customers() {
       name: form.name.trim(), companyName: form.companyName.trim() || null,
       contactPerson: form.contactPerson.trim() || null, email: form.email.trim() || null,
       phone: form.phone.trim() || null, whatsapp: form.whatsapp.trim() || null,
-      segment: form.segment, creditLimit: parseInt(form.creditLimit) || 0,
-      paymentTerms: form.paymentTerms, taxNumber: form.taxNumber.trim() || null,
-      vatNumber: form.vatNumber.trim() || null, notes: form.notes.trim() || null,
+      segment: form.segment,
+      ...(allowed ? { creditLimit: parseInt(form.creditLimit) || 0,
+        paymentTerms: form.paymentTerms, taxNumber: form.taxNumber.trim() || null,
+        vatNumber: form.vatNumber.trim() || null, notes: form.notes.trim() || null } : {}),
     };
     if (editingId !== null) {
       updateMutation.mutate({ id: editingId, ...payload });
@@ -117,7 +120,7 @@ export default function Customers() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Customers</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage customer accounts, credit limits, and contact details</p>
+          <p className="text-sm text-muted-foreground mt-1">{allowed ? "Manage customer accounts, credit limits, and contact details" : "Manage customer accounts and contact details"}</p>
         </div>
         <Button onClick={handleOpenCreate} className="gap-2">
           <Plus className="h-4 w-4" />Add Customer
@@ -130,7 +133,7 @@ export default function Customers() {
           { icon: <UserCheck className="h-4 w-4 text-green-600" />, bg: "bg-green-500/10", label: "Active", value: activeCustomers },
           { icon: <TrendingUp className="h-4 w-4 text-blue-600" />, bg: "bg-blue-500/10", label: "Wholesale", value: wholesaleCustomers },
           { icon: <CreditCard className="h-4 w-4 text-amber-600" />, bg: "bg-amber-500/10", label: "Total Credit", value: `R${totalCreditLimit.toLocaleString("en-ZA")}` },
-        ].map((s) => (
+        ].filter((s) => allowed || s.label !== "Total Credit").map((s) => (
           <Card key={s.label}><CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className={`p-2 ${s.bg} rounded-lg`}>{s.icon}</div>
@@ -184,7 +187,7 @@ export default function Customers() {
                   <TableRow>
                     <TableHead>Number</TableHead><TableHead>Name / Company</TableHead>
                     <TableHead>Segment</TableHead><TableHead>Contact</TableHead>
-                    <TableHead>Payment Terms</TableHead><TableHead className="text-right">Credit Limit</TableHead>
+                    {allowed && (<TableHead>Payment Terms</TableHead>)}{allowed && (<TableHead className="text-right">Credit Limit</TableHead>)}
                     <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -206,10 +209,10 @@ export default function Customers() {
                         {c.email && <div className="text-xs text-muted-foreground truncate max-w-[160px]">{c.email}</div>}
                         {c.phone && <div className="text-xs text-muted-foreground">{c.phone}</div>}
                       </TableCell>
-                      <TableCell className="text-sm">{c.paymentTerms || "—"}</TableCell>
-                      <TableCell className="text-right font-medium text-sm">
+                      {allowed && (<TableCell className="text-sm">{c.paymentTerms || "—"}</TableCell>)}
+                      {allowed && (<TableCell className="text-right font-medium text-sm">
                         {Number(c.creditLimit) > 0 ? `R${Number(c.creditLimit).toLocaleString("en-ZA")}` : "—"}
-                      </TableCell>
+                      </TableCell>)}
                       <TableCell><Badge variant={c.isActive ? "default" : "secondary"} className="text-xs">{c.isActive ? "Active" : "Inactive"}</Badge></TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -284,20 +287,20 @@ export default function Customers() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
+              {allowed && (<div className="space-y-1.5">
                 <Label>Payment Terms</Label>
                 <Select value={form.paymentTerms} onValueChange={(v) => setForm({ ...form, paymentTerms: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{PAYMENT_TERMS_OPTIONS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                 </Select>
-              </div>
+              </div>)}
             </div>
-            <div className="space-y-1.5">
+            {allowed && (<div className="space-y-1.5">
               <Label>Credit Limit (R)</Label>
               <Input type="number" min={0} value={form.creditLimit} onChange={(e) => setForm({ ...form, creditLimit: e.target.value })} placeholder="0" />
               <p className="text-xs text-muted-foreground">Set to 0 for cash-only customers.</p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            </div>)}
+            {allowed && (<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Tax Number</Label>
                 <Input value={form.taxNumber} onChange={(e) => setForm({ ...form, taxNumber: e.target.value })} placeholder="e.g. 4123456789" />
@@ -306,11 +309,11 @@ export default function Customers() {
                 <Label>VAT Number</Label>
                 <Input value={form.vatNumber} onChange={(e) => setForm({ ...form, vatNumber: e.target.value })} placeholder="e.g. 4123456789" />
               </div>
-            </div>
-            <div className="space-y-1.5">
+            </div>)}
+            {allowed && (<div className="space-y-1.5">
               <Label>Notes</Label>
               <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any additional information..." rows={3} />
-            </div>
+            </div>)}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isMutating}>Cancel</Button>
               <Button onClick={handleSubmit} disabled={isMutating}>{isMutating ? "Saving..." : editingId !== null ? "Save Changes" : "Create Customer"}</Button>
@@ -359,7 +362,7 @@ export default function Customers() {
                   <div><p className="text-xs text-muted-foreground">WhatsApp</p><p>{viewingCustomer.whatsapp || "—"}</p></div>
                 </CardContent>
               </Card>
-              <Card>
+              {allowed && (<Card>
                 <CardHeader className="pb-2 pt-3 px-4"><CardTitle className="text-sm">Financial Details</CardTitle></CardHeader>
                 <CardContent className="px-4 pb-3 grid grid-cols-2 gap-2 text-sm">
                   <div><p className="text-xs text-muted-foreground">Payment Terms</p><p>{viewingCustomer.paymentTerms || "—"}</p></div>
@@ -367,8 +370,8 @@ export default function Customers() {
                   <div><p className="text-xs text-muted-foreground">Tax Number</p><p>{viewingCustomer.taxNumber || "—"}</p></div>
                   <div><p className="text-xs text-muted-foreground">VAT Number</p><p>{viewingCustomer.vatNumber || "—"}</p></div>
                 </CardContent>
-              </Card>
-              {viewingCustomer.notes && (
+              </Card>)}
+              {allowed && viewingCustomer.notes && (
                 <Card>
                   <CardHeader className="pb-2 pt-3 px-4"><CardTitle className="text-sm">Notes</CardTitle></CardHeader>
                   <CardContent className="px-4 pb-3"><p className="text-sm text-muted-foreground whitespace-pre-wrap">{viewingCustomer.notes}</p></CardContent>

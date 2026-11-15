@@ -1,3 +1,4 @@
+import { useModuleViewAccess } from "@/hooks/useModuleViewAccess";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Activity, TrendingUp, Users, DollarSign, Bell, AlertCircle, Clock, CheckCircle2 } from "lucide-react";
@@ -5,8 +6,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import RemindersWidget from "@/components/RemindersWidget";
 import FeedAlertsWidget from "@/components/FeedAlertsWidget";
 import FinancialAttentionWidget from "@/components/FinancialAttentionWidget";
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 
 export default function Home() {
+  const moduleAccess = useModuleViewAccess();
+  const { allowed, loading: financialLoading } = useFinancialVisibility();
+  const financialAllowed = allowed && !financialLoading;
   const { data: analytics, isLoading } = trpc.analytics.dashboard.useQuery();
 
   if (isLoading) {
@@ -16,7 +21,7 @@ export default function Home() {
         <Skeleton className="w-full h-48 rounded-xl" />
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
+          {Array.from({ length: financialAllowed ? 4 : 3 }, (_, i) => i).map((i) => (
             <Card key={i}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <Skeleton className="h-4 w-24" />
@@ -64,7 +69,7 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        <Card>
+        {moduleAccess.customers && <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -73,20 +78,20 @@ export default function Home() {
             <div className="text-2xl font-bold">{analytics?.totalCustomers || 0}</div>
             <p className="text-xs text-muted-foreground">Active customer accounts</p>
           </CardContent>
-        </Card>
+        </Card>}
 
-        <Card>
+        {financialAllowed && <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Monthly Revenue</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {analytics?.monthlyRevenue ? formatCurrency(analytics.monthlyRevenue) : "R0.00"}
+              {formatCurrency(analytics?.monthlyRevenue ?? 0)}
             </div>
             <p className="text-xs text-muted-foreground">Current month</p>
           </CardContent>
-        </Card>
+        </Card>}
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -126,7 +131,7 @@ export default function Home() {
                   <p className="font-medium">House Configuration</p>
                 </div>
               </a>
-              <a
+              {moduleAccess.customers && <a
                 href="/customers"
                 className="flex items-center justify-center p-4 border rounded-lg hover:bg-accent transition-colors"
               >
@@ -134,8 +139,8 @@ export default function Home() {
                   <Users className="h-6 w-6 mx-auto mb-2 text-primary" />
                   <p className="font-medium">Customer Management</p>
                 </div>
-              </a>
-              <a
+              </a>}
+              {moduleAccess.suppliers && <a
                 href="/suppliers"
                 className="flex items-center justify-center p-4 border rounded-lg hover:bg-accent transition-colors"
               >
@@ -143,7 +148,7 @@ export default function Home() {
                   <Users className="h-6 w-6 mx-auto mb-2 text-primary" />
                   <p className="font-medium">Supplier Management</p>
                 </div>
-              </a>
+              </a>}
             </div>
           </CardContent>
         </Card>
@@ -160,12 +165,12 @@ export default function Home() {
             <RemindersWidget />
           </CardContent>
         </Card>
-        <Card className="col-span-full">
+        {moduleAccess.feed_management && <Card className="col-span-full">
           <FeedAlertsWidget />
-        </Card>
-        <div className="col-span-full">
+        </Card>}
+        {financialAllowed && <div className="col-span-full">
           <FinancialAttentionWidget />
-        </div>
+        </div>}
       </div>
     </div>
   );

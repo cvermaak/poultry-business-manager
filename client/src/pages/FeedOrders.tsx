@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -106,6 +107,7 @@ const defaultForm: CreateOrderForm = {
 };
 
 export default function FeedOrders() {
+  const { allowed } = useFinancialVisibility();
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterStage, setFilterStage] = useState<string>("all");
   const [createOpen, setCreateOpen] = useState(false);
@@ -212,11 +214,11 @@ export default function FeedOrders() {
       birdCount: form.birdCount ? parseInt(form.birdCount) : undefined,
       allocationKgPerBird: form.allocationKgPerBird || undefined,
       transportMode: form.transportMode as any,
-      transportCostPerTon: form.transportCostPerTon || "0",
+      ...(allowed ? { transportCostPerTon: form.transportCostPerTon || "0" } : {}),
       orderDate: form.orderDate,
       requiredByDate: form.requiredByDate,
-      pricePerTon: form.pricePerTon || undefined,
-      notes: form.notes || undefined,
+      ...(allowed ? { pricePerTon: form.pricePerTon || undefined } : {}),
+      ...(allowed ? { notes: form.notes || undefined } : {}),
       macroKgPerTon: form.macroKgPerTon || undefined,
       soyaOilKgPerTon: form.soyaOilKgPerTon || undefined,
       probioticKgPerTon: form.probioticKgPerTon || undefined,
@@ -324,14 +326,14 @@ export default function FeedOrders() {
                     <th className="text-left p-3 font-medium">Required By</th>
                     <th className="text-left p-3 font-medium">Transport</th>
                     <th className="text-left p-3 font-medium">Status</th>
-                    <th className="text-left p-3 font-medium">Mill Invoice</th>
+                    {allowed && (<th className="text-left p-3 font-medium">Mill Invoice</th>)}
                     <th className="p-3"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredOrders.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={allowed ? 10 : 9} className="p-8 text-center text-muted-foreground">
                         No feed orders found. Create your first order to get started.
                       </td>
                     </tr>
@@ -366,7 +368,7 @@ export default function FeedOrders() {
                             {STATUS_LABELS[o.status] || o.status}
                           </span>
                         </td>
-                        <td className="p-3">
+                        {allowed && (<td className="p-3">
                           {o.millInvoiceNumber ? (
                             <div>
                               <div className="text-xs font-mono">{o.millInvoiceNumber}</div>
@@ -380,7 +382,7 @@ export default function FeedOrders() {
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
-                        </td>
+                        </td>)}
                         <td className="p-3">
                           <Link href={`/feed-orders/${o.id}`}>
                             <Button variant="ghost" size="sm">View</Button>
@@ -536,7 +538,7 @@ export default function FeedOrders() {
                     </SelectContent>
                   </Select>
                 </div>
-                {form.transportMode === "afgro_delivers" && (
+                {allowed && form.transportMode === "afgro_delivers" && (
                   <div className="space-y-1">
                     <Label>Transport Cost per Ton (R)</Label>
                     <Input
@@ -551,7 +553,7 @@ export default function FeedOrders() {
               </div>
 
               {/* Pricing */}
-              <div className="space-y-1">
+              {allowed && (<div className="space-y-1">
                 <Label>Selling Price per Ton (R, excl. VAT)</Label>
                 <Input
                   type="number"
@@ -560,7 +562,7 @@ export default function FeedOrders() {
                   value={form.pricePerTon}
                   onChange={(e) => setForm((f) => ({ ...f, pricePerTon: e.target.value }))}
                 />
-              </div>
+              </div>)}
 
               {/* Additive Rates */}
               <div className="p-3 border rounded-lg space-y-3">
@@ -661,7 +663,7 @@ export default function FeedOrders() {
               )}
 
               {/* Notes */}
-              <div className="space-y-1">
+              {allowed && (<div className="space-y-1">
                 <Label>Notes</Label>
                 <Textarea
                   placeholder="Any special instructions..."
@@ -669,7 +671,7 @@ export default function FeedOrders() {
                   onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                   rows={2}
                 />
-              </div>
+              </div>)}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>

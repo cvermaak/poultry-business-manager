@@ -1,6 +1,10 @@
+import { useBusinessRolePermissionsClients } from "@/hooks/useBusinessRolePermissionsClients";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { UserManagementPermissionTabs } from "@/components/UserManagementPermissionTabs";
+import type { SupplierEditorClient } from "@shared/supplier-permission-editor-contract";
+import { useSupplierRolePermissionsClient } from "@/hooks/useSupplierRolePermissionsClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +27,10 @@ const ROLES = [
 
 type RoleValue = typeof ROLES[number]["value"];
 
-export default function UserManagement() {
+export default function UserManagement({ permissionClient }: { permissionClient?: SupplierEditorClient } = {}) {
   const { user: currentUser } = useAuth();
+  const livePermissionClient = useSupplierRolePermissionsClient();
+  const businessClients = useBusinessRolePermissionsClients();
   const [selectedUser, setSelectedUser] = useState<{ id: number; name: string; currentRole: string } | null>(null);
   const [newRole, setNewRole] = useState<RoleValue | "">("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -140,6 +146,8 @@ export default function UserManagement() {
   }
 
   return (
+    <UserManagementPermissionTabs permissionClient={permissionClient ?? livePermissionClient} businessClients={businessClients}
+      viewer={currentUser ? { id: currentUser.id, role: currentUser.role, isActive: currentUser.isActive } : null}>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -164,9 +172,9 @@ export default function UserManagement() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <UserCog className="h-5 w-5" />
-            Role Permissions
+            Role Overview
           </CardTitle>
-          <CardDescription>Overview of available roles and their access levels</CardDescription>
+          <CardDescription>Descriptive overview of available roles; not actual permission enforcement</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
@@ -487,5 +495,6 @@ export default function UserManagement() {
         </DialogContent>
       </Dialog>
     </div>
+    </UserManagementPermissionTabs>
   );
 }

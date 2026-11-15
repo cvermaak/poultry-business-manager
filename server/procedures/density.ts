@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../_core/trpc";
+import { router } from "../_core/trpc";
+import { financialProtectedProcedure as protectedProcedure } from "../financial-data-procedure";
 import { getDb } from "../db";
 import { crateTypes } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";

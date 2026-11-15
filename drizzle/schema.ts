@@ -1,5 +1,6 @@
 import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, uniqueIndex, foreignKey, int, decimal, timestamp, text, varchar, mysqlEnum, json, tinyint } from "drizzle-orm/mysql-core"
 import { sql } from "drizzle-orm"
+export { supplierPermissionPolicies, supplierPermissionAudit } from "./supplier-permission-schema";
 
 export const catchBatches = mysqlTable("catch_batches", {
 	id: int().autoincrement().notNull(),

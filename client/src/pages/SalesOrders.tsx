@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -76,6 +77,9 @@ function LineItemRow({
   onChangeRow: (i: number, updated: LineItem) => void;
   onRemove: (i: number) => void;
 }) {
+  const { allowed } = useFinancialVisibility();
+  if (!allowed) return null;
+
   const recalc = (field: keyof LineItem, value: any) => {
     const qty   = Number(field === "quantity"  ? value : item.quantity)  || 0;
     const price = Number(field === "unitPrice" ? value : item.unitPrice) || 0;
@@ -162,6 +166,7 @@ function LineItemRow({
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function SalesOrders() {
+  const { allowed } = useFinancialVisibility();
   const utils = trpc.useUtils();
 
   // Filters
@@ -200,7 +205,7 @@ export default function SalesOrders() {
   // Invoice generation
   const { data: existingInvoice } = trpc.invoices.checkOrderInvoice.useQuery(
     genInvoiceOrder?.id ?? 0,
-    { enabled: !!genInvoiceOrder?.id }
+    { enabled: allowed && !!genInvoiceOrder?.id }
   );
   const genInvoiceMut = trpc.invoices.generateFromOrder.useMutation({
     onSuccess: (data) => {
@@ -296,12 +301,14 @@ export default function SalesOrders() {
 
   // Handlers
   const handleCreate = () => {
+    if (!allowed) return;
     if (!form.customerId) return toast.error("Please select a customer");
     if (createItems.length === 0) return toast.error("Please add at least one line item");
     createMut.mutate({ ...form, items: createItems });
   };
 
   const handleEdit = (order: any) => {
+    if (!allowed) return;
     setEditOrder(order);
     setForm({
       customerId: order.customerId,
@@ -333,6 +340,7 @@ export default function SalesOrders() {
   };
 
   const handleUpdate = () => {
+    if (!allowed) return;
     if (!editOrder) return;
     if (!form.customerId) return toast.error("Please select a customer");
     if (editItems.length === 0) return toast.error("Please add at least one line item");
@@ -359,9 +367,9 @@ export default function SalesOrders() {
               Create and manage customer sales orders
             </p>
           </div>
-          <Button onClick={() => { setCreateOpen(true); setCreateItems([]); setForm(emptyForm()); }}>
+          {allowed && (<Button onClick={() => { setCreateOpen(true); setCreateItems([]); setForm(emptyForm()); }}>
             <Plus className="h-4 w-4 mr-2" /> New Order
-          </Button>
+          </Button>)}
         </div>
 
         {/* Stats */}
@@ -373,7 +381,7 @@ export default function SalesOrders() {
             { label: "Processing", value: stats?.processing ?? 0, icon: <Package className="h-4 w-4" />, color: "text-yellow-500" },
             { label: "Delivered", value: stats?.delivered ?? 0, icon: <Truck className="h-4 w-4" />, color: "text-green-500" },
             { label: "Total Value", value: formatCurrency(stats?.totalValue), icon: <TrendingUp className="h-4 w-4" />, color: "text-emerald-600" },
-          ].map((s) => (
+          ].filter((s) => allowed || s.label !== "Total Value").map((s) => (
             <Card key={s.label} className="p-4">
               <div className={`flex items-center gap-2 ${s.color} mb-1`}>
                 {s.icon}
@@ -419,15 +427,15 @@ export default function SalesOrders() {
                   <TableHead>Order Date</TableHead>
                   <TableHead>Delivery Date</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Total (incl. VAT)</TableHead>
+                  {allowed && (<TableHead className="text-right">Total (incl. VAT)</TableHead>)}
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={allowed ? 7 : 6} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>
                 ) : filtered.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No orders found</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={allowed ? 7 : 6} className="text-center py-8 text-muted-foreground">No orders found</TableCell></TableRow>
                 ) : filtered.map((order: any) => {
                   const cfg = STATUS_CONFIG[order.status as OrderStatus] ?? STATUS_CONFIG.draft;
                   const next = NEXT_STATUS[order.status as OrderStatus];
@@ -445,13 +453,13 @@ export default function SalesOrders() {
                           {cfg.icon} {cfg.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(order.totalAmount)}</TableCell>
+                      {allowed && (<TableCell className="text-right font-medium">{formatCurrency(order.totalAmount)}</TableCell>)}
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewOrder(order)} title="View">
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {order.status !== "cancelled" && order.status !== "delivered" && (
+                          {allowed && order.status !== "cancelled" && order.status !== "delivered" && (
                             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(order)} title="Edit">
                               <Edit2 className="h-4 w-4" />
                             </Button>
@@ -467,7 +475,7 @@ export default function SalesOrders() {
                               {STATUS_CONFIG[next].icon}
                             </Button>
                           )}
-                          {(order.status === "confirmed" || order.status === "processing" || order.status === "delivered") && (
+                          {allowed && (order.status === "confirmed" || order.status === "processing" || order.status === "delivered") && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -504,7 +512,7 @@ export default function SalesOrders() {
       </div>
 
       {/* ── Create Dialog ── */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      {allowed && (<Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto" style={{ width: '95vw', maxWidth: '1100px' }}>
           <DialogHeader>
             <DialogTitle>New Sales Order {nextNumber && <span className="text-muted-foreground font-normal">({nextNumber})</span>}</DialogTitle>
@@ -526,10 +534,10 @@ export default function SalesOrders() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
 
       {/* ── Edit Dialog ── */}
-      <Dialog open={!!editOrder} onOpenChange={(o) => !o && setEditOrder(null)}>
+      {allowed && (<Dialog open={!!editOrder} onOpenChange={(o) => !o && setEditOrder(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto" style={{ width: '95vw', maxWidth: '1100px' }}>
           <DialogHeader>
             <DialogTitle>Edit Order {editOrder?.orderNumber}</DialogTitle>
@@ -551,7 +559,7 @@ export default function SalesOrders() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
 
       {/* ── View Dialog ── */}
       <Dialog open={!!viewOrder} onOpenChange={(o) => !o && setViewOrder(null)}>
@@ -567,7 +575,7 @@ export default function SalesOrders() {
                 <div><span className="text-muted-foreground">Order Date:</span> <span>{viewOrder.orderDate?.split("T")[0]}</span></div>
                 <div><span className="text-muted-foreground">Delivery Date:</span> <span>{viewOrder.deliveryDate?.split("T")[0] ?? "—"}</span></div>
               </div>
-              {viewOrder.notes && <p className="text-sm text-muted-foreground border rounded p-3">{viewOrder.notes}</p>}
+              {allowed && viewOrder.notes && <p className="text-sm text-muted-foreground border rounded p-3">{viewOrder.notes}</p>}
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -575,9 +583,9 @@ export default function SalesOrders() {
                     <TableHead>Description</TableHead>
                     <TableHead className="text-right">Qty</TableHead>
                     <TableHead>Unit</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">VAT</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
+                    {allowed && (<TableHead className="text-right">Unit Price</TableHead>)}
+                    {allowed && (<TableHead className="text-right">VAT</TableHead>)}
+                    {allowed && (<TableHead className="text-right">Total</TableHead>)}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -587,18 +595,18 @@ export default function SalesOrders() {
                       <TableCell className="text-sm">{it.description}</TableCell>
                       <TableCell className="text-right text-sm">{Number(it.quantity).toFixed(2)}</TableCell>
                       <TableCell className="text-sm">{it.unit}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(it.unitPrice)}</TableCell>
-                      <TableCell className="text-right text-sm">{formatCurrency(it.taxAmount)}</TableCell>
-                      <TableCell className="text-right text-sm font-medium">{formatCurrency(it.totalAmount)}</TableCell>
+                      {allowed && (<TableCell className="text-right text-sm">{formatCurrency(it.unitPrice)}</TableCell>)}
+                      {allowed && (<TableCell className="text-right text-sm">{formatCurrency(it.taxAmount)}</TableCell>)}
+                      {allowed && (<TableCell className="text-right text-sm font-medium">{formatCurrency(it.totalAmount)}</TableCell>)}
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-              <div className="flex flex-col items-end gap-1 text-sm">
+              {allowed && (<div className="flex flex-col items-end gap-1 text-sm">
                 <div className="flex gap-8"><span className="text-muted-foreground">Subtotal</span><span>{formatCurrency(viewOrder.subtotal)}</span></div>
                 <div className="flex gap-8"><span className="text-muted-foreground">VAT</span><span>{formatCurrency(viewOrder.taxAmount)}</span></div>
                 <div className="flex gap-8 font-bold text-base border-t pt-1"><span>Total</span><span>{formatCurrency(viewOrder.totalAmount)}</span></div>
-              </div>
+              </div>)}
             </div>
           )}
           <DialogFooter>
@@ -622,7 +630,7 @@ export default function SalesOrders() {
       </Dialog>
 
       {/* ── Generate Invoice Dialog ── */}
-      <Dialog open={!!genInvoiceOrder} onOpenChange={(o) => !o && setGenInvoiceOrder(null)}>
+      {allowed && (<Dialog open={!!genInvoiceOrder} onOpenChange={(o) => !o && setGenInvoiceOrder(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -690,7 +698,7 @@ export default function SalesOrders() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
     </DashboardLayout>
   );
 }
@@ -708,6 +716,9 @@ function OrderForm({
   onRemoveItem: (i: number) => void;
   onAddItem: () => void;
 }) {
+  const { allowed } = useFinancialVisibility();
+  if (!allowed) return null;
+
   const totals = {
     subtotal: items.reduce((s, i) => s + (i.subtotal || 0), 0),
     taxAmount: items.reduce((s, i) => s + (i.taxAmount || 0), 0),

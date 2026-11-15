@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { protectedProcedure, router } from "./_core/trpc";
+import { router } from "./_core/trpc";
+import { financialProtectedProcedure as protectedProcedure } from "./financial-data-procedure";
 import * as supplierDb from "./supplier-management-db";
 
 const optionalText = z.string().max(500).optional();

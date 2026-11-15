@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +22,7 @@ import {
 } from "@/lib/health-library-inputs";
 
 export default function HealthManagement() {
+  const { allowed } = useFinancialVisibility();
   const [selectedTab, setSelectedTab] = useState("vaccines");
   const [vaccineDialogOpen, setVaccineDialogOpen] = useState(false);
   const [stressPackDialogOpen, setStressPackDialogOpen] = useState(false);
@@ -161,10 +163,12 @@ export default function HealthManagement() {
       return;
     }
 
+    const { costPerKg, ...operational } = result.data;
+    const payload = allowed ? result.data : operational;
     if (editingStressPack) {
-      updateStressPackMutation.mutate({ id: editingStressPack.id, ...result.data });
+      updateStressPackMutation.mutate({ id: editingStressPack.id, ...payload });
     } else {
-      createStressPackMutation.mutate(result.data);
+      createStressPackMutation.mutate(payload);
     }
   };
 
@@ -442,7 +446,7 @@ export default function HealthManagement() {
                     </div>
                     <div className="text-sm">
                       <p><strong>Duration:</strong> {stressPack.recommendedDurationDays} days</p>
-                      {stressPack.costPerKg && <p><strong>Cost:</strong> R{stressPack.costPerKg}/kg</p>}
+                      {allowed && stressPack.costPerKg && <p><strong>Cost:</strong> R{stressPack.costPerKg}/kg</p>}
                     </div>
                   </CardContent>
                 </Card>
@@ -667,10 +671,10 @@ export default function HealthManagement() {
                 <Label htmlFor="recommendedDurationDays">Recommended Duration (days) *</Label>
                 <Input id="recommendedDurationDays" name="recommendedDurationDays" type="number" required defaultValue={editingStressPack?.recommendedDurationDays} />
               </div>
-              <div className="space-y-2">
+              {allowed && (<div className="space-y-2">
                 <Label htmlFor="costPerKg">Cost Per Kg (R)</Label>
                 <Input id="costPerKg" name="costPerKg" placeholder="e.g., 450.00" defaultValue={editingStressPack?.costPerKg} />
-              </div>
+              </div>)}
             </div>
             <div className="space-y-2">
               <Label htmlFor="activeIngredients">Active Ingredients</Label>

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useModuleViewAccess } from "@/hooks/useModuleViewAccess";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -16,20 +17,32 @@ import { toast } from "sonner";
 import { BookOpenCheck, Download, Plus, Eye, Loader2, RefreshCw, Send, CreditCard, XCircle, Landmark } from "lucide-react";
 import { format } from "date-fns";
 
+// A missing discriminator is not evidence that a cached selection is a Sales invoice.
+export function invoiceVisibleUnderFeedAccess(invoice: any, feedAllowed: boolean): boolean {
+  return !!invoice && (feedAllowed || (
+    Object.prototype.hasOwnProperty.call(invoice, "feedOrderId") && invoice.feedOrderId == null
+  ));
+}
+
 export function Invoices() {
+  const moduleAccess = useModuleViewAccess();
+  const feedAllowed = !moduleAccess.loading && moduleAccess.feed_management;
+  const feedAllowedRef = useRef(feedAllowed);
+  feedAllowedRef.current = feedAllowed;
+  const pendingPdfInvoice = useRef<any>(null);
   const [, setLocation] = useLocation();
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
-  const [viewInvoice, setViewInvoice] = useState<any>(null);
+  const [cachedViewInvoice, setViewInvoice] = useState<any>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
 
   // Send dialog state
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
-  const [sendTarget, setSendTarget] = useState<any>(null);
+  const [cachedSendTarget, setSendTarget] = useState<any>(null);
   const [sentDate, setSentDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Payment dialog state
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [paymentTarget, setPaymentTarget] = useState<any>(null);
+  const [cachedPaymentTarget, setPaymentTarget] = useState<any>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("EFT");
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -38,14 +51,22 @@ export function Invoices() {
 
   // Cancel dialog state
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [cancelTarget, setCancelTarget] = useState<any>(null);
+  const [cachedCancelTarget, setCancelTarget] = useState<any>(null);
+
+  // Render gates apply immediately, before the disposal effect can run.
+  const viewInvoice = invoiceVisibleUnderFeedAccess(cachedViewInvoice, feedAllowed) ? cachedViewInvoice : null;
+  const sendTarget = invoiceVisibleUnderFeedAccess(cachedSendTarget, feedAllowed) ? cachedSendTarget : null;
+  const paymentTarget = invoiceVisibleUnderFeedAccess(cachedPaymentTarget, feedAllowed) ? cachedPaymentTarget : null;
+  const cancelTarget = invoiceVisibleUnderFeedAccess(cachedCancelTarget, feedAllowed) ? cachedCancelTarget : null;
 
   const utils = trpc.useUtils();
 
   // Fetch invoices
-  const { data: invoices, isLoading } = trpc.invoices.list.useQuery({
+  const { data: cachedInvoices, isLoading } = trpc.invoices.list.useQuery({
     status: selectedStatus === "all" ? undefined : selectedStatus,
   });
+
+  const invoices = cachedInvoices?.filter((invoice) => invoiceVisibleUnderFeedAccess(invoice, feedAllowed));
 
   // Fetch line items for the currently viewed invoice
   const { data: viewInvoiceItems, isLoading: itemsLoading } = trpc.invoices.getItems.useQuery(
@@ -64,6 +85,8 @@ export function Invoices() {
   // Generate PDF mutation
   const generatePdfMutation = trpc.invoices.generatePDF.useMutation({
     onSuccess: (data) => {
+      if (!invoiceVisibleUnderFeedAccess(pendingPdfInvoice.current, feedAllowedRef.current)) return;
+      pendingPdfInvoice.current = null;
       const binaryString = atob(data.pdfBuffer);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
@@ -81,19 +104,24 @@ export function Invoices() {
       toast.success("Invoice downloaded successfully");
     },
     onError: (error) => {
-      toast.error(`Failed to generate PDF: ${error.message}`);
+      if (invoiceVisibleUnderFeedAccess(pendingPdfInvoice.current, feedAllowedRef.current)) {
+        toast.error(`Failed to generate PDF: ${error.message}`);
+      }
+      pendingPdfInvoice.current = null;
     },
   });
 
   // Mark as Sent mutation
   const markAsSentMutation = trpc.invoices.markAsSent.useMutation({
     onSuccess: (posting) => {
+      if (!invoiceVisibleUnderFeedAccess(cachedSendTarget, feedAllowedRef.current)) return;
       toast.success(posting.alreadyPosted ? "Invoice is already sent and posted to the ledger" : `Invoice sent and posted to ledger as ${posting.journalNumber}`);
       setSendDialogOpen(false);
       utils.invoices.list.invalidate();
       utils.invoices.getAccountingPosting.invalidate();
     },
     onError: (error) => {
+      if (!invoiceVisibleUnderFeedAccess(cachedSendTarget, feedAllowedRef.current)) return;
       toast.error(formatFinancialMutationError(error, "Invoice could not be sent and posted"));
     },
   });
@@ -101,6 +129,7 @@ export function Invoices() {
   // Record Payment mutation
   const recordPaymentMutation = trpc.invoices.recordPayment.useMutation({
     onSuccess: (data) => {
+      if (!invoiceVisibleUnderFeedAccess(cachedPaymentTarget, feedAllowedRef.current)) return;
       toast.success(
         data.alreadyPosted
           ? `Payment is already posted to the General Ledger as ${data.journalNumber}`
@@ -109,7 +138,7 @@ export function Invoices() {
       setPaymentDialogOpen(false);
       utils.invoices.list.invalidate();
       utils.invoices.getPaymentPostings.invalidate();
-      setViewInvoice((current: any) => current && data.newStatus ? {
+      setViewInvoice((current: any) => invoiceVisibleUnderFeedAccess(current, feedAllowedRef.current) && data.newStatus ? {
         ...current,
         status: data.newStatus,
         paidAmount: data.newPaid,
@@ -119,6 +148,7 @@ export function Invoices() {
       } : current);
     },
     onError: (error) => {
+      if (!invoiceVisibleUnderFeedAccess(cachedPaymentTarget, feedAllowedRef.current)) return;
       toast.error(formatFinancialMutationError(error, "Customer payment could not be recorded"));
     },
   });
@@ -126,27 +156,60 @@ export function Invoices() {
   // Cancel mutation
   const cancelMutation = trpc.invoices.cancel.useMutation({
     onSuccess: () => {
+      if (!invoiceVisibleUnderFeedAccess(cachedCancelTarget, feedAllowedRef.current)) return;
       toast.success("Invoice cancelled");
       setCancelDialogOpen(false);
       utils.invoices.list.invalidate();
     },
     onError: (error) => {
+      if (!invoiceVisibleUnderFeedAccess(cachedCancelTarget, feedAllowedRef.current)) return;
       toast.error(`Failed to cancel invoice: ${error.message}`);
     },
   });
 
-  const handleDownloadPDF = (invoiceId: number) => {
-    generatePdfMutation.mutate(invoiceId);
+  useEffect(() => {
+    if (feedAllowed) return;
+    if (cachedViewInvoice && !invoiceVisibleUnderFeedAccess(cachedViewInvoice, false)) {
+      setViewInvoice(null);
+      setViewModalOpen(false);
+    }
+    if (cachedSendTarget && !invoiceVisibleUnderFeedAccess(cachedSendTarget, false)) {
+      setSendTarget(null);
+      setSendDialogOpen(false);
+    }
+    if (cachedPaymentTarget && !invoiceVisibleUnderFeedAccess(cachedPaymentTarget, false)) {
+      setPaymentTarget(null);
+      setPaymentDialogOpen(false);
+      setPaymentAmount("");
+      setPaymentReference("");
+      setPaymentIdempotencyKey("");
+    }
+    if (cachedCancelTarget && !invoiceVisibleUnderFeedAccess(cachedCancelTarget, false)) {
+      setCancelTarget(null);
+      setCancelDialogOpen(false);
+    }
+    if (pendingPdfInvoice.current && !invoiceVisibleUnderFeedAccess(pendingPdfInvoice.current, false)) {
+      pendingPdfInvoice.current = null;
+      generatePdfMutation.reset();
+    }
+  }, [feedAllowed, cachedViewInvoice, cachedSendTarget, cachedPaymentTarget, cachedCancelTarget, generatePdfMutation.reset]);
+
+  const handleDownloadPDF = (invoice: any) => {
+    if (!invoiceVisibleUnderFeedAccess(invoice, feedAllowedRef.current)) return;
+    pendingPdfInvoice.current = invoice;
+    generatePdfMutation.mutate(invoice.id);
   };
 
   const handleViewInvoice = (invoice: any) => {
+    if (!invoiceVisibleUnderFeedAccess(invoice, feedAllowedRef.current)) return;
     setViewInvoice(invoice);
     setViewModalOpen(true);
   };
 
   const handleRecheckPosting = async () => {
-    if (!viewInvoice?.id) return;
+    if (!viewInvoice?.id || !invoiceVisibleUnderFeedAccess(viewInvoice, feedAllowedRef.current)) return;
     const result = await recheckInvoicePosting();
+    if (!invoiceVisibleUnderFeedAccess(viewInvoice, feedAllowedRef.current)) return;
     if (result.data) {
       toast.success(`General Ledger journal ${result.data.journalNumber} is already posted. No duplicate entry was created.`);
     } else {
@@ -155,6 +218,7 @@ export function Invoices() {
   };
 
   const handleViewLedgerJournal = (journalNumber = invoicePosting?.journalNumber) => {
+    if (!invoiceVisibleUnderFeedAccess(viewInvoice, feedAllowedRef.current)) return;
     if (!journalNumber) {
       toast.info("No General Ledger journal is linked to this invoice yet.");
       return;
@@ -164,12 +228,14 @@ export function Invoices() {
   };
 
   const openSendDialog = (invoice: any) => {
+    if (!invoiceVisibleUnderFeedAccess(invoice, feedAllowedRef.current)) return;
     setSendTarget(invoice);
     setSentDate(new Date().toISOString().slice(0, 10));
     setSendDialogOpen(true);
   };
 
   const openPaymentDialog = (invoice: any) => {
+    if (!invoiceVisibleUnderFeedAccess(invoice, feedAllowedRef.current)) return;
     setPaymentTarget(invoice);
     const balance = parseFloat(String(invoice.balanceDue || 0));
     setPaymentAmount(balance.toFixed(2));
@@ -185,12 +251,13 @@ export function Invoices() {
   };
 
   const openCancelDialog = (invoice: any) => {
+    if (!invoiceVisibleUnderFeedAccess(invoice, feedAllowedRef.current)) return;
     setCancelTarget(invoice);
     setCancelDialogOpen(true);
   };
 
   const handleConfirmSent = () => {
-    if (!sendTarget) return;
+    if (!invoiceVisibleUnderFeedAccess(sendTarget, feedAllowedRef.current)) return;
     markAsSentMutation.mutate({
       invoiceId: sendTarget.id,
       sentAt: sentDate + " 00:00:00",
@@ -198,7 +265,7 @@ export function Invoices() {
   };
 
   const handleConfirmPayment = () => {
-    if (!paymentTarget) return;
+    if (!invoiceVisibleUnderFeedAccess(paymentTarget, feedAllowedRef.current)) return;
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) {
       toast.error("Please enter a valid payment amount");
@@ -220,7 +287,7 @@ export function Invoices() {
   };
 
   const handleConfirmCancel = () => {
-    if (!cancelTarget) return;
+    if (!invoiceVisibleUnderFeedAccess(cancelTarget, feedAllowedRef.current)) return;
     cancelMutation.mutate(cancelTarget.id);
   };
 
@@ -399,7 +466,7 @@ export function Invoices() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleDownloadPDF(invoice.id)}
+                            onClick={() => handleDownloadPDF(invoice)}
                             disabled={generatePdfMutation.isPending}
                             title="Download PDF"
                           >
@@ -437,7 +504,7 @@ export function Invoices() {
       </Tabs>
 
       {/* ===== MARK AS SENT DIALOG ===== */}
-      <Dialog open={sendDialogOpen} onOpenChange={setSendDialogOpen}>
+      {sendTarget && (<Dialog open={sendDialogOpen} onOpenChange={setSendDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Mark Invoice as Sent</DialogTitle>
@@ -468,10 +535,10 @@ export function Invoices() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
 
       {/* ===== RECORD PAYMENT DIALOG ===== */}
-      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+      {paymentTarget && (<Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Record Payment</DialogTitle>
@@ -537,10 +604,10 @@ export function Invoices() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
 
       {/* ===== CANCEL INVOICE DIALOG ===== */}
-      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+      {cancelTarget && (<Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Cancel Invoice</DialogTitle>
@@ -563,10 +630,10 @@ export function Invoices() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
 
       {/* ===== VIEW INVOICE MODAL ===== */}
-      <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
+      {viewInvoice && (<Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3">
@@ -793,7 +860,7 @@ export function Invoices() {
                   className="bg-orange-500 hover:bg-orange-600 text-white gap-2"
                   onClick={() => {
                     setViewModalOpen(false);
-                    handleDownloadPDF(viewInvoice.id);
+                    handleDownloadPDF(viewInvoice);
                   }}
                   disabled={generatePdfMutation.isPending}
                 >
@@ -808,7 +875,7 @@ export function Invoices() {
             </div>
           )}
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
     </div>
   );
 }

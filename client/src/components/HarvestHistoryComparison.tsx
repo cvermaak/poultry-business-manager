@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatRand } from "@/lib/format";
@@ -21,6 +22,7 @@ interface HarvestHistoryComparisonProps {
 }
 
 export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps) {
+  const { allowed } = useFinancialVisibility();
   if (!data || data.length === 0) {
     return (
       <Card>
@@ -99,7 +101,7 @@ export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps
           </CardContent>
         </Card>
 
-        <Card>
+        {allowed && (<Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <Award className="h-4 w-4" />
@@ -112,7 +114,7 @@ export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps
               {formatRand(bestRevenue.totalRevenue)}
             </p>
           </CardContent>
-        </Card>
+        </Card>)}
       </div>
 
       {/* Comparison Table */}
@@ -136,7 +138,7 @@ export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps
                   <TableHead className="text-right">Avg Delivered</TableHead>
                   <TableHead className="text-right">Performance</TableHead>
                   <TableHead className="text-right">Avg Shrinkage</TableHead>
-                  <TableHead className="text-right">Total Revenue</TableHead>
+                  {allowed && (<TableHead className="text-right">Total Revenue</TableHead>)}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -189,9 +191,9 @@ export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps
                           {flock.avgShrinkage.toFixed(2)}%
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-medium">
+                      {allowed && (<TableCell className="text-right font-medium">
                         {formatRand(flock.totalRevenue)}
-                      </TableCell>
+                      </TableCell>)}
                     </TableRow>
                   );
                 })}
@@ -217,10 +219,10 @@ export function HarvestHistoryComparison({ data }: HarvestHistoryComparisonProps
                   {overallAvgShrinkage.toFixed(2)}%
                 </p>
               </div>
-              <div>
+              {allowed && (<div>
                 <p className="text-sm text-muted-foreground">Total Revenue (All Flocks)</p>
                 <p className="text-lg font-bold">R{overallTotalRevenue.toFixed(2)}</p>
-              </div>
+              </div>)}
             </div>
           </div>
 

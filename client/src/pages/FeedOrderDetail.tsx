@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState } from "react";
 import { useRoute, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -27,10 +28,13 @@ import { ArrowLeft, Truck, Package, AlertTriangle, CheckCircle, Clock, FileText,
 import { Link as WouterLink } from "wouter";
 
 function FeedInvoiceStatus({ orderId }: { orderId: number }) {
+  const { allowed } = useFinancialVisibility();
   const { data: feedInvoices = [] } = trpc.invoices.listFeedDeliveryInvoices.useQuery(
     { feedOrderId: orderId },
-    { enabled: orderId > 0 }
+    { enabled: allowed && orderId > 0 }
   );
+
+  if (!allowed) return null;
 
   const fmt = (v: unknown) =>
     new Intl.NumberFormat("en-ZA", { style: "currency", currency: "ZAR" }).format(
@@ -134,6 +138,7 @@ const PO_STATUS_COLORS: Record<string, string> = {
 };
 
 export default function FeedOrderDetail() {
+  const { allowed } = useFinancialVisibility();
   const [, params] = useRoute("/feed-orders/:id");
   const orderId = params?.id ? parseInt(params.id) : 0;
 
@@ -261,7 +266,7 @@ export default function FeedOrderDetail() {
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Transport</p>
               <p className="font-bold text-sm">{order.transportMode === "afgro_delivers" ? "AFGRO Delivers" : "Customer Collects"}</p>
-              {order.transportMode === "afgro_delivers" && order.transportCostTotal && (
+              {allowed && order.transportMode === "afgro_delivers" && order.transportCostTotal && (
                 <p className="text-xs text-muted-foreground">R {parseFloat(order.transportCostTotal).toFixed(2)}</p>
               )}
             </CardContent>
@@ -290,7 +295,7 @@ export default function FeedOrderDetail() {
         </Card>
 
         {/* Mill Invoice (AFGRO pays mill) */}
-        <Card>
+        {allowed && (<Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm">Mill Invoice (Mill → AFGRO)</CardTitle>
             <div className="flex gap-2">
@@ -341,7 +346,7 @@ export default function FeedOrderDetail() {
               <p className="text-sm text-muted-foreground">No mill invoice recorded yet. Record the invoice once received from the mill.</p>
             )}
           </CardContent>
-        </Card>
+        </Card>)}
 
         {/* Additive Purchase Orders */}
         <Card>
@@ -469,7 +474,7 @@ export default function FeedOrderDetail() {
         <FeedInvoiceStatus orderId={orderId} />
 
         {/* Notes */}
-        {order.notes && (
+        {allowed && order.notes && (
           <Card>
             <CardHeader><CardTitle className="text-sm">Notes</CardTitle></CardHeader>
             <CardContent><p className="text-sm">{order.notes}</p></CardContent>
@@ -502,7 +507,7 @@ export default function FeedOrderDetail() {
       </Dialog>
 
       {/* Record Mill Invoice Dialog */}
-      <Dialog open={millInvoiceOpen} onOpenChange={setMillInvoiceOpen}>
+      {allowed && (<Dialog open={millInvoiceOpen} onOpenChange={setMillInvoiceOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Record Mill Invoice</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2">
@@ -530,10 +535,10 @@ export default function FeedOrderDetail() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
 
       {/* Mark Mill Invoice Paid Dialog */}
-      <Dialog open={paidOpen} onOpenChange={setPaidOpen}>
+      {allowed && (<Dialog open={paidOpen} onOpenChange={setPaidOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Mark Mill Invoice as Paid</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2">
@@ -547,7 +552,7 @@ export default function FeedOrderDetail() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>)}
 
       {/* Record Delivery Dialog */}
       <Dialog open={deliveryOpen} onOpenChange={setDeliveryOpen}>
@@ -660,10 +665,10 @@ export default function FeedOrderDetail() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1">
+                {allowed && (<div className="space-y-1">
                   <Label>Unit Price (R/kg)</Label>
                   <Input type="number" step="0.0001" value={poForm.unitPricePerKg} onChange={(e) => setPoForm((f) => ({ ...f, unitPricePerKg: e.target.value }))} />
-                </div>
+                </div>)}
                 <div className="space-y-1">
                   <Label>Order Placed Date</Label>
                   <Input type="date" value={poForm.orderPlacedDate} onChange={(e) => setPoForm((f) => ({ ...f, orderPlacedDate: e.target.value }))} />
@@ -676,15 +681,15 @@ export default function FeedOrderDetail() {
                   <Label>Actual Delivery</Label>
                   <Input type="date" value={poForm.actualDeliveryDate} onChange={(e) => setPoForm((f) => ({ ...f, actualDeliveryDate: e.target.value }))} />
                 </div>
-                <div className="space-y-1">
+                {allowed && (<div className="space-y-1">
                   <Label>Supplier Invoice #</Label>
                   <Input value={poForm.supplierInvoiceNumber} onChange={(e) => setPoForm((f) => ({ ...f, supplierInvoiceNumber: e.target.value }))} />
-                </div>
-                <div className="space-y-1">
+                </div>)}
+                {allowed && (<div className="space-y-1">
                   <Label>Supplier Invoice Date</Label>
                   <Input type="date" value={poForm.supplierInvoiceDate} onChange={(e) => setPoForm((f) => ({ ...f, supplierInvoiceDate: e.target.value }))} />
-                </div>
-                <div className="space-y-1">
+                </div>)}
+                {allowed && (<div className="space-y-1">
                   <Label>Supplier Invoice Paid?</Label>
                   <Select value={poForm.supplierInvoicePaid} onValueChange={(v) => setPoForm((f) => ({ ...f, supplierInvoicePaid: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -693,12 +698,12 @@ export default function FeedOrderDetail() {
                       <SelectItem value="1">Yes</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
+                </div>)}
               </div>
-              <div className="space-y-1">
+              {allowed && (<div className="space-y-1">
                 <Label>Notes</Label>
                 <Textarea rows={2} value={poForm.notes} onChange={(e) => setPoForm((f) => ({ ...f, notes: e.target.value }))} />
-              </div>
+              </div>)}
             </div>
           )}
           <DialogFooter>
@@ -707,14 +712,16 @@ export default function FeedOrderDetail() {
               onClick={() => updatePO.mutate({
                 id: selectedPO.po.id,
                 status: poForm.status as any,
-                unitPricePerKg: poForm.unitPricePerKg || undefined,
+                ...(allowed ? { unitPricePerKg: poForm.unitPricePerKg || undefined } : {}),
                 orderPlacedDate: poForm.orderPlacedDate || undefined,
                 expectedDeliveryDate: poForm.expectedDeliveryDate || undefined,
                 actualDeliveryDate: poForm.actualDeliveryDate || undefined,
-                supplierInvoiceNumber: poForm.supplierInvoiceNumber || undefined,
-                supplierInvoiceDate: poForm.supplierInvoiceDate || undefined,
-                supplierInvoicePaid: parseInt(poForm.supplierInvoicePaid),
-                notes: poForm.notes || undefined,
+                ...(allowed ? {
+                  supplierInvoiceNumber: poForm.supplierInvoiceNumber || undefined,
+                  supplierInvoiceDate: poForm.supplierInvoiceDate || undefined,
+                  supplierInvoicePaid: parseInt(poForm.supplierInvoicePaid),
+                  notes: poForm.notes || undefined,
+                } : {}),
               })}
               disabled={updatePO.isPending}
             >

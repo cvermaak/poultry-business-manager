@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatRand } from "@/lib/format";
@@ -62,6 +63,7 @@ interface HarvestFormData {
 }
 
 export default function Harvests() {
+  const { allowed } = useFinancialVisibility();
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingHarvest, setEditingHarvest] = useState<HarvestFormData | null>(null);
@@ -102,6 +104,8 @@ export default function Harvests() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (editingHarvest && !allowed) return;
+
     if (formData.flockId === 0) {
       toast.error("Please select a flock");
       return;
@@ -132,7 +136,8 @@ export default function Harvests() {
         });
         toast.success("Harvest record updated successfully");
       } else {
-        await createMutation.mutateAsync(formData);
+        const { pricePerKg, paymentTerms, invoiceReference, notes, ...operational } = formData;
+        await createMutation.mutateAsync(allowed ? formData : operational);
         toast.success("Harvest record created successfully");
       }
       setIsDialogOpen(false);
@@ -149,6 +154,7 @@ export default function Harvests() {
   };
 
   const handleEdit = (harvest: any) => {
+    if (!allowed) return;
     setEditingHarvest(harvest);
     setFormData({
       ...harvest,
@@ -416,7 +422,7 @@ export default function Harvests() {
               </div>
 
               {/* Financial Details */}
-              <div className="space-y-4">
+              {allowed && (<div className="space-y-4">
                 <h3 className="font-semibold text-lg">Financial Details</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -447,10 +453,10 @@ export default function Harvests() {
                     />
                   </div>
                 </div>
-              </div>
+              </div>)}
 
               {/* Notes */}
-              <div className="space-y-2">
+              {allowed && (<div className="space-y-2">
                 <Label htmlFor="notes">Notes</Label>
                 <Textarea
                   id="notes"
@@ -459,7 +465,7 @@ export default function Harvests() {
                   placeholder="Weather conditions, issues, observations..."
                   rows={3}
                 />
-              </div>
+              </div>)}
 
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
@@ -494,7 +500,7 @@ export default function Harvests() {
             <p className="text-xs text-muted-foreground">Total count</p>
           </CardContent>
         </Card>
-        <Card>
+        {allowed && (<Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <DollarSign className="h-4 w-4" />
@@ -505,7 +511,7 @@ export default function Harvests() {
             <div className="text-2xl font-bold">{formatRand(totalRevenue)}</div>
             <p className="text-xs text-muted-foreground">From all harvests</p>
           </CardContent>
-        </Card>
+        </Card>)}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -555,7 +561,7 @@ export default function Harvests() {
                   <TableHead className="text-right">Loaded Weight</TableHead>
                   <TableHead className="text-right">Delivered Weight</TableHead>
                   <TableHead className="text-right">Shrinkage</TableHead>
-                  <TableHead className="text-right">Revenue</TableHead>
+                  {allowed && (<TableHead className="text-right">Revenue</TableHead>)}
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -575,14 +581,14 @@ export default function Harvests() {
                       <TableCell className="text-right">
                         {harvest.shrinkagePercentage ? `${harvest.shrinkagePercentage}%` : "-"}
                       </TableCell>
-                      <TableCell className="text-right">
+                      {allowed && (<TableCell className="text-right">
                         {harvest.totalRevenue ? formatRand(parseFloat(harvest.totalRevenue)) : "-"}
-                      </TableCell>
+                      </TableCell>)}
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => handleEdit(harvest)}>
+                          {allowed && (<Button variant="ghost" size="sm" onClick={() => handleEdit(harvest)}>
                             <Edit className="h-4 w-4" />
-                          </Button>
+                          </Button>)}
                           <Button variant="ghost" size="sm" onClick={() => handleDelete(harvest.id)}>
                             <Trash2 className="h-4 w-4" />
                           </Button>

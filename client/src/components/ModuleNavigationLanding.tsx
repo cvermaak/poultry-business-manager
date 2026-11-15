@@ -28,6 +28,7 @@ import {
   type NavigationIcon,
   type NavigationModuleKey,
 } from "@/lib/module-navigation";
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 
 const linkIcons: Readonly<Record<NavigationIcon, LucideIcon>> = {
   "financial-reports": FileText,
@@ -44,6 +45,7 @@ export interface ModuleNavigationLandingProps {
   moduleKey: NavigationModuleKey;
   role?: string;
   loading?: boolean;
+  financialAllowed?: boolean;
 }
 
 /** Presentational navigation only; authentication is supplied by page wrappers. */
@@ -51,6 +53,7 @@ export function ModuleNavigationLanding({
   moduleKey,
   role,
   loading = false,
+  financialAllowed = true,
 }: ModuleNavigationLandingProps) {
   const module = getNavigationModule(moduleKey);
 
@@ -61,7 +64,7 @@ export function ModuleNavigationLanding({
           {module.title}
         </h1>
         <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          {module.description}
+          {financialAllowed ? module.description : "Navigate to existing feed formulations, feed orders, and additive inventory tools."}
         </p>
       </header>
 
@@ -97,7 +100,7 @@ export function ModuleNavigationLanding({
       ) : (
         <nav aria-label={`${module.title} destinations`}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {getVisibleModuleLinks(moduleKey, role).map(link => {
+            {getVisibleModuleLinks(moduleKey, role, financialAllowed).map(link => {
               const Icon = linkIcons[link.icon];
               return (
                 <Link
@@ -134,4 +137,8 @@ export function ModuleNavigationLanding({
   );
 }
 
-export default ModuleNavigationLanding;
+/** Production entry point: operational links stay available while finance loads. */
+export default function FinancialModuleNavigationLanding(props: ModuleNavigationLandingProps) {
+  const { allowed, loading } = useFinancialVisibility();
+  return <ModuleNavigationLanding {...props} financialAllowed={allowed && !loading} />;
+}

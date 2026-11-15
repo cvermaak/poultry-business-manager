@@ -1,3 +1,5 @@
+import { canViewModulePath } from "@/lib/module-view-paths";
+import { useModuleViewAccess } from "@/hooks/useModuleViewAccess";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -28,6 +30,7 @@ import { Button } from "./ui/button";
 import LoginPage from "@/pages/Login";
 import { ReminderNotifications } from "@/components/ReminderNotifications";
 import { useIsMobile } from "@/hooks/useMobile";
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 
 type UserRole = "admin" | "farm_manager" | "accountant" | "sales_staff" | "production_worker" | "chicken_house_operator";
 
@@ -38,6 +41,7 @@ interface MenuItem {
   roles?: UserRole[]; // If undefined, accessible to all roles
   children?: MenuItem[]; // Submenu items
   indent?: boolean; // Whether this item is indented as a child
+  requiresFinancialAccess?: boolean;
 }
 
 const menuItems: MenuItem[] = [
@@ -55,21 +59,21 @@ const menuItems: MenuItem[] = [
   { icon: Users, label: "Customers", path: "/customers", roles: ["admin", "sales_staff"] },
   { icon: Package, label: "Suppliers", path: "/suppliers", roles: ["admin", "farm_manager", "accountant"] },
   { icon: ShoppingCart, label: "Purchase Orders", path: "/purchase-orders", roles: ["admin", "farm_manager", "accountant"], indent: true },
-  { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"] },
+  { icon: ShoppingCart, label: "Sales", path: "/sales", roles: ["admin", "sales_staff"], requiresFinancialAccess: true },
   { icon: ShoppingCart, label: "Sales Orders", path: "/sales/orders", roles: ["admin", "sales_staff"], indent: true },
-  { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"], indent: true },
-  { icon: FileText, label: "Feed Invoices", path: "/invoicing/feed-invoices", roles: ["admin", "accountant", "sales_staff"], indent: true },
-  { icon: Factory, label: "Mill Invoices", path: "/invoicing/mill-invoices", roles: ["admin", "accountant"], indent: true },
-  { icon: DollarSign, label: "Financial Reports", path: "/finance", roles: ["admin", "accountant"] },
-  { icon: TrendingDown, label: "Expenses", path: "/finance/expenses", roles: ["admin", "accountant"], indent: true },
-  { icon: TrendingUp, label: "Cash Flow", path: "/finance/cash-flow", roles: ["admin", "accountant"], indent: true },
-  { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"] },
+  { icon: FileText, label: "Invoices", path: "/sales/invoices", roles: ["admin", "sales_staff"], indent: true, requiresFinancialAccess: true },
+  { icon: FileText, label: "Feed Invoices", path: "/invoicing/feed-invoices", roles: ["admin", "accountant", "sales_staff"], indent: true, requiresFinancialAccess: true },
+  { icon: Factory, label: "Mill Invoices", path: "/invoicing/mill-invoices", roles: ["admin", "accountant"], indent: true, requiresFinancialAccess: true },
+  { icon: DollarSign, label: "Financial Reports", path: "/finance", roles: ["admin", "accountant"], requiresFinancialAccess: true },
+  { icon: TrendingDown, label: "Expenses", path: "/finance/expenses", roles: ["admin", "accountant"], indent: true, requiresFinancialAccess: true },
+  { icon: TrendingUp, label: "Cash Flow", path: "/finance/cash-flow", roles: ["admin", "accountant"], indent: true, requiresFinancialAccess: true },
+  { icon: ScrollText, label: "Audit Logs", path: "/audit-logs", roles: ["admin"], requiresFinancialAccess: true },
   { icon: Settings, label: "User Management", path: "/user-management", roles: ["admin"] },
-  { icon: Settings, label: "Settings", path: "/settings/company", roles: ["admin"] },
+  { icon: Settings, label: "Settings", path: "/settings/company", roles: ["admin"], requiresFinancialAccess: true },
   { icon: FlaskConical, label: "Feed Management", path: "/feed-management", roles: ["admin", "farm_manager"] },
   { icon: FlaskConical, label: "Formulations", path: "/feed-management/formulations", roles: ["admin", "farm_manager"], indent: true },
-  { icon: Factory, label: "Mill Costs", path: "/feed-management/mill-costs", roles: ["admin", "farm_manager"], indent: true },
-  { icon: Tag, label: "Customer Prices", path: "/feed-management/customer-pricing", roles: ["admin", "farm_manager"], indent: true },
+  { icon: Factory, label: "Mill Costs", path: "/feed-management/mill-costs", roles: ["admin", "farm_manager"], indent: true, requiresFinancialAccess: true },
+  { icon: Tag, label: "Customer Prices", path: "/feed-management/customer-pricing", roles: ["admin", "farm_manager"], indent: true, requiresFinancialAccess: true },
   { icon: ShoppingCart, label: "Feed Orders", path: "/feed-orders", roles: ["admin", "farm_manager", "accountant"], indent: true },
   { icon: Package, label: "Additive Inventory", path: "/feed-management/additive-inventory", roles: ["admin", "farm_manager"], indent: true },
 ];
@@ -133,6 +137,9 @@ function DashboardLayoutContent({
   setSidebarWidth,
 }: DashboardLayoutContentProps) {
   const { user, logout } = useAuth();
+  const moduleAccess = useModuleViewAccess();
+  const { allowed, loading: financialLoading } = useFinancialVisibility();
+  const financialAllowed = allowed && !financialLoading;
   const [location, setLocation] = useLocation();
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -217,7 +224,7 @@ function DashboardLayoutContent({
           <SidebarContent className="gap-0">
             <SidebarMenu className="px-2 py-1">
               {menuItems
-                .filter(item => canAccessMenuItem(item, user?.role))
+                .filter(item => canAccessMenuItem(item, user?.role) && canViewModulePath(item.path, moduleAccess) && (!item.requiresFinancialAccess || financialAllowed))
                 .map(item => {
                   const isActive = location === item.path || (item.path !== '/' && location.startsWith(item.path) && !item.indent);
                   const isExactActive = location === item.path;

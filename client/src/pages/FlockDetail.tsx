@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import { buildDailyLossUpdate, emptyDailyLossForm, hydrateDailyLossForm, validat
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
+  const { allowed } = useFinancialVisibility();
   const [, params] = useRoute("/flocks/:id");
   const [, setLocation] = useLocation();
   const flockId = params?.id ? parseInt(params.id) : 0;
@@ -494,7 +496,7 @@ export default function FlockDetail() {
       medication: healthRecordForm.medication || undefined,
       dosage: healthRecordForm.dosage || undefined,
       veterinarianName: healthRecordForm.veterinarianName || undefined,
-      cost: healthRecordForm.cost || undefined,
+      ...(allowed ? { cost: healthRecordForm.cost || undefined } : {}),
       notes: normalizeHealthRecordNotes(healthRecordForm.notes),
     });
   };
@@ -2135,7 +2137,7 @@ export default function FlockDetail() {
                       <TableHead>Description</TableHead>
                       <TableHead>Treatment</TableHead>
                       <TableHead>Medication</TableHead>
-                      <TableHead>Cost</TableHead>
+                      {allowed && (<TableHead>Cost</TableHead>)}
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2153,7 +2155,7 @@ export default function FlockDetail() {
                         <TableCell className="max-w-xs truncate">{record.description}</TableCell>
                         <TableCell className="max-w-xs truncate">{record.treatment || '-'}</TableCell>
                         <TableCell>{record.medication || '-'}</TableCell>
-                        <TableCell>{record.cost ? formatRand(parseFloat(record.cost)) : '-'}</TableCell>
+                        {allowed && (<TableCell>{record.cost ? formatRand(parseFloat(record.cost)) : '-'}</TableCell>)}
                         <TableCell className="text-right">
                           <Button
                             variant="ghost"
@@ -2746,7 +2748,7 @@ export default function FlockDetail() {
                             <TableHead className="text-right">Loaded Weight</TableHead>
                             <TableHead className="text-right">Delivered Weight</TableHead>
                             <TableHead className="text-right">Shrinkage</TableHead>
-                            <TableHead className="text-right">Revenue</TableHead>
+                            {allowed && (<TableHead className="text-right">Revenue</TableHead>)}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2762,9 +2764,9 @@ export default function FlockDetail() {
                               <TableCell className="text-right">
                                 {harvest.shrinkagePercentage ? `${harvest.shrinkagePercentage}%` : "-"}
                               </TableCell>
-                              <TableCell className="text-right">
+                              {allowed && (<TableCell className="text-right">
                                 {harvest.totalRevenue ? formatRand(parseFloat(harvest.totalRevenue)) : "-"}
-                              </TableCell>
+                              </TableCell>)}
                             </TableRow>
                           ))}
                         </TableBody>
@@ -3297,7 +3299,7 @@ export default function FlockDetail() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            {allowed && (<div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="cost">Cost (R)</Label>
                 <Input
@@ -3308,7 +3310,7 @@ export default function FlockDetail() {
                   onChange={(e) => setHealthRecordForm({ ...healthRecordForm, cost: parseFloat(e.target.value) || 0 })}
                 />
               </div>
-            </div>
+            </div>)}
             <div>
               <Label htmlFor="notes">Additional Notes (optional)</Label>
               <Textarea
@@ -3338,7 +3340,7 @@ export default function FlockDetail() {
                     medication: healthRecordForm.medication || undefined,
                     dosage: healthRecordForm.dosage || undefined,
                     veterinarianName: healthRecordForm.veterinarianName || undefined,
-                    cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined,
+                    ...(allowed ? { cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined } : {}),
                     notes: normalizeHealthRecordNotes(healthRecordForm.notes),
                   });
                 } else {
@@ -3351,7 +3353,7 @@ export default function FlockDetail() {
                     medication: healthRecordForm.medication || undefined,
                     dosage: healthRecordForm.dosage || undefined,
                     veterinarianName: healthRecordForm.veterinarianName || undefined,
-                    cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined,
+                    ...(allowed ? { cost: healthRecordForm.cost ? Number(healthRecordForm.cost) : undefined } : {}),
                     notes: normalizeHealthRecordNotes(healthRecordForm.notes),
                   });
                 }

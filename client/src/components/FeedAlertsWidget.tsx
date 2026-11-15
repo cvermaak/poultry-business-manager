@@ -3,15 +3,23 @@ import { trpc } from "@/lib/trpc";
 import { CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, ShoppingCart, Clock, CheckCircle } from "lucide-react";
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 
 export default function FeedAlertsWidget() {
+  const { allowed, loading: financialLoading } = useFinancialVisibility();
   const { data: alerts, isLoading } = trpc.feedOrders.getAlerts.useQuery();
 
-  const critical = alerts?.filter((a: any) => a.severity === "critical") ?? [];
-  const warnings = alerts?.filter((a: any) => a.severity === "warning") ?? [];
-  const infos = alerts?.filter((a: any) => a.severity === "info") ?? [];
+  // The server supplies operational-only rows when blocked. Filter cached/full
+  // responses defensively before deriving badges, groups, or "+more" counts.
+  const financialAllowed = allowed && !financialLoading;
+  const visibleAlerts = (alerts ?? []).filter((alert: any) =>
+    financialAllowed || ["feed_stage_transition", "additive_po_overdue", "additive_po_due_soon"].includes(alert.type),
+  );
+  const critical = visibleAlerts.filter((a: any) => a.severity === "critical");
+  const warnings = visibleAlerts.filter((a: any) => a.severity === "warning");
+  const infos = visibleAlerts.filter((a: any) => a.severity === "info");
 
-  const totalAlerts = (alerts?.length ?? 0);
+  const totalAlerts = visibleAlerts.length;
 
   return (
     <>
