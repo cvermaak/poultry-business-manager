@@ -25,6 +25,8 @@ import { PlanCatchDialog } from "@/components/PlanCatchDialog";
 import { AuditTimestamp } from "@/components/AuditTimestamp";
 import { DailyLossFields, DailyLossHistoryCells } from "@/components/DailyLossFields";
 import { buildDailyLossUpdate, emptyDailyLossForm, hydrateDailyLossForm, validateDailyLossForm } from "@/lib/daily-loss-form";
+import { getFlockPlacementDate, getFlockAgeDays, getFlockRecordDay } from "@shared/flock-placement";
+import { productionToday } from "@shared/production-report-dates";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 
 export default function FlockDetail() {
@@ -34,7 +36,7 @@ export default function FlockDetail() {
   const flockId = params?.id ? parseInt(params.id) : 0;
   
   // Get tab from URL query parameter
-  const urlParams = new URLSearchParams(window.location.search);
+  const urlParams = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
   const tabParam = urlParams.get('tab');
   const [activeTab, setActiveTab] = useState(tabParam || "daily");
   
@@ -69,6 +71,8 @@ export default function FlockDetail() {
   const { data: statusHistory } = trpc.flocks.getStatusHistory.useQuery({ flockId });
   const { data: activityLogs } = trpc.flocks.getActivityLogs.useQuery({ flockId });
   const { data: displaySettings, isError: timezoneError } = trpc.system.getDisplayTimezone.useQuery();
+  const companyTimezone = displaySettings?.timezone || "Africa/Johannesburg";
+  const companyToday = () => productionToday(companyTimezone);
   const { data: harvests } = trpc.harvest.getByFlock.useQuery({ flockId });
   const { data: catchPlan, refetch: refetchCatchPlan } = trpc.catch.getCatchPlan.useQuery({ flockId });
   const { data: house } = trpc.houses.getById.useQuery({ id: flock?.houseId ?? 0 }, { enabled: !!flock?.houseId });
@@ -282,8 +286,8 @@ export default function FlockDetail() {
   // Form states for daily record
   const [dailyLossForm, setDailyLossForm] = useState(emptyDailyLossForm);
   const [dailyRecordForm, setDailyRecordForm] = useState({
-    recordDate: format(new Date(), "yyyy-MM-dd"),
-    dayNumber: 1,
+    recordDate: companyToday(),
+    dayNumber: 0,
     feedConsumed: 0,
     feedType: "starter" as "starter" | "grower" | "finisher",
     waterConsumed: 0,
@@ -361,10 +365,11 @@ export default function FlockDetail() {
   const resetDailyRecordForm = () => {
     setDailyLossForm(emptyDailyLossForm());
     const today = new Date();
-    const placementDate = flock?.placementDate ? new Date(flock.placementDate) : today;
-    const calculatedDayNumber = Math.floor((today.getTime() - placementDate.getTime()) / (1000 * 60 * 60 * 24));
+    let calculatedDayNumber: number;
+    try { calculatedDayNumber = getFlockAgeDays(flock!.placementDate, today, companyTimezone); }
+    catch { toast.error("Invalid flock placement date. Correct it before adding daily records."); return; }
     setDailyRecordForm({
-      recordDate: format(today, "yyyy-MM-dd"),
+      recordDate: productionToday(companyTimezone, today),
       dayNumber: Math.max(0, calculatedDayNumber),
       feedConsumed: 0,
       feedType: "starter",
@@ -412,10 +417,17 @@ export default function FlockDetail() {
       toast.error("Reopen Add Record to enter separately recorded losses.");
       return;
     }
+    let recordDate: string;
+    let dayNumber: number;
+    try {
+      recordDate = getFlockPlacementDate(dailyRecordForm.recordDate);
+      dayNumber = getFlockRecordDay(flock!.placementDate, recordDate);
+      if (dayNumber < 0) throw new Error("Record date cannot be before placement.");
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Invalid flock placement/record date."); return; }
     createDailyRecord.mutate({
       flockId,
-      recordDate: new Date(dailyRecordForm.recordDate),
-      dayNumber: dailyRecordForm.dayNumber,
+      recordDate: new Date(`${recordDate}T00:00:00.000Z`),
+      dayNumber,
       losses: validated.losses,
       feedConsumed: dailyRecordForm.feedConsumed,
       feedType: dailyRecordForm.feedType,
@@ -434,7 +446,7 @@ export default function FlockDetail() {
     setEditingRecordId(record.id);
     setDailyLossForm(hydrateDailyLossForm(record));
     setDailyRecordForm({
-      recordDate: format(new Date(record.recordDate), "yyyy-MM-dd"),
+      recordDate: getFlockPlacementDate(record.recordDate),
       dayNumber: record.dayNumber,
       feedConsumed: record.feedConsumed ? parseFloat(record.feedConsumed.toString()) : 0,
       feedType: (record.feedType as "starter" | "grower" | "finisher") || "starter",
@@ -534,6 +546,10 @@ export default function FlockDetail() {
       </div>
     );
   }
+
+  let flockAgeDays: number;
+  try { flockAgeDays = getFlockAgeDays(flock.placementDate, new Date(), companyTimezone); }
+  catch { return <Alert variant="destructive"><AlertDescription>Invalid flock placement date. Correct the placement before adding daily records.</AlertDescription></Alert>; }
 
   // Prepare chart data - merge actual and target data
   // Treat weight of 0 as "not weighed" (null) so chart skips those days
@@ -695,9 +711,9 @@ export default function FlockDetail() {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{performanceMetrics?.ageInDays || 0}</div>
+            <div className="text-2xl font-bold">{flockAgeDays}</div>
             <p className="text-xs text-muted-foreground">
-              {performanceMetrics?.daysRemaining || 0} days remaining
+              {Math.max(0, (flock.growingPeriod ?? 42) - flockAgeDays)} days remaining
             </p>
           </CardContent>
         </Card>
@@ -745,7 +761,7 @@ export default function FlockDetail() {
 
       {/* Active Feed Phase Indicator */}
       {(() => {
-        const currentDay = performanceMetrics?.ageInDays || 0;
+        const currentDay = flockAgeDays;
         let activeFeedPhase: 'starter' | 'grower' | 'finisher' | null = null;
         let activeFeedType: string | null = null;
         
@@ -979,7 +995,7 @@ export default function FlockDetail() {
                     : "No data"}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {performanceMetrics?.ageInDays !== undefined ? `Day ${performanceMetrics.ageInDays}` : "Record weights to track"}
+                  {`Day ${flockAgeDays}`}
                 </p>
               </CardContent>
             </Card>
@@ -1227,15 +1243,14 @@ export default function FlockDetail() {
                 if (open) {
                   // Calculate day number when dialog opens
                   const today = new Date();
-                  const placementDate = flock?.placementDate ? new Date(flock.placementDate) : today;
-                  const calculatedDayNumber = Math.floor((today.getTime() - placementDate.getTime()) / (1000 * 60 * 60 * 24));
+                  const calculatedDayNumber = getFlockAgeDays(flock.placementDate, today, companyTimezone);
                   // Detect last used feed type from existing records (sorted by day)
                   const sortedRecords = [...(dailyRecords ?? [])].sort((a, b) => a.dayNumber - b.dayNumber);
                   const lastFeedType = (sortedRecords[sortedRecords.length - 1]?.feedType ?? "starter") as "starter" | "grower" | "finisher";
                   setPrevFeedType(lastFeedType);
                   setDailyRecordForm(prev => ({
                     ...prev,
-                    recordDate: format(today, "yyyy-MM-dd"),
+                    recordDate: productionToday(companyTimezone, today),
                     dayNumber: Math.max(0, calculatedDayNumber),
                     feedType: lastFeedType,
                   }));
@@ -1264,10 +1279,13 @@ export default function FlockDetail() {
                           value={dailyRecordForm.recordDate}
                           onChange={(e) => {
                             const newDate = e.target.value;
-                            const placementDate = flock?.placementDate ? new Date(flock.placementDate) : new Date();
-                            const recordDate = new Date(newDate);
-                            const dayNumber = Math.floor((recordDate.getTime() - placementDate.getTime()) / (1000 * 60 * 60 * 24));
-                            setDailyRecordForm({ ...dailyRecordForm, recordDate: newDate, dayNumber: Math.max(0, dayNumber) });
+                            try {
+                              const dayNumber = getFlockRecordDay(flock.placementDate, newDate);
+                              setDailyRecordForm({ ...dailyRecordForm, recordDate: newDate, dayNumber });
+                            } catch {
+                              setDailyRecordForm({ ...dailyRecordForm, recordDate: newDate });
+                              toast.error("Invalid record date.");
+                            }
                           }}
                         />
                       </div>

@@ -73,6 +73,8 @@ import {
 import "../drizzle/relations";
 import { ENV } from "./_core/env";
 import { normalizeAuditEpochMs } from "./audit-time";
+import { getFlockAgeDays } from "../shared/flock-placement";
+import { createFlockMutation, updateFlockMutation, type FlockCreateInput, type FlockUpdateInput } from "./flock-mutations";
 import {
   createDailyRecordMutation, updateDailyRecordMutation, deleteDailyRecordMutation,
   type DailyRecordCreateInput, type DailyRecordUpdatePatch,
@@ -549,6 +551,18 @@ export async function getFlockById(id: number) {
   };
 }
 
+/** Flock, health, reminders and success audit share one executor/transaction. */
+export async function createFlockAtomic(input: FlockCreateInput, actorId: number) {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  return createFlockMutation(database, input, actorId);
+}
+export async function updateFlockAtomic(input: FlockUpdateInput, actorId: number) {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  return updateFlockMutation(database, input, actorId);
+}
+
 export async function createFlock(data: typeof flocks.$inferInsert) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
@@ -562,23 +576,6 @@ export async function updateFlock(id: number, data: Partial<typeof flocks.$infer
   if (!db) throw new Error("Database not available");
 
   await db.update(flocks).set(data).where(eq(flocks.id, id));
-  
-  // Update feed transition reminder dates if feed schedule changed
-  const feedScheduleChanged = 
-    data.starterToDay !== undefined ||
-    data.growerFromDay !== undefined ||
-    data.growerToDay !== undefined ||
-    data.finisherFromDay !== undefined;
-  
-  if (feedScheduleChanged) {
-    await updateFeedTransitionReminderDates(
-      id,
-      data.starterToDay ?? undefined,
-      data.growerFromDay ?? undefined,
-      data.growerToDay ?? undefined,
-      data.finisherFromDay ?? undefined
-    );
-  }
   
   return true;
 }
@@ -2742,14 +2739,8 @@ export async function getFlockPerformanceMetrics(flockId: number) {
     ? (totalMortality / flock.initialCount) * 100 
     : 0;
 
-  // Calculate age in days (placement day = Day 0)
-  // Use UTC dates to ensure consistent calculation regardless of server timezone
-  const placementDate = new Date(flock.placementDate);
-  const today = new Date();
-  // Get UTC date components only (year, month, day) to avoid timezone issues
-  const placementUTC = Date.UTC(placementDate.getUTCFullYear(), placementDate.getUTCMonth(), placementDate.getUTCDate());
-  const todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  const ageInDays = Math.floor((todayUTC - placementUTC) / (1000 * 60 * 60 * 24));
+  // Company-calendar age, shared with clients; placement day is Day 0.
+  const ageInDays = getFlockAgeDays(flock.placementDate, new Date(), await getDisplayTimezone());
 
   const targetWeight = flock.targetSlaughterWeight ? parseFloat(flock.targetSlaughterWeight) : 0;
   const growingPeriod = flock.growingPeriod || 42;

@@ -24,8 +24,10 @@ describe("FlockDetail daily-loss capture integration", () => {
     expect(create).toContain("losses: validated.losses");
     expect(create).not.toContain("mortality:");
     expect(create).not.toContain("expectedLosses");
-    expect(create).toContain("recordDate: new Date(dailyRecordForm.recordDate)");
-    expect(create).toContain("dayNumber: dailyRecordForm.dayNumber");
+    expect(create).toContain("recordDate = getFlockPlacementDate(dailyRecordForm.recordDate)");
+    expect(create).toContain("recordDate: new Date(`${recordDate}T00:00:00.000Z`)");
+    expect(create).toContain("dayNumber = getFlockRecordDay(flock!.placementDate, recordDate)");
+    expect(create).toContain("dayNumber,");
     for (const field of ["feedConsumed", "feedType", "waterConsumed", "averageWeight", "weightSamples", "temperature", "humidity", "notes"]) {
       expect(create).toContain(`${field}: dailyRecordForm.${field}`);
     }
@@ -33,7 +35,7 @@ describe("FlockDetail daily-loss capture integration", () => {
   it("edit hydrates only from the opened record and sends loss fields only via change helper", () => {
     const hydrate = section("const handleEditDailyRecord", "const handleUpdateDailyRecord");
     expect(hydrate).toContain("setDailyLossForm(hydrateDailyLossForm(record))");
-    expect(hydrate).toContain('format(new Date(record.recordDate), "yyyy-MM-dd")');
+    expect(hydrate).toContain("getFlockPlacementDate(record.recordDate)");
     const update = section("const handleUpdateDailyRecord", "const handleDeleteDailyRecord");
     expect(update).toContain("buildDailyLossUpdate(dailyLossForm)");
     expect(update).toContain("...lossUpdate.fields");
