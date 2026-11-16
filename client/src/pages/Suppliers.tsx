@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -119,6 +120,7 @@ const emptyForm = (): SupplierForm => ({
 });
 
 export default function Suppliers() {
+  const { allowed } = useFinancialVisibility();
   
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
@@ -215,10 +217,12 @@ export default function Suppliers() {
       toast.error("Supplier name is required");
       return;
     }
+    const { paymentTerms, taxNumber, bankName, bankAccountNumber, notes, ...contact } = form;
+    const payload = allowed ? form : contact;
     if (editingId !== null) {
-      updateMutation.mutate({ id: editingId, ...form });
+      updateMutation.mutate({ id: editingId, ...payload });
     } else {
-      createMutation.mutate(form);
+      createMutation.mutate(payload);
     }
   };
 
@@ -343,7 +347,7 @@ export default function Suppliers() {
                     <TableHead>Name</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Contact</TableHead>
-                    <TableHead>Payment Terms</TableHead>
+                    {allowed && (<TableHead>Payment Terms</TableHead>)}
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -351,7 +355,7 @@ export default function Suppliers() {
                 <TableBody>
                   {filtered.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-10">
+                      <TableCell colSpan={allowed ? 7 : 6} className="text-center text-muted-foreground py-10">
                         {search || filterCategory !== "all"
                           ? "No suppliers match your filters."
                           : 'No suppliers yet. Click "Add Supplier" to get started.'}
@@ -399,9 +403,9 @@ export default function Suppliers() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        {allowed && (<TableCell>
                           <div className="text-xs">{supplier.paymentTerms ?? "—"}</div>
-                        </TableCell>
+                        </TableCell>)}
                         <TableCell>
                           {supplier.isActive
                             ? <Badge className="bg-green-100 text-green-700 border-green-200 text-xs gap-1"><CheckCircle className="h-3 w-3" />Active</Badge>
@@ -451,7 +455,7 @@ export default function Suppliers() {
                         ? <Badge className="bg-green-100 text-green-700 border-green-200 text-xs">Active</Badge>
                         : <Badge variant="outline" className="text-xs">Inactive</Badge>}
                     </div>
-                    {viewSupplier.notes && (
+                    {allowed && viewSupplier.notes && (
                       <div><span className="text-muted-foreground block mb-1">Notes</span>
                         <p className="text-xs bg-muted rounded p-2">{viewSupplier.notes}</p>
                       </div>
@@ -485,7 +489,7 @@ export default function Suppliers() {
                   </CardContent>
                 </Card>
 
-                <Card>
+                {allowed && (<Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base flex items-center gap-2">
                       <CreditCard className="h-4 w-4" />Financial & Banking
@@ -497,7 +501,7 @@ export default function Suppliers() {
                     <div className="flex justify-between"><span className="text-muted-foreground">Bank Name</span><span>{viewSupplier.bankName ?? "—"}</span></div>
                     <div className="flex justify-between"><span className="text-muted-foreground">Account Number</span><span className="font-mono">{viewSupplier.bankAccountNumber ?? "—"}</span></div>
                   </CardContent>
-                </Card>
+                </Card>)}
 
                 <Card>
                   <CardHeader className="pb-2">
@@ -553,7 +557,7 @@ export default function Suppliers() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
+                {allowed && (<div>
                   <Label>Payment Terms</Label>
                   <Select value={form.paymentTerms || "Net 30"} onValueChange={(v) => setForm({ ...form, paymentTerms: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -561,7 +565,7 @@ export default function Suppliers() {
                       {PAYMENT_TERMS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                </div>
+                </div>)}
               </div>
             </div>
 
@@ -596,7 +600,7 @@ export default function Suppliers() {
               </div>
             </div>
 
-            <div className="space-y-3">
+            {allowed && (<div className="space-y-3">
               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Financial & Banking</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
@@ -612,12 +616,12 @@ export default function Suppliers() {
                   <Input value={form.bankAccountNumber} onChange={(e) => setForm({ ...form, bankAccountNumber: e.target.value })} placeholder="e.g. 62123456789" />
                 </div>
               </div>
-            </div>
+            </div>)}
 
-            <div>
+            {allowed && (<div>
               <Label>Notes</Label>
               <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes about this supplier..." rows={3} />
-            </div>
+            </div>)}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>

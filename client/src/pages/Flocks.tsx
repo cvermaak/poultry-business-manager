@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -31,16 +31,46 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { formatWeight, convertToKg } from "@/lib/weightUtils";
+import { getFlockPlacementDate, getFlockAgeDays } from "@shared/flock-placement";
+
+// These are the existing form defaults (also 42 in the create parser/schema).
+const FLOCK_FORM_DEFAULTS = { growingPeriod: 42, starterToDay: 10, growerToDay: 24 };
+const selectionKey = (value: unknown) => JSON.stringify(value);
+const sameSelections = (a: unknown[], b: unknown[]) =>
+  selectionKey(a.map(selectionKey).sort()) === selectionKey(b.map(selectionKey).sort());
+const removesSelection = (previous: unknown[], next: unknown[]) => {
+  const remaining = next.map(selectionKey);
+  return previous.some(value => {
+    const index = remaining.indexOf(selectionKey(value));
+    if (index < 0) return true;
+    remaining.splice(index, 1);
+    return false;
+  });
+};
+const optionalDay = (value: string, fallback: number) => value.trim() === "" ? fallback : Number(value);
+const nextFeedDay = (value: string, fallback: number) => {
+  const day = optionalDay(value, fallback);
+  return Number.isFinite(day) && Number.isInteger(day) ? String(day + 1) : "";
+};
 
 export default function Flocks() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+  const editLoadVersion = useRef(0);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editingFlockId, setEditingFlockId] = useState<number | null>(null);
   const [copyMode, setCopyMode] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingFlockId, setDeletingFlockId] = useState<number | null>(null);
+  const [editLoadState, setEditLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [initialSelections, setInitialSelections] = useState<{
+    flockId: number;
+    vaccinationSchedules: Array<{ vaccineId: number; scheduledDay: number }>;
+    stressPackSchedules: Array<{ stressPackId: number; startDay: number; endDay: number; dosageStrength: "single" | "double" | "triple" }>;
+    selectedTemplateIds: number[];
+  } | null>(null);
+  const [attachedCustomReminders, setAttachedCustomReminders] = useState<Array<{ id: number; title: string; dueDate: string; status: string }>>([]);
   const [formData, setFormData] = useState({
     flockNumber: "",
     houseId: "",
@@ -67,6 +97,8 @@ export default function Flocks() {
 
   const { data: flocks, isLoading: flocksLoading, refetch } = trpc.flocks.list.useQuery();
   const { data: houses } = trpc.houses.list.useQuery();
+  const { data: displaySettings } = trpc.system.getDisplayTimezone.useQuery();
+  const companyTimezone = displaySettings?.timezone || "Africa/Johannesburg";
   const { data: vaccines } = trpc.health.listVaccines.useQuery();
   const { data: stressPacks } = trpc.health.listStressPacks.useQuery();
   const { data: reminderTemplates } = trpc.reminderTemplates.list.useQuery();
@@ -94,6 +126,7 @@ export default function Flocks() {
   const updateFlock = trpc.flocks.update.useMutation({
     onSuccess: () => {
       toast.success("Flock updated successfully");
+      editLoadVersion.current++;
       setDialogOpen(false);
       resetForm();
       setEditMode(false);
@@ -109,6 +142,7 @@ export default function Flocks() {
   const createFlock = trpc.flocks.create.useMutation({
     onSuccess: async (result) => {
       toast.success("Flock created successfully");
+      editLoadVersion.current++;
       setDialogOpen(false);
       refetch();
       resetForm();
@@ -164,6 +198,10 @@ export default function Flocks() {
   };
 
   const resetForm = () => {
+    editLoadVersion.current++;
+    setInitialSelections(null);
+    setEditLoadState("idle");
+    setAttachedCustomReminders([]);
     setFormData({
       flockNumber: "",
       houseId: "",
@@ -191,65 +229,137 @@ export default function Flocks() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const growingPeriod = parseInt(formData.growingPeriod);
-    const finisherToDay = growingPeriod;
-    
-    if (editMode && editingFlockId) {
-      // Update existing flock
-      updateFlock.mutate({
-        id: editingFlockId,
+    if (editMode && (editLoadState !== "ready" || !initialSelections || initialSelections.flockId !== editingFlockId)) {
+      toast.error("Saved reminders and health schedules must load successfully before saving. Please retry.");
+      return;
+    }
+    try {
+      const placementDate = getFlockPlacementDate(formData.placementDate);
+      const growingPeriod = optionalDay(formData.growingPeriod, FLOCK_FORM_DEFAULTS.growingPeriod);
+      const starterToDay = optionalDay(formData.starterToDay, FLOCK_FORM_DEFAULTS.starterToDay);
+      const growerToDay = optionalDay(formData.growerToDay, FLOCK_FORM_DEFAULTS.growerToDay);
+      const houseId = Number(formData.houseId);
+      const initialCount = Number(formData.initialCount);
+      const targetSlaughterWeight = Number(formData.targetSlaughterWeight);
+      const targetDeliveredWeight = formData.targetDeliveredWeight.trim() ? Number(formData.targetDeliveredWeight) : undefined;
+      const targetCatchingWeight = formData.targetCatchingWeight.trim() ? Number(formData.targetCatchingWeight) : undefined;
+      if (!formData.flockNumber.trim() || !formData.houseId.trim() || !Number.isInteger(houseId) || houseId <= 0 ||
+          !formData.initialCount.trim() || !Number.isInteger(initialCount) || initialCount <= 0 ||
+          !formData.targetSlaughterWeight.trim() || !Number.isFinite(targetSlaughterWeight) || targetSlaughterWeight <= 0) {
+        throw new Error("Please complete the required flock number, house, placement date and positive bird count/target weight.");
+      }
+      if (![growingPeriod, starterToDay, growerToDay].every(Number.isInteger) ||
+          [targetDeliveredWeight, targetCatchingWeight].some(value => value !== undefined && (!Number.isFinite(value) || value <= 0)) ||
+          formData.vaccinationSchedules.some(schedule => !Number.isInteger(schedule.vaccineId) || !Number.isInteger(schedule.scheduledDay)) ||
+          formData.stressPackSchedules.some(schedule => ![schedule.stressPackId, schedule.startDay, schedule.endDay].every(Number.isInteger))) {
+        throw new Error("Please enter valid finite numeric values for weights, feed days and health schedules.");
+      }
+      const payload = {
         flockNumber: formData.flockNumber,
-        houseId: parseInt(formData.houseId),
-        placementDate: new Date(formData.placementDate),
-        initialCount: parseInt(formData.initialCount),
-        targetSlaughterWeight: parseFloat(formData.targetSlaughterWeight),
-        targetDeliveredWeight: formData.targetDeliveredWeight ? parseFloat(formData.targetDeliveredWeight) : undefined,
-        targetCatchingWeight: formData.targetCatchingWeight ? parseFloat(formData.targetCatchingWeight) : undefined,
+        houseId,
+        placementDate: new Date(`${placementDate}T00:00:00.000Z`),
+        initialCount,
+        targetSlaughterWeight,
+        targetDeliveredWeight,
+        targetCatchingWeight,
         growingPeriod,
-        weightUnit: formData.weightUnit as "kg" | "lbs",
+        weightUnit: formData.weightUnit,
         starterFeedType: formData.starterFeedType,
-        starterToDay: parseInt(formData.starterToDay),
+        starterToDay,
         growerFeedType: formData.growerFeedType,
-        growerFromDay: parseInt(formData.growerFromDay),
-        growerToDay: parseInt(formData.growerToDay),
+        growerFromDay: optionalDay(formData.growerFromDay, starterToDay + 1),
+        growerToDay,
         finisherFeedType: formData.finisherFeedType,
-        finisherFromDay: parseInt(formData.finisherFromDay),
-        finisherToDay,
+        finisherFromDay: optionalDay(formData.finisherFromDay, growerToDay + 1),
+        finisherToDay: growingPeriod,
         notes: formData.notes || undefined,
+      };
+      if (editMode && editingFlockId && initialSelections) {
+        const vaccinesChanged = !sameSelections(initialSelections.vaccinationSchedules, formData.vaccinationSchedules);
+        const stressChanged = !sameSelections(initialSelections.stressPackSchedules, formData.stressPackSchedules);
+        const templatesChanged = !sameSelections(initialSelections.selectedTemplateIds, formData.selectedTemplateIds);
+        const removal = removesSelection(initialSelections.selectedTemplateIds, formData.selectedTemplateIds) ||
+          removesSelection(initialSelections.vaccinationSchedules, formData.vaccinationSchedules) ||
+          removesSelection(initialSelections.stressPackSchedules, formData.stressPackSchedules);
+        if (removal && !window.confirm("Remove the unselected pending generated reminders/health schedules? Custom fixed-date reminders and completed/administered history will be preserved.")) return;
+        updateFlock.mutate({
+          ...payload,
+          id: editingFlockId,
+          ...(vaccinesChanged ? { vaccinationSchedules: formData.vaccinationSchedules } : {}),
+          ...(stressChanged ? { stressPackSchedules: formData.stressPackSchedules } : {}),
+          ...(templatesChanged ? { selectedTemplateIds: formData.selectedTemplateIds } : {}),
+          ...(removal ? { scheduleRemovalConfirmed: true } : {}),
+        });
+        return;
+      }
+      createFlock.mutate({
+        ...payload,
+        starterFromDay: 0,
         vaccinationProtocol: formData.vaccinationProtocol,
         vaccinationSchedules: formData.vaccinationSchedules,
         stressPackSchedules: formData.stressPackSchedules,
         selectedTemplateIds: formData.selectedTemplateIds,
       });
-      return;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Invalid flock details.");
     }
-    
-    // Create new flock (or copy)
-    createFlock.mutate({
-      flockNumber: formData.flockNumber,
-      houseId: parseInt(formData.houseId),
-      placementDate: new Date(formData.placementDate),
-      initialCount: parseInt(formData.initialCount),
-      targetSlaughterWeight: parseFloat(formData.targetSlaughterWeight),
-      targetDeliveredWeight: formData.targetDeliveredWeight ? parseFloat(formData.targetDeliveredWeight) : undefined,
-      targetCatchingWeight: formData.targetCatchingWeight ? parseFloat(formData.targetCatchingWeight) : undefined,
-      growingPeriod,
-      weightUnit: formData.weightUnit,
-      starterFeedType: formData.starterFeedType,
-      starterFromDay: 0,
-      starterToDay: parseInt(formData.starterToDay),
-      growerFeedType: formData.growerFeedType,
-      growerFromDay: parseInt(formData.growerFromDay),
-      growerToDay: parseInt(formData.growerToDay),
-      finisherFeedType: formData.finisherFeedType,
-      finisherFromDay: parseInt(formData.finisherFromDay),
-      finisherToDay,
-      notes: formData.notes || undefined,
-      vaccinationProtocol: formData.vaccinationProtocol,
-      vaccinationSchedules: formData.vaccinationSchedules,
-      stressPackSchedules: formData.stressPackSchedules,
-      selectedTemplateIds: formData.selectedTemplateIds,
-    });
+  };
+
+  const openEdit = async (flock: NonNullable<typeof flocks>[number]) => {
+    const requestVersion = ++editLoadVersion.current;
+    setEditMode(true);
+    setEditingFlockId(flock.id);
+    setCopyMode(false);
+    setInitialSelections(null);
+    setEditLoadState("loading");
+    setAttachedCustomReminders([]);
+    setDialogOpen(true);
+    try {
+      const placementDate = getFlockPlacementDate(flock.placementDate);
+      const [vacSchedules, spSchedules, selectedTemplateIds, savedReminders] = await Promise.all([
+        utils.flocks.getVaccinationSchedules.fetch({ flockId: flock.id }),
+        utils.flocks.getStressPackSchedules.fetch({ flockId: flock.id }),
+        utils.reminderTemplates.getAppliedTemplates.fetch({ flockId: flock.id }),
+        utils.reminders.list.fetch({ flockId: flock.id }),
+      ]);
+      if (requestVersion !== editLoadVersion.current) return;
+      const vaccinationSchedules = vacSchedules.map(vs => ({ vaccineId: vs.vaccineId, scheduledDay: vs.scheduledDay }));
+      const stressPackSchedules = spSchedules.map(sp => ({ stressPackId: sp.stressPackId, startDay: sp.startDay, endDay: sp.endDay, dosageStrength: sp.dosageStrength as "single" | "double" | "triple" }));
+      // Independent copies: controls may edit schedule objects; the initial snapshot must stay immutable.
+      setInitialSelections({ flockId: flock.id, vaccinationSchedules: vaccinationSchedules.map(v => ({ ...v })), stressPackSchedules: stressPackSchedules.map(v => ({ ...v })), selectedTemplateIds: [...selectedTemplateIds] });
+      setAttachedCustomReminders(savedReminders.filter(reminder => reminder.templateId == null).map(reminder => ({
+        id: reminder.id, title: reminder.title, dueDate: getFlockPlacementDate(reminder.dueDate), status: reminder.status,
+      })));
+      setFormData({
+        flockNumber: flock.flockNumber,
+        houseId: flock.houseId.toString(),
+        placementDate,
+        initialCount: flock.initialCount.toString(),
+        targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
+        targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
+        targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
+        growingPeriod: flock.growingPeriod?.toString() || "42",
+        weightUnit: flock.weightUnit || "kg",
+        starterFeedType: flock.starterFeedType || "premium",
+        starterToDay: flock.starterToDay?.toString() || "10",
+        growerFeedType: flock.growerFeedType || "premium",
+        growerFromDay: flock.growerFromDay?.toString() || "11",
+        growerToDay: flock.growerToDay?.toString() || "24",
+        finisherFeedType: flock.finisherFeedType || "premium",
+        finisherFromDay: flock.finisherFromDay?.toString() || "25",
+        notes: flock.notes || "",
+        vaccinationProtocol: "none",
+        vaccinationSchedules,
+        stressPackSchedules,
+        selectedTemplateIds: [...selectedTemplateIds],
+      });
+      setEditLoadState("ready");
+    } catch (error) {
+      if (requestVersion !== editLoadVersion.current) return;
+      setInitialSelections(null);
+      setEditLoadState("error");
+      toast.error(error instanceof Error && error.message.includes("placement") ? error.message : "Could not load saved reminders or health schedules. Saving is blocked; retry loading.");
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -263,23 +373,15 @@ export default function Flocks() {
   };
 
   const formatDate = (date: Date | string) => {
-    return new Date(date).toLocaleDateString("en-ZA", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    try {
+      return new Date(`${getFlockPlacementDate(date)}T00:00:00Z`).toLocaleDateString("en-ZA", {
+        year: "numeric", month: "short", day: "numeric", timeZone: "UTC",
+      });
+    } catch { return "Invalid placement date"; }
   };
-
   const calculateAge = (placementDate: Date | string) => {
-    // Placement day = Day 0
-    // Use UTC dates to ensure consistent calculation regardless of timezone
-    const placed = new Date(placementDate);
-    const now = new Date();
-    // Get UTC date components only (year, month, day) to avoid timezone issues
-    const placedUTC = Date.UTC(placed.getUTCFullYear(), placed.getUTCMonth(), placed.getUTCDate());
-    const nowUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    const diffDays = Math.floor((nowUTC - placedUTC) / (1000 * 60 * 60 * 24));
-    return diffDays;
+    try { return getFlockAgeDays(placementDate, new Date(), companyTimezone); }
+    catch { return "Invalid placement date"; }
   };
 
   if (flocksLoading) {
@@ -309,9 +411,9 @@ export default function Flocks() {
           <p className="text-muted-foreground">Manage your broiler chicken flocks</p>
         </div>
         {user?.role !== "chicken_house_operator" && (
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) editLoadVersion.current++; setDialogOpen(open); }}>
             <DialogTrigger asChild>
-              <Button>
+              <Button onClick={() => { resetForm(); setEditMode(false); setEditingFlockId(null); setCopyMode(false); }}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Flock
               </Button>
@@ -326,7 +428,16 @@ export default function Flocks() {
                   {editMode ? "Update flock settings" : copyMode ? "Create a copy with modified settings" : "Create a new broiler flock"}
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
+              {editMode && editLoadState !== "ready" && (
+                <div role="alert" className="py-3 text-sm">
+                  {editLoadState === "error" ? "Saved reminders/health schedules could not be loaded. Saving is blocked." : "Loading saved reminders and health schedules…"}
+                  {editLoadState === "error" && <Button type="button" variant="outline" onClick={() => {
+                    const flock = flocks?.find(f => f.id === editingFlockId);
+                    if (flock) return openEdit(flock);
+                  }}>Retry loading saved schedules</Button>}
+                </div>
+              )}
+              <fieldset disabled={editMode && editLoadState !== "ready"} className="grid gap-4 py-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="flockNumber">Flock Number *</Label>
@@ -495,11 +606,11 @@ export default function Flocks() {
                           type="number"
                           value={formData.starterToDay}
                           onChange={(e) => {
-                            const toDay = parseInt(e.target.value);
+                            const toDay = e.target.value;
                             setFormData({ 
                               ...formData, 
                               starterToDay: e.target.value,
-                              growerFromDay: (toDay + 1).toString()
+                              growerFromDay: nextFeedDay(toDay, FLOCK_FORM_DEFAULTS.starterToDay)
                             });
                           }}
                         />
@@ -536,11 +647,11 @@ export default function Flocks() {
                           type="number"
                           value={formData.growerToDay}
                           onChange={(e) => {
-                            const toDay = parseInt(e.target.value);
+                            const toDay = e.target.value;
                             setFormData({ 
                               ...formData, 
                               growerToDay: e.target.value,
-                              finisherFromDay: (toDay + 1).toString()
+                              finisherFromDay: nextFeedDay(toDay, FLOCK_FORM_DEFAULTS.growerToDay)
                             });
                           }}
                         />
@@ -863,6 +974,13 @@ export default function Flocks() {
                     {/* Reminder Templates */}
                     <div className="space-y-2 mt-4">
                       <Label>Reminder Templates</Label>
+                      {editMode && attachedCustomReminders.length > 0 && (
+                        <div className="rounded border p-2 text-xs" aria-label="Attached custom reminders">
+                          <p className="font-medium">Attached custom / non-template reminders (preserved)</p>
+                          {attachedCustomReminders.map(reminder => <p key={reminder.id}>{reminder.title} — {reminder.dueDate} ({reminder.status})</p>)}
+                          <p>These are not template selections. Their fixed dates and history are retained.</p>
+                        </div>
+                      )}
                       <p className="text-xs text-muted-foreground mb-2">
                         Select reminder templates to apply to this flock. Reminders will be created based on the placement date.
                       </p>
@@ -917,12 +1035,12 @@ export default function Flocks() {
                     rows={3}
                   />
                 </div>
-              </div>
+              </fieldset>
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+                <Button type="button" variant="outline" onClick={() => { editLoadVersion.current++; setDialogOpen(false); }}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={createFlock.isPending || updateFlock.isPending}>
+                <Button type="submit" disabled={createFlock.isPending || updateFlock.isPending || (editMode && editLoadState !== "ready")}>
                   {editMode 
                     ? (updateFlock.isPending ? "Updating..." : "Update Flock")
                     : (createFlock.isPending ? "Creating..." : "Create Flock")
@@ -941,7 +1059,7 @@ export default function Flocks() {
             <Activity className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">No flocks found</h3>
             <p className="text-muted-foreground mb-4">Get started by creating your first flock</p>
-            <Button onClick={() => setDialogOpen(true)}>
+            <Button onClick={() => { resetForm(); setEditMode(false); setEditingFlockId(null); setCopyMode(false); setDialogOpen(true); }}>
               <Plus className="mr-2 h-4 w-4" />
               Add Flock
             </Button>
@@ -990,81 +1108,7 @@ export default function Flocks() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={async () => {
-                              try {
-                                setEditMode(true);
-                                setEditingFlockId(flock.id);
-                                setCopyMode(false);
-                              
-                              // Load existing health schedules with error handling
-                              let vacSchedules: any[] = [];
-                              let spSchedules: any[] = [];
-                              
-                              try {
-                                vacSchedules = await utils.flocks.getVaccinationSchedules.fetch({ flockId: flock.id });
-                              } catch (error) {
-                                console.error("Failed to load vaccination schedules:", error);
-                                toast.error("Warning: Could not load vaccination schedules");
-                              }
-                              
-                              try {
-                                spSchedules = await utils.flocks.getStressPackSchedules.fetch({ flockId: flock.id });
-                              } catch (error) {
-                                console.error("Failed to load stress pack schedules:", error);
-                                toast.error("Warning: Could not load stress pack schedules");
-                              }
-                              
-                              // Determine vaccination protocol from schedules
-                              let vacProtocol: "standard" | "premium" | "none" = "none";
-                              if (vacSchedules.length > 0) {
-                                // Check if it's standard (3 vaccines) or premium (more vaccines)
-                                vacProtocol = vacSchedules.length <= 3 ? "standard" : "premium";
-                              }
-                              
-                              // Map stress pack schedules to form format
-                              const spSchedulesForForm = spSchedules.map((sp: any) => ({
-                                stressPackId: sp.stressPackId,
-                                startDay: sp.startDay,
-                                endDay: sp.endDay,
-                                dosageStrength: sp.dosageStrength as "single" | "double" | "triple",
-                              }));
-                              
-                              // Load flock data into form
-                              // Convert vaccination schedules to form format
-                              const vacSchedulesForForm = vacSchedules.map((vs: any) => ({
-                                vaccineId: vs.vaccineId,
-                                scheduledDay: vs.scheduledDay,
-                              }));
-                              
-                              setFormData({
-                                flockNumber: flock.flockNumber,
-                                houseId: flock.houseId.toString(),
-                                placementDate: new Date(flock.placementDate).toISOString().split('T')[0],
-                                initialCount: flock.initialCount.toString(),
-                                targetSlaughterWeight: flock.targetSlaughterWeight || "1.70",
-                                targetDeliveredWeight: flock.targetDeliveredWeight?.toString() || "",
-                                targetCatchingWeight: flock.targetCatchingWeight?.toString() || "",
-                                growingPeriod: flock.growingPeriod?.toString() || "42",
-                                weightUnit: flock.weightUnit || "kg",
-                                starterFeedType: flock.starterFeedType || "premium",
-                                starterToDay: flock.starterToDay?.toString() || "10",
-                                growerFeedType: flock.growerFeedType || "premium",
-                                growerFromDay: flock.growerFromDay?.toString() || "11",
-                                growerToDay: flock.growerToDay?.toString() || "24",
-                                finisherFeedType: flock.finisherFeedType || "premium",
-                                finisherFromDay: flock.finisherFromDay?.toString() || "25",
-                                notes: flock.notes || "",
-                                vaccinationProtocol: vacProtocol,
-                                vaccinationSchedules: vacSchedulesForForm,
-                                stressPackSchedules: spSchedulesForForm,
-                                selectedTemplateIds: [],
-                              });
-                              setDialogOpen(true);
-                            } catch (error) {
-                              console.error("Failed to open edit dialog:", error);
-                              toast.error("Failed to open edit form. Please try again.");
-                            }
-                          }}
+                            onClick={() => openEdit(flock)}
                         >
                           <Edit className="h-4 w-4 mr-1" />
                           Edit
@@ -1075,6 +1119,7 @@ export default function Flocks() {
                             variant="ghost"
                             size="sm"
                             onClick={() => {
+                              editLoadVersion.current++;
                               setCopyMode(true);
                               setEditMode(false);
                               setEditingFlockId(null);

@@ -1,6 +1,7 @@
+import { financialProtectedProcedure as protectedProcedure } from "../financial-data-procedure";
 import { z } from "zod";
 import { notifyOwner } from "./notification";
-import { adminProcedure, publicProcedure, protectedProcedure, router } from "./trpc";
+import { adminProcedure, publicProcedure, router } from "./trpc";
 import * as db from "../db";
 
 export const systemRouter = router({

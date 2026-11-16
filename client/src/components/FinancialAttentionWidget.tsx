@@ -3,6 +3,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, CheckCircle2, Clock3, Landmark, Loader2 } from "lucide-react";
 import { Link } from "wouter";
+import { useModuleViewAccess } from "@/hooks/useModuleViewAccess";
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 
 type AttentionItem = {
   id: string;
@@ -23,7 +25,17 @@ const formatCurrency = (value: unknown) =>
   }).format(Number(value ?? 0));
 
 export default function FinancialAttentionWidget() {
+  const { allowed, loading } = useFinancialVisibility();
+  return allowed && !loading ? <FinancialAttentionContent /> : null;
+}
+
+function FinancialAttentionContent() {
+  const moduleAccess = useModuleViewAccess();
+  const feedAllowed = !moduleAccess.loading && moduleAccess.feed_management;
   const { data: aging, isLoading, isError } = trpc.invoices.getInvoiceAgingSummary.useQuery();
+  // A retained Allow response can include Feed amounts in customer aggregates.
+  // Only the server's explicit filtered-response marker makes it safe on Block.
+  const waitingForFilteredAging = moduleAccess.loading || (!feedAllowed && aging?.feedViewAllowed !== false);
 
   const customer = aging?.customer ?? {
     overdue: 0,
@@ -75,7 +87,7 @@ export default function FinancialAttentionWidget() {
       href: "/invoicing/mill-invoices",
       tone: "upcoming" as const,
     },
-  ].filter((item) => item.count > 0 && item.amount > 0);
+  ].filter((item) => (feedAllowed || !item.id.startsWith("supplier-")) && item.count > 0 && item.amount > 0);
 
   return (
     <Card>
@@ -94,7 +106,7 @@ export default function FinancialAttentionWidget() {
         </Link>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
+        {isLoading || waitingForFilteredAging ? (
           <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading financial attention…
           </div>

@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { VACCINATION_PROTOCOLS } from "./flock-health-protocol";
 import { flockVaccinationSchedules, flockStressPackSchedules, vaccines, stressPacks, users } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 
@@ -18,30 +19,9 @@ export async function createVaccinationSchedulesForFlock(
   const allVaccines = await db.select().from(vaccines);
 
   // Define vaccination protocols
-  const protocols = {
-    standard: [
-      { diseaseType: "newcastle_disease", day: 1, name: "ND LaSota" },
-      { diseaseType: "newcastle_disease", day: 7, name: "ND Hitchner B1" },
-      { diseaseType: "newcastle_disease", day: 21, name: "ND LaSota" },
-      { diseaseType: "infectious_bronchitis", day: 1, name: "IB H120" },
-      { diseaseType: "infectious_bronchitis", day: 14, name: "IB H120" },
-      { diseaseType: "gumboro", day: 14, name: "Gumboro Intermediate" },
-      { diseaseType: "gumboro", day: 28, name: "Gumboro Intermediate" },
-    ],
-    premium: [
-      { diseaseType: "newcastle_disease", day: 1, name: "ND LaSota" },
-      { diseaseType: "newcastle_disease", day: 7, name: "ND Hitchner B1" },
-      { diseaseType: "newcastle_disease", day: 21, name: "ND LaSota" },
-      { diseaseType: "infectious_bronchitis", day: 1, name: "IB H120" },
-      { diseaseType: "infectious_bronchitis", day: 14, name: "IB H120" },
-      { diseaseType: "gumboro", day: 14, name: "Gumboro Intermediate" },
-      { diseaseType: "gumboro", day: 28, name: "Gumboro Intermediate" },
-      { diseaseType: "fowl_pox", day: 7, name: "Fowl Pox" },
-      { diseaseType: "coccidiosis", day: 1, name: "Coccidiosis" },
-    ],
-  };
 
-  const scheduleTemplate = protocols[protocol];
+
+  const scheduleTemplate = VACCINATION_PROTOCOLS[protocol];
   const schedulesToCreate = [];
 
   for (const item of scheduleTemplate) {
@@ -116,7 +96,7 @@ export async function createFlockVaccinationSchedule(data: {
  */
 export async function getFlockVaccinationSchedules(flockId: number) {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) throw new Error("Database not available: health schedules could not be loaded");
 
   const schedules = await db
     .select()
@@ -146,7 +126,7 @@ export async function getFlockVaccinationSchedules(flockId: number) {
  */
 export async function getFlockStressPackSchedules(flockId: number) {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) throw new Error("Database not available: health schedules could not be loaded");
 
   const schedules = await db
     .select()

@@ -1,3 +1,6 @@
+import { canReadFinancialData } from "../business-permission-service";
+import { getCompanySettings } from "../db";
+import { registerStorageProxy } from "./storageProxy";
 import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
@@ -36,6 +39,17 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  registerStorageProxy(app, {
+    async isPublicKey(key) {
+      if (key === 'afgro-dashboard-commercial-chicken-houses_846bfbcf.png') return true;
+      const settings = await getCompanySettings();
+      return typeof settings?.logoUrl === 'string' && settings.logoUrl === '/manus-storage/' + key;
+    },
+    async authorize(req, res) {
+      const context = await createContext({ req, res } as Parameters<typeof createContext>[0]);
+      return !!context.user && await canReadFinancialData(context.user.id);
+    },
+  });
   // OAuth callback under /api/oauth/callback. The route registers only when
   // Manus-specific OAuth environment settings are present.
   // tRPC API

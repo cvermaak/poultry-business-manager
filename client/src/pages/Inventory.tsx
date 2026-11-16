@@ -1,3 +1,4 @@
+import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { formatRand, formatCents, formatNumber } from "@/lib/format";
@@ -14,6 +15,7 @@ import { Plus, Package, MapPin, TrendingDown, Edit, Trash2, AlertTriangle, Histo
 import { toast } from "sonner";
 
 export default function Inventory() {
+  const { allowed } = useFinancialVisibility();
   const [activeTab, setActiveTab] = useState("items");
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
@@ -90,7 +92,7 @@ export default function Inventory() {
   const { data: locations = [], refetch: refetchLocations } = trpc.inventory.listLocations.useQuery({ isActive: true });
   const { data: stockLevels = [], refetch: refetchStockLevels } = trpc.inventory.getAllStockLevels.useQuery();
   const { data: reorderAlerts = [], refetch: refetchReorderAlerts } = trpc.inventory.getReorderAlerts.useQuery();
-  const { data: stockValuation } = trpc.inventory.getStockValuation.useQuery();
+  const { data: stockValuation } = trpc.inventory.getStockValuation.useQuery(undefined, { enabled: allowed });
   const { data: uoms = [] } = trpc.inventory.listUoms.useQuery();
   const { data: itemConversions = [], refetch: refetchConversions } = trpc.inventory.getItemConversions.useQuery(
     { itemId: conversionItemId! },
@@ -265,8 +267,10 @@ export default function Inventory() {
       transactionType,
       quantity,
       uomCode: transactionForm.uomCode || undefined,
-      unitCost: transactionForm.unitCost ? Math.round(parseFloat(transactionForm.unitCost) * 100) : undefined,
-      totalCost: transactionForm.totalCost ? Math.round(parseFloat(transactionForm.totalCost) * 100) : undefined,
+      ...(allowed ? {
+        unitCost: transactionForm.unitCost ? Math.round(parseFloat(transactionForm.unitCost) * 100) : undefined,
+        totalCost: transactionForm.totalCost ? Math.round(parseFloat(transactionForm.totalCost) * 100) : undefined,
+      } : {}),
       referenceNumber: transactionForm.referenceNumber || undefined,
       notes: transactionForm.notes || undefined,
       transactionDate: new Date(),
@@ -295,7 +299,7 @@ export default function Inventory() {
       bagSizeKg: itemForm.bagSizeKg ? parseFloat(itemForm.bagSizeKg) : undefined,
       currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : 0,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
-      unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
+      ...(allowed ? { unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined } : {}),
       locationId: itemForm.locationId ? parseInt(itemForm.locationId) : undefined,
       baseUomCode: itemForm.baseUomCode || undefined,
       purchaseUomCode: itemForm.purchaseUomCode || undefined,
@@ -322,7 +326,7 @@ export default function Inventory() {
       bagSizeKg: itemForm.bagSizeKg ? parseFloat(itemForm.bagSizeKg) : undefined,
       currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : undefined,
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
-      unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined,
+      ...(allowed ? { unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined } : {}),
       baseUomCode: itemForm.baseUomCode || undefined,
       purchaseUomCode: itemForm.purchaseUomCode || undefined,
       issueUomCode: itemForm.issueUomCode || undefined,
@@ -450,10 +454,9 @@ export default function Inventory() {
       "Item",
       "Location",
       "Quantity",
-      "Unit Cost (R)",
-      "Total Cost (R)",
+      ...(allowed ? ["Unit Cost (R)", "Total Cost (R)"] : []),
       "Reference",
-      "Notes",
+      ...(allowed ? ["Notes"] : []),
     ];
 
     // Helper: format number for CSV (space thousands, dot decimal)
@@ -468,10 +471,10 @@ export default function Inventory() {
       transaction.itemName,
       transaction.locationName,
       fmtNum(parseFloat(transaction.quantity || "0")),
-      transaction.unitCost ? fmtNum(parseFloat(transaction.unitCost) / 100) : "",
-      transaction.totalCost ? fmtNum(parseFloat(transaction.totalCost) / 100) : "",
+      ...(allowed ? [transaction.unitCost ? fmtNum(parseFloat(transaction.unitCost) / 100) : "",
+        transaction.totalCost ? fmtNum(parseFloat(transaction.totalCost) / 100) : ""] : []),
       transaction.referenceNumber || "",
-      transaction.notes || "",
+      ...(allowed ? [transaction.notes || ""] : []),
     ]);
 
     const csvContent = [
@@ -569,10 +572,10 @@ export default function Inventory() {
             <History className="h-4 w-4 mr-2" />
             Transaction History
           </TabsTrigger>
-          <TabsTrigger value="valuation">
+          {allowed && (<TabsTrigger value="valuation">
             <TrendingUp className="h-4 w-4 mr-2" />
             Stock Valuation
-          </TabsTrigger>
+          </TabsTrigger>)}
           <TabsTrigger value="units">
             <Ruler className="h-4 w-4 mr-2" />
             Units
@@ -607,7 +610,7 @@ export default function Inventory() {
                     <TableHead>Barcode</TableHead>
                     <TableHead>Brand</TableHead>
                     <TableHead>Total Stock</TableHead>
-                    <TableHead>Unit Cost</TableHead>
+                    {allowed && (<TableHead>Unit Cost</TableHead>)}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -679,9 +682,9 @@ export default function Inventory() {
                           {formatQty(stock.total)} {item.unit}
                           {isLowStock && <AlertTriangle className="inline h-4 w-4 ml-2 text-orange-500" />}
                         </TableCell>
-                        <TableCell>
+                        {allowed && (<TableCell>
                           {item.unitCost ? formatCurrency(item.unitCost / 100) : "-"}
-                        </TableCell>
+                        </TableCell>)}
                         <TableCell className="text-right">
                           <Button variant="ghost" size="sm" title="Manage unit conversions" onClick={() => openConversionDialog(item)}>
                             <Ruler className="h-4 w-4" />
@@ -928,8 +931,8 @@ export default function Inventory() {
                       <TableHead>Item</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead className="text-right">Quantity</TableHead>
-                      <TableHead className="text-right">Unit Cost</TableHead>
-                      <TableHead className="text-right">Total Cost</TableHead>
+                      {allowed && (<TableHead className="text-right">Unit Cost</TableHead>)}
+                      {allowed && (<TableHead className="text-right">Total Cost</TableHead>)}
                       <TableHead>Reference</TableHead>
                       <TableHead>Notes</TableHead>
                     </TableRow>
@@ -937,7 +940,7 @@ export default function Inventory() {
                   <TableBody>
                     {filteredTransactions.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                        <TableCell colSpan={allowed ? 9 : 7} className="text-center text-muted-foreground py-8">
                           No transactions found
                         </TableCell>
                       </TableRow>
@@ -967,16 +970,16 @@ export default function Inventory() {
                           <TableCell className="text-right">
                             {formatQty(transaction.quantity || "0")}
                           </TableCell>
-                          <TableCell className="text-right">
+                          {allowed && (<TableCell className="text-right">
                             {transaction.unitCost
                               ? formatCurrency(parseFloat(String(transaction.unitCost)) / 100)
                               : "-"}
-                          </TableCell>
-                          <TableCell className="text-right">
+                          </TableCell>)}
+                          {allowed && (<TableCell className="text-right">
                             {transaction.totalCost
                               ? formatCurrency(parseFloat(String(transaction.totalCost)) / 100)
                               : "-"}
-                          </TableCell>
+                          </TableCell>)}
                           <TableCell>{(transaction as any).referenceNumber || "-"}</TableCell>
                           <TableCell className="max-w-xs truncate">
                             {transaction.notes || "-"}
@@ -1019,7 +1022,7 @@ export default function Inventory() {
                       </p>
                     </CardContent>
                   </Card>
-                  <Card>
+                  {allowed && (<Card>
                     <CardHeader className="pb-2">
                       <CardDescription>Total Value</CardDescription>
                     </CardHeader>
@@ -1033,7 +1036,7 @@ export default function Inventory() {
                         )}
                       </p>
                     </CardContent>
-                  </Card>
+                  </Card>)}
                 </div>
               )}
             </CardContent>
@@ -1041,7 +1044,7 @@ export default function Inventory() {
         </TabsContent>
 
         {/* Stock Valuation Tab */}
-        <TabsContent value="valuation">
+        {allowed && (<TabsContent value="valuation">
           <div className="space-y-6">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1259,7 +1262,7 @@ export default function Inventory() {
               </CardContent>
             </Card>
           </div>
-        </TabsContent>
+        </TabsContent>)}
 
         {/* Units of Measure Tab */}
         <TabsContent value="units">
@@ -1429,6 +1432,7 @@ export default function Inventory() {
                         <SelectItem value="G">G - Granule</SelectItem>
                         <SelectItem value="D">D - Dust/Powder</SelectItem>
                         <SelectItem value="INJ">INJ - Injectable</SelectItem>
+                        <SelectItem value="LMP">LMP - Lump (pea coal)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1703,7 +1707,7 @@ export default function Inventory() {
                     placeholder="100"
                   />
                 </div>
-                <div className="space-y-2">
+                {allowed && (<div className="space-y-2">
                   <Label htmlFor="unitCost">Unit Cost (R)</Label>
                   <Input
                     id="unitCost"
@@ -1713,7 +1717,7 @@ export default function Inventory() {
                     onChange={(e) => setItemForm({ ...itemForm, unitCost: e.target.value })}
                     placeholder="25.50"
                   />
-                </div>
+                </div>)}
               </div>
             </div>
           </div>
@@ -1857,7 +1861,7 @@ export default function Inventory() {
             )}
 
             {/* Receipt: Unit Cost */}
-            {transactionType === "receipt" && (
+            {allowed && transactionType === "receipt" && (
               <div>
                 <Label htmlFor="unitCost">Unit Cost</Label>
                 <Input

@@ -76,6 +76,7 @@ export const FORMS = {
   G: 'Granule',
   D: 'Dust/Powder',
   INJ: 'Injectable',
+  LMP: 'Lump (pea coal)',
 } as const;
 
 // Type exports

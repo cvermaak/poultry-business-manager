@@ -25,6 +25,7 @@ export interface NavigationModuleLink {
   readonly href: string;
   readonly icon: NavigationIcon;
   readonly roles: readonly NavigationRole[];
+  readonly requiresFinancialAccess?: boolean;
 }
 
 export interface NavigationModule {
@@ -59,6 +60,7 @@ export const NAVIGATION_MODULES = {
         href: "/feed-management/mill-costs",
         icon: "mill-costs",
         roles: ["admin", "farm_manager"],
+        requiresFinancialAccess: true,
       },
       {
         id: "customer-prices",
@@ -67,6 +69,7 @@ export const NAVIGATION_MODULES = {
         href: "/feed-management/customer-pricing",
         icon: "customer-prices",
         roles: ["admin", "farm_manager"],
+        requiresFinancialAccess: true,
       },
       {
         id: "feed-orders",
@@ -107,10 +110,12 @@ export function canAccessNavigationModule(
 export function getVisibleModuleLinks(
   moduleKey: NavigationModuleKey,
   role?: string,
+  financialAllowed = true,
 ): readonly NavigationModuleLink[] {
   if (!canAccessNavigationModule(moduleKey, role)) return [];
 
   return getNavigationModule(moduleKey).links.filter(link =>
-    link.roles.some(allowedRole => allowedRole === role),
+    link.roles.some(allowedRole => allowedRole === role) &&
+    (!link.requiresFinancialAccess || financialAllowed),
   );
 }

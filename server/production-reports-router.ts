@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "./_core/trpc";
+import { router } from "./_core/trpc";
+import { financialProtectedProcedure as protectedProcedure } from "./financial-data-procedure";
 import { canReadProductionReports, type ResolvedFlockPerformanceFilters } from "../shared/production-reports";
 import { isProductionDate, productionToday } from "../shared/production-report-dates";
 import { readProductionReportSource } from "./production-reports-db";
