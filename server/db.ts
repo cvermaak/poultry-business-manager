@@ -1,3 +1,4 @@
+import { resolveInventoryStock } from "./inventory-stock-mapping";
 import { eq, and, gte, lte, lt, desc, asc, sql, or, like, inArray, isNotNull, isNull, getTableColumns } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
@@ -5749,6 +5750,7 @@ export async function setAdditiveMapping(
 export async function getInventoryItemStock(inventoryItemId: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
+  const inventoryStock = await resolveInventoryStock(db);
   const rows = await db
     .select({ qty: inventoryStock.quantity })
     .from(inventoryStock)
@@ -5769,6 +5771,7 @@ export async function checkAdditiveStockForOrder(params: {
 }) {
   const db = await getDb();
   if (!db) return null;
+  const inventoryStock = await resolveInventoryStock(db);
 
   const mappings = await getAdditiveMappings();
   const mappingByType = Object.fromEntries(mappings.map(m => [m.additiveType, m]));
@@ -5882,6 +5885,7 @@ export async function reserveAdditiveStock(params: {
 }) {
   const db = await getDb();
   if (!db) return;
+  const inventoryStock = await resolveInventoryStock(db);
 
   const mappings = await getAdditiveMappings();
   const mappingByType = Object.fromEntries(mappings.map(m => [m.additiveType, m]));
