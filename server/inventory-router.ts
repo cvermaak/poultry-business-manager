@@ -47,19 +47,19 @@ export const inventoryRouter = router({
         model: z.string().optional(),
         category: z.enum(["live_birds", "feed", "raw_materials", "supplies", "equipment"]),
         unit: z.string(),
-        bagSizeKg: z.number().optional(),
-        currentStock: z.number().optional(),
-        reorderPoint: z.number().optional(),
-        unitCost: z.number().optional(),
-        locationId: z.number().optional(),
+        bagSizeKg: z.number().finite().optional(),
+        currentStock: z.number().finite().nonnegative("Initial stock cannot be negative").optional(),
+        reorderPoint: z.number().finite().optional(),
+        unitCost: z.number().finite().int("Unit cost must be whole cents").min(-2147483648).max(2147483647).optional(),
+        locationId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
         // UoM fields
         baseUomCode: z.string().optional(),
         purchaseUomCode: z.string().optional(),
         issueUomCode: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      return await inventoryDb.createInventoryItem(input);
+    .mutation(async ({ input, ctx }) => {
+      return await inventoryDb.createInventoryItem(input, ctx.user.id);
     }),
 
   updateItem: protectedProcedure

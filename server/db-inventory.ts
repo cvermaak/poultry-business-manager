@@ -1,7 +1,8 @@
 import { getDb, mysqlTimestamp } from "./db";
-import { inventoryItems, inventoryLocations, inventoryStock, inventoryTransactions } from "../drizzle/schema";
+import { inventoryItems, inventoryLocations, inventoryTransactions } from "../drizzle/schema";
 import { eq, and, sql, desc, gte, lte, like, gt } from "drizzle-orm";
-import { formatSKU } from "../shared/sku-constants";
+import { resolveInventoryStock } from "./inventory-stock-mapping";
+import { executeInventoryItemCreate, type CreateInventoryItemInput } from "./inventory-create-executor";
 
 // ============================================================================
 // UNITS OF MEASURE HELPERS
@@ -229,177 +230,10 @@ export async function getInventoryItem(id: number) {
   return item || null;
 }
 
-export async function createInventoryItem(data: {
-  itemNumber?: string; // Optional - will be auto-generated if primaryClass/subType/form provided
-  primaryClass?: string;
-  subType?: string;
-  form?: string;
-  name: string;
-  longDescription?: string;
-  itemStatus?: "active" | "inactive" | "discontinued" | "obsolete";
-  itemType?: "stocked_item" | "non_stocked" | "service" | "raw_material" | "finished_good" | "consumable";
-  barcode?: string;
-  manufacturerPartNumber?: string;
-  internalReference?: string;
-  supplierPartNumber?: string;
-  brand?: string;
-  model?: string;
-  category: string;
-  unit: string;
-  bagSizeKg?: number;
-  reorderPoint?: number;
-  unitCost?: number;
-  currentStock?: number;
-  locationId?: number;
-  // UoM fields
-  baseUomCode?: string;
-  purchaseUomCode?: string;
-  issueUomCode?: string;
-}) {
+export async function createInventoryItem(data: CreateInventoryItemInput, actorId: number) {
   const db = await getDb();
-  if (!db) return null;
-
-  // Validate barcode uniqueness if provided
-  if (data.barcode) {
-    const isUnique = await validateBarcodeUniqueness(data.barcode);
-    if (!isUnique) {
-      throw new Error("Barcode already exists");
-    }
-  }
-
-  // Auto-generate SKU if components provided
-  let itemNumber = data.itemNumber;
-  if (data.primaryClass && data.subType && data.form) {
-    const seqNumber = await getNextSequentialNumber(
-      data.primaryClass,
-      data.subType,
-      data.form
-    );
-    itemNumber = formatSKU(data.primaryClass, data.subType, data.form, seqNumber);
-  }
-
-  if (!itemNumber) {
-    throw new Error("Either itemNumber or (primaryClass + subType + form) must be provided");
-  }
-
-  const insertData: any = {
-    itemNumber,
-    name: data.name,
-    category: data.category,
-    unit: data.unit,
-    itemStatus: data.itemStatus || "active",
-    itemType: data.itemType || "stocked_item",
-  };
-
-  // Add SKU component fields
-  if (data.primaryClass) insertData.primaryClass = data.primaryClass;
-  if (data.subType) insertData.subType = data.subType;
-  if (data.form) insertData.form = data.form;
-
-  // Add optional SKU Identity Block fields
-  if (data.longDescription) insertData.longDescription = data.longDescription;
-  if (data.barcode) insertData.barcode = data.barcode;
-  if (data.manufacturerPartNumber) insertData.manufacturerPartNumber = data.manufacturerPartNumber;
-  if (data.internalReference) insertData.internalReference = data.internalReference;
-  if (data.supplierPartNumber) insertData.supplierPartNumber = data.supplierPartNumber;
-  if (data.brand) insertData.brand = data.brand;
-  if (data.model) insertData.model = data.model;
-
-  if (data.bagSizeKg !== undefined) {
-    insertData.bagSizeKg = data.bagSizeKg.toString();
-  }
-  if (data.reorderPoint !== undefined) {
-    insertData.reorderPoint = data.reorderPoint.toString();
-  }
-  if (data.unitCost !== undefined) {
-    insertData.unitCost = data.unitCost;
-  }
-  if (data.currentStock !== undefined) {
-    insertData.currentStock = data.currentStock.toString();
-  }
-  // UoM fields — default baseUomCode to unit if not provided
-  insertData.baseUomCode = data.baseUomCode || data.unit || null;
-  if (data.purchaseUomCode) insertData.purchaseUomCode = data.purchaseUomCode;
-  if (data.issueUomCode) insertData.issueUomCode = data.issueUomCode;
-
-  let result;
-  try {
-    result = await db.insert(inventoryItems).values(insertData);
-  } catch (err: any) {
-    // Handle duplicate itemNumber (e.g. re-creating a previously soft-deleted item)
-    if (err?.code === 'ER_DUP_ENTRY' || (err?.message && err.message.includes('Duplicate entry'))) {
-      throw new Error(`An item with item number '${itemNumber}' already exists. If you previously deleted this item, please contact an admin to restore or permanently remove it.`);
-    }
-    throw err;
-  }
-  
-  // Fetch the created item to get all fields including defaults
-  const insertId = Number(result[0].insertId);
-  const [createdItem] = await db
-    .select()
-    .from(inventoryItems)
-    .where(eq(inventoryItems.id, insertId));
-  
-  // If currentStock > 0, create initial stock transaction
-  if (data.currentStock && data.currentStock > 0) {
-    let targetLocationId = data.locationId;
-    
-    // If no locationId provided, get or create default location ("Main Warehouse")
-    if (!targetLocationId) {
-      let defaultLocation = await db
-        .select()
-        .from(inventoryLocations)
-        .where(eq(inventoryLocations.name, "Main Warehouse"))
-        .limit(1);
-      
-      if (defaultLocation.length === 0) {
-        // Create default location
-        await db.insert(inventoryLocations).values({
-          name: "Main Warehouse",
-          locationType: "warehouse",
-          description: "Default storage location",
-          isActive: 1,
-        });
-        defaultLocation = await db
-          .select()
-          .from(inventoryLocations)
-          .where(eq(inventoryLocations.name, "Main Warehouse"))
-          .limit(1);
-      }
-      
-      targetLocationId = defaultLocation[0].id;
-    }
-    
-    const locationId = targetLocationId;
-    
-    // Create or update stock level for the location
-    await db.insert(inventoryStock).values({
-      itemId: insertId,
-      locationId,
-      quantity: data.currentStock.toString(),
-      updatedBy: 1, // System user
-    });
-
-    // Record an initial receipt transaction so FIFO costing has all stock layers
-    const initialUnitCost = data.unitCost ?? null;
-    const initialTotalCost = initialUnitCost !== null
-      ? Math.round(initialUnitCost * data.currentStock)
-      : null;
-    await db.insert(inventoryTransactions).values({
-      itemId: insertId,
-      locationId,
-      transactionType: "receipt",
-      quantity: data.currentStock.toString(),
-      unitCost: initialUnitCost,
-      totalCost: initialTotalCost,
-      referenceType: "initial_stock",
-      notes: "Initial stock on item creation",
-      transactionDate: mysqlTimestamp(),
-      createdBy: 1,
-    });
-  }
-  
-  return createdItem || null;
+  if (!db) throw new Error("Database not available");
+  return executeInventoryItemCreate(db, data, actorId);
 }
 
 export async function updateInventoryItem(
@@ -530,6 +364,7 @@ export async function updateInventoryLocation(
 export async function getStockByLocation(itemId: number, locationId: number) {
   const db = await getDb();
   if (!db) return null;
+  const inventoryStock = await resolveInventoryStock(db);
 
   const [stock] = await db
     .select()
@@ -542,6 +377,7 @@ export async function getStockByLocation(itemId: number, locationId: number) {
 export async function getStockByItem(itemId: number) {
   const db = await getDb();
   if (!db) return [];
+  const inventoryStock = await resolveInventoryStock(db);
 
   const stocks = await db
     .select({
@@ -563,6 +399,7 @@ export async function getStockByItem(itemId: number) {
 export async function getAllStockLevels() {
   const db = await getDb();
   if (!db) return [];
+  const inventoryStock = await resolveInventoryStock(db);
 
   const stocks = await db
     .select({
@@ -594,6 +431,7 @@ export async function updateStock(
 ) {
   const db = await getDb();
   if (!db) return false;
+  const inventoryStock = await resolveInventoryStock(db);
 
   // Check if stock record exists
   const existing = await getStockByLocation(itemId, locationId);
@@ -628,6 +466,7 @@ export async function updateStock(
 async function getStockLevel(itemId: number, locationId: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
+  const inventoryStock = await resolveInventoryStock(db);
 
   const [stock] = await db
     .select()
@@ -650,6 +489,7 @@ async function updateStockLevel(
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database connection failed");
+  const inventoryStock = await resolveInventoryStock(db);
 
   const currentStock = await getStockLevel(itemId, locationId);
   const newStock = operation === "add" 
@@ -703,6 +543,7 @@ async function setStockLevel(
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database connection failed");
+  const inventoryStock = await resolveInventoryStock(db);
 
   // Check if stock record exists
   const [existing] = await db
@@ -977,6 +818,7 @@ export async function getTransactionHistory(
 export async function getReorderAlerts() {
   const db = await getDb();
   if (!db) return [];
+  const inventoryStock = await resolveInventoryStock(db);
 
   // Get items where total stock across all locations is below reorder point
   const alerts = await db
@@ -1160,6 +1002,7 @@ export async function searchInventoryItems(
 export async function getStockValuation() {
   const db = await getDb();
   if (!db) throw new Error("Database connection failed");
+  const inventoryStock = await resolveInventoryStock(db);
 
   // Get all stock with item details
   const stockWithDetails = await db

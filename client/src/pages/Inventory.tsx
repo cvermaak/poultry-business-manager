@@ -1,3 +1,4 @@
+import { hydrateInventoryClassification, inventoryClassificationUpdate } from "@/lib/inventory-classification";
 import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -40,8 +41,8 @@ export default function Inventory() {
     form: "",
     name: "",
     longDescription: "",
-    itemStatus: "active" as "active" | "inactive" | "discontinued" | "obsolete",
-    itemType: "stocked_item" as "stocked_item" | "non_stocked" | "service" | "raw_material" | "finished_good" | "consumable",
+    itemStatus: "active" as "" | "active" | "inactive" | "discontinued" | "obsolete",
+    itemType: "stocked_item" as "" | "stocked_item" | "non_stocked" | "service" | "raw_material" | "finished_good" | "consumable",
     barcode: "",
     manufacturerPartNumber: "",
     internalReference: "",
@@ -280,6 +281,10 @@ export default function Inventory() {
   };
 
   const handleCreateItem = () => {
+    if (!itemForm.itemStatus || !itemForm.itemType) {
+      toast.error("Choose status and type for a new item");
+      return;
+    }
     createItemMutation.mutate({
       primaryClass: itemForm.primaryClass || undefined,
       subType: itemForm.subType || undefined,
@@ -313,8 +318,7 @@ export default function Inventory() {
       id: editingItem.id,
       name: itemForm.name,
       longDescription: itemForm.longDescription || undefined,
-      itemStatus: itemForm.itemStatus,
-      itemType: itemForm.itemType,
+      ...inventoryClassificationUpdate(itemForm),
       barcode: itemForm.barcode || undefined,
       manufacturerPartNumber: itemForm.manufacturerPartNumber || undefined,
       internalReference: itemForm.internalReference || undefined,
@@ -342,8 +346,7 @@ export default function Inventory() {
       form: item.form || "",
       name: item.name,
       longDescription: item.longDescription || "",
-      itemStatus: item.itemStatus || "active",
-      itemType: item.itemType || "stocked_item",
+      ...hydrateInventoryClassification(item),
       barcode: item.barcode || "",
       manufacturerPartNumber: item.manufacturerPartNumber || "",
       internalReference: item.internalReference || "",
@@ -636,7 +639,9 @@ export default function Inventory() {
                         <TableCell>
                           <Badge
                             className={
-                              item.itemStatus === "active"
+                              !item.itemStatus
+                                ? "bg-gray-100 text-gray-800"
+                                : item.itemStatus === "active"
                                 ? "bg-green-100 text-green-800"
                                 : item.itemStatus === "inactive"
                                 ? "bg-gray-100 text-gray-800"
@@ -645,12 +650,12 @@ export default function Inventory() {
                                 : "bg-red-100 text-red-800"
                             }
                           >
-                            {item.itemStatus || "active"}
+                            {item.itemStatus || "Unclassified"}
                           </Badge>
                         </TableCell>
                         <TableCell>
                           <span className="text-sm text-muted-foreground">
-                            {item.itemType?.replace("_", " ") || "stocked item"}
+                            {item.itemType?.replace("_", " ") || "Unclassified"}
                           </span>
                         </TableCell>
                         <TableCell>
@@ -1494,7 +1499,7 @@ export default function Inventory() {
                   <Label htmlFor="itemStatus">Item Status</Label>
                   <Select value={itemForm.itemStatus} onValueChange={(value: any) => setItemForm({ ...itemForm, itemStatus: value })}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Unclassified — choose to classify" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="active">Active</SelectItem>
@@ -1508,7 +1513,7 @@ export default function Inventory() {
                   <Label htmlFor="itemType">Item Type</Label>
                   <Select value={itemForm.itemType} onValueChange={(value: any) => setItemForm({ ...itemForm, itemType: value })}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Unclassified — choose to classify" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="stocked_item">Stocked Item</SelectItem>
