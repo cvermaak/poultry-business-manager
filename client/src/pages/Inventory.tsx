@@ -1,6 +1,7 @@
 import { hydrateInventoryClassification, inventoryClassificationUpdate } from "@/lib/inventory-classification";
 import { useFinancialVisibility } from "@/hooks/useFinancialVisibility";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { buildStockEditAdjustment, emptyStockEdit, isConfirmedInventoryUpdate, readStockEditTotal, selectStockEditLocation, type StockEditDraft } from "@/lib/inventory-stock-edit";
 import { trpc } from "@/lib/trpc";
 import { formatRand, formatCents, formatNumber } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,8 @@ export default function Inventory() {
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [transactionDialogOpen, setTransactionDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
+  const [stockEdit, setStockEdit] = useState<StockEditDraft>(() => emptyStockEdit());
+  const updateItemSubmitting = useRef(false);
   const [selectedStock, setSelectedStock] = useState<any>(null);
   const [transactionType, setTransactionType] = useState<"receipt" | "issue" | "transfer" | "adjustment">("receipt");
   // Conversion management dialog state
@@ -91,7 +94,9 @@ export default function Inventory() {
   // Queries
   const { data: items = [], refetch: refetchItems } = trpc.inventory.listItems.useQuery({ isActive: true });
   const { data: locations = [], refetch: refetchLocations } = trpc.inventory.listLocations.useQuery({ isActive: true });
-  const { data: stockLevels = [], refetch: refetchStockLevels } = trpc.inventory.getAllStockLevels.useQuery();
+  const stockLevelsQuery = trpc.inventory.getAllStockLevels.useQuery(undefined, { staleTime: 30_000 });
+  const { data: stockLevels = [], refetch: refetchStockLevels } = stockLevelsQuery;
+  const stockEditContext = { stockQuery: stockLevelsQuery, locations };
   const { data: reorderAlerts = [], refetch: refetchReorderAlerts } = trpc.inventory.getReorderAlerts.useQuery();
   const { data: stockValuation } = trpc.inventory.getStockValuation.useQuery(undefined, { enabled: allowed });
   const { data: uoms = [] } = trpc.inventory.listUoms.useQuery();
@@ -125,15 +130,27 @@ export default function Inventory() {
   });
 
   const updateItemMutation = trpc.inventory.updateItem.useMutation({
-    onSuccess: () => {
+    retry: false, // An unknown commit must never be automatically retried.
+    onSuccess: (result) => {
+      if (!isConfirmedInventoryUpdate(result)) {
+        toast.error("Item update was not confirmed. Draft kept; verify stock and history before retrying.");
+        return;
+      }
       toast.success("Item updated successfully");
       setItemDialogOpen(false);
       setEditingItem(null);
       resetItemForm();
-      refetchItems();
+      utils.inventory.listItems.invalidate();
+      utils.inventory.getAllStockLevels.invalidate();
+      utils.inventory.getTransactionHistory.invalidate();
+      utils.inventory.getStockValuation.invalidate();
+      utils.inventory.getReorderAlerts.invalidate();
     },
     onError: (error) => {
-      toast.error(`Failed to update item: ${error.message}`);
+      toast.error(`Item update failed or was not confirmed: ${error.message}. Draft kept; verify stock and history before retrying.`);
+    },
+    onSettled: () => {
+      updateItemSubmitting.current = false;
     },
   });
 
@@ -197,6 +214,7 @@ export default function Inventory() {
   });
 
   const resetItemForm = () => {
+    setStockEdit(emptyStockEdit());
     setItemForm({
       itemNumber: "",
       primaryClass: "",
@@ -313,7 +331,13 @@ export default function Inventory() {
   };
 
   const handleUpdateItem = () => {
-    if (!editingItem) return;
+    if (!editingItem || updateItemMutation.isPending || updateItemSubmitting.current) return;
+    const adjustment = buildStockEditAdjustment(editingItem.id, stockEdit, stockEditContext);
+    if (!adjustment.ok) {
+      toast.error(adjustment.error);
+      return;
+    }
+    updateItemSubmitting.current = true;
     updateItemMutation.mutate({
       id: editingItem.id,
       name: itemForm.name,
@@ -328,7 +352,7 @@ export default function Inventory() {
       category: itemForm.category,
       unit: itemForm.baseUomCode || itemForm.unit, // Keep unit in sync with baseUomCode
       bagSizeKg: itemForm.bagSizeKg ? parseFloat(itemForm.bagSizeKg) : undefined,
-      currentStock: itemForm.currentStock ? parseFloat(itemForm.currentStock) : undefined,
+      ...(adjustment.value ? { stockAdjustment: adjustment.value } : {}),
       reorderPoint: itemForm.reorderPoint ? parseFloat(itemForm.reorderPoint) : undefined,
       ...(allowed ? { unitCost: itemForm.unitCost ? Math.round(parseFloat(itemForm.unitCost) * 100) : undefined } : {}),
       baseUomCode: itemForm.baseUomCode || undefined,
@@ -338,6 +362,8 @@ export default function Inventory() {
   };
 
   const handleEditItem = (item: any) => {
+    if (updateItemSubmitting.current) return;
+    setStockEdit(emptyStockEdit(item.id));
     setEditingItem(item);
     setItemForm({
       itemNumber: item.itemNumber,
@@ -356,7 +382,7 @@ export default function Inventory() {
       category: item.category,
       unit: item.unit,
       bagSizeKg: item.bagSizeKg || "",
-      currentStock: item.currentStock || "",
+      currentStock: "", // Creation field only; never hydrate Edit from inventory_items.currentStock.
       reorderPoint: item.reorderPoint || "",
       unitCost: item.unitCost ? (item.unitCost / 100).toFixed(2) : "",
       locationId: "",
@@ -365,6 +391,25 @@ export default function Inventory() {
       issueUomCode: item.issueUomCode || "",
     });
     setItemDialogOpen(true);
+  };
+
+  const handleStockEditLocation = (locationId: string) => {
+    if (!editingItem || updateItemSubmitting.current) return;
+    const selected = selectStockEditLocation(editingItem.id, locationId, stockEditContext);
+    if (!selected.ok) {
+      toast.error(selected.error);
+      return;
+    }
+    setStockEdit(selected.value); // Explicit location changes start a new observed snapshot.
+  };
+
+  const handleItemDialogOpenChange = (open: boolean) => {
+    if (!open && updateItemSubmitting.current) return;
+    setItemDialogOpen(open);
+    if (!open) {
+      setEditingItem(null);
+      resetItemForm();
+    }
   };
 
   const openConversionDialog = (item: any) => {
@@ -512,6 +557,9 @@ export default function Inventory() {
     });
     return acc;
   }, {} as Record<number, { total: number; locations: Array<{ locationName: string; quantity: number }> }>);
+
+  const editStockTotal = editingItem ? readStockEditTotal(editingItem.id, stockEditContext) : null;
+  const editStockUnit = editingItem?.baseUomCode || editingItem?.unit || "";
 
   return (
     <div className="container py-6">
@@ -1324,7 +1372,7 @@ export default function Inventory() {
       </Tabs>
 
       {/* Add/Edit Item Dialog */}
-      <Dialog open={itemDialogOpen} onOpenChange={setItemDialogOpen}>
+      <Dialog open={itemDialogOpen} onOpenChange={handleItemDialogOpenChange}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingItem ? "Edit Item" : "Add New Item"}</DialogTitle>
@@ -1670,6 +1718,42 @@ export default function Inventory() {
             <div>
               <h3 className="text-sm font-semibold mb-3 text-muted-foreground">Inventory Management</h3>
               <div className="grid grid-cols-3 gap-4">
+                {editingItem ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="editItemTotal">Item Total (read-only)</Label>
+                      <Input id="editItemTotal" readOnly value={editStockTotal?.ok ? `${formatQty(editStockTotal.value)} ${editStockUnit}` : "Stock total unavailable"} />
+                      <p className="text-xs text-muted-foreground">Sum across all locations; not an editable quantity.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="editStockLocation">Adjust Location (optional)</Label>
+                      <Select value={stockEdit.locationId || "_none"} onValueChange={(value) => handleStockEditLocation(value === "_none" ? "" : value)} disabled={updateItemMutation.isPending}>
+                        <SelectTrigger id="editStockLocation">
+                          <SelectValue placeholder="Choose a location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="_none">No stock change</SelectItem>
+                          {locations.map((loc: any) => (
+                            <SelectItem key={loc.id} value={loc.id.toString()}>{loc.name} ({loc.locationType})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">{stockEdit.snapshot ? `Observed location quantity: ${stockEdit.snapshot.expectedQuantity} ${editStockUnit}` : "Choose a location to load its actual quantity."}</p>
+                      <Button type="button" variant="outline" size="sm" disabled={updateItemMutation.isPending || stockLevelsQuery.isFetching} onClick={() => { void refetchStockLevels(); }}>Refresh stock</Button>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="editStockQuantity">New Location Quantity ({editStockUnit})</Label>
+                      <Input id="editStockQuantity" type="number" min="0" step="0.01" value={stockEdit.quantity} disabled={updateItemMutation.isPending} onChange={(e) => setStockEdit({ ...stockEdit, quantity: e.target.value, quantityEdited: true })} placeholder="Choose a location first" />
+                      <p className="text-xs text-muted-foreground">Absolute new quantity for the selected location, in the item's stored base unit. Zero is allowed.</p>
+                    </div>
+                    <div className="col-span-3 space-y-2">
+                      <Label htmlFor="editStockReason">Reason (required only when quantity changes)</Label>
+                      <Input id="editStockReason" value={stockEdit.reason} disabled={updateItemMutation.isPending} onChange={(e) => setStockEdit({ ...stockEdit, reason: e.target.value })} placeholder="Reason for correcting this location's stock" />
+                      <p className="text-xs text-muted-foreground">1–500 characters after trimming. Metadata-only saves do not adjust stock.</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
                 <div className="space-y-2">
                   <Label htmlFor="currentStock">Current Stock *</Label>
                   <Input
@@ -1701,6 +1785,8 @@ export default function Inventory() {
                   </Select>
                   <p className="text-xs text-muted-foreground">Where stock is stored</p>
                 </div>
+                  </>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="reorderPoint">Reorder Point</Label>
                   <Input
@@ -1727,11 +1813,11 @@ export default function Inventory() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setItemDialogOpen(false); setEditingItem(null); }}>
+            <Button variant="outline" disabled={!!editingItem && updateItemMutation.isPending} onClick={() => handleItemDialogOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={editingItem ? handleUpdateItem : handleCreateItem}>
-              {editingItem ? "Update" : "Create"}
+            <Button disabled={!!editingItem && updateItemMutation.isPending} onClick={editingItem ? handleUpdateItem : handleCreateItem}>
+              {editingItem ? (updateItemMutation.isPending ? "Updating…" : "Update") : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

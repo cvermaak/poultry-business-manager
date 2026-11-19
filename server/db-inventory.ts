@@ -1,3 +1,4 @@
+import { executeInventoryItemUpdate, type UpdateInventoryItemInput } from "./inventory-item-update-executor";
 import { getDb, mysqlTimestamp } from "./db";
 import { inventoryItems, inventoryLocations, inventoryTransactions } from "../drizzle/schema";
 import { eq, and, sql, desc, gte, lte, like, gt } from "drizzle-orm";
@@ -238,72 +239,17 @@ export async function createInventoryItem(data: CreateInventoryItemInput, actorI
 
 export async function updateInventoryItem(
   id: number,
-  data: {
-    itemNumber?: string; // Will be validated for immutability
-    name?: string;
-    longDescription?: string;
-    itemStatus?: "active" | "inactive" | "discontinued" | "obsolete";
-    itemType?: "stocked_item" | "non_stocked" | "service" | "raw_material" | "finished_good" | "consumable";
-    barcode?: string;
-    manufacturerPartNumber?: string;
-    internalReference?: string;
-    supplierPartNumber?: string;
-    brand?: string;
-    model?: string;
-    category?: string;
-    unit?: string;
-    bagSizeKg?: number;
-    reorderPoint?: number;
-    unitCost?: number;
-    currentStock?: number;
-    isActive?: boolean;
-    // UoM fields
-    baseUomCode?: string;
-    purchaseUomCode?: string;
-    issueUomCode?: string;
-  }
+  data: UpdateInventoryItemInput,
+  actorId: number,
 ) {
+  // Reject the deprecated field even for non-tRPC callers; never silently
+  // write a stale metadata total. Creation remains on its existing path.
+  if (Object.prototype.hasOwnProperty.call(data, "currentStock")) {
+    throw new Error("currentStock cannot be edited on an existing item; use stockAdjustment for one location");
+  }
   const db = await getDb();
-  if (!db) return false;
-
-  // Validate SKU immutability - itemNumber cannot be changed
-  if (data.itemNumber) {
-    const isValid = await validateItemNumberImmutability(id, data.itemNumber);
-    if (!isValid) {
-      throw new Error("Item number (SKU) cannot be changed after creation");
-    }
-    // Remove from update data since it shouldn't change
-    delete data.itemNumber;
-  }
-
-  // Validate barcode uniqueness if being updated
-  if (data.barcode) {
-    const isUnique = await validateBarcodeUniqueness(data.barcode, id);
-    if (!isUnique) {
-      throw new Error("Barcode already exists");
-    }
-  }
-
-  const updateData: any = { ...data };
-  if (data.bagSizeKg !== undefined) {
-    updateData.bagSizeKg = data.bagSizeKg.toString();
-  }
-  if (data.reorderPoint !== undefined) {
-    updateData.reorderPoint = data.reorderPoint.toString();
-  }
-  if (data.currentStock !== undefined) {
-    updateData.currentStock = data.currentStock.toString();
-  }
-  // UoM fields are passed through directly (they are varchar columns)
-  // baseUomCode, purchaseUomCode, issueUomCode already in updateData via spread
-
-  // If no fields to update (e.g., only itemNumber was provided and was removed), return success
-  if (Object.keys(updateData).length === 0) {
-    return true;
-  }
-
-  await db.update(inventoryItems).set(updateData).where(eq(inventoryItems.id, id));
-  return true;
+  if (!db) throw new Error("Database not available");
+  return executeInventoryItemUpdate(db, id, data, actorId);
 }
 
 export async function deleteInventoryItem(id: number) {
