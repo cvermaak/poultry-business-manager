@@ -1296,7 +1296,7 @@ export default function Inventory() {
                           {formatQty(item.quantity)} {item.unit}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {item.unitCost ? formatCurrency(parseFloat(item.unitCost)) : "-"}
+                          {item.unitCost ? formatCents(item.unitCost) : "-"}
                         </TableCell>
                         <TableCell className="text-right font-mono font-semibold">
                           {formatCurrency(item.totalValue)}
