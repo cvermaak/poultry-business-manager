@@ -1,3 +1,4 @@
+import { isInventoryBalance, isPositiveInventoryId } from "./inventory-item-update-executor";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "./_core/trpc";
@@ -64,8 +65,16 @@ export const inventoryRouter = router({
 
   updateItem: protectedProcedure
     .input(
-      z.object({
-        id: z.number(),
+      z.preprocess((raw, ctx) => {
+        // Zod normally strips unknown fields; explicitly reject this obsolete
+        // quantity field (including explicit undefined) before stripping.
+        if (raw && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "currentStock")) {
+          ctx.addIssue({ code: "custom", message: "currentStock cannot be edited on an existing item; use stockAdjustment" });
+          return z.NEVER;
+        }
+        return raw;
+      }, z.object({
+        id: z.number().refine(isPositiveInventoryId, "Item ID must be a positive safe integer"),
         itemNumber: z.string().optional(), // Will be validated for immutability in db function
         name: z.string().optional(),
         longDescription: z.string().optional(),
@@ -80,7 +89,12 @@ export const inventoryRouter = router({
         category: z.enum(["live_birds", "feed", "raw_materials", "supplies", "equipment"]).optional(),
         unit: z.string().optional(),
         bagSizeKg: z.number().optional(),
-        currentStock: z.number().optional(),
+        stockAdjustment: z.object({
+          locationId: z.number().refine(isPositiveInventoryId, "Location ID must be a positive safe integer"),
+          quantity: z.number().refine(isInventoryBalance, "Quantity must be a nonnegative decimal(10,2) balance"),
+          expectedQuantity: z.number().refine(isInventoryBalance, "Expected quantity must be a nonnegative decimal(10,2) balance"),
+          reason: z.string().trim().max(500).optional(),
+        }).refine(a => a.quantity === a.expectedQuantity || !!a.reason, "A reason is required when quantity changes").optional(),
         reorderPoint: z.number().optional(),
         unitCost: z.number().optional(),
         isActive: z.boolean().optional(),
@@ -88,11 +102,18 @@ export const inventoryRouter = router({
         baseUomCode: z.string().optional(),
         purchaseUomCode: z.string().optional(),
         issueUomCode: z.string().optional(),
-      })
+      }))
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id, ...data } = input;
-      return await inventoryDb.updateInventoryItem(id, data);
+      try {
+        return await inventoryDb.updateInventoryItem(id, data, ctx.user.id);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "Failed to update inventory item",
+        });
+      }
     }),
 
   deleteItem: protectedProcedure.use(({ ctx, next }) => {
