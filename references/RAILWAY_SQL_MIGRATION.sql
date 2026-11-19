@@ -164,6 +164,7 @@ INSERT IGNORE INTO `unit_of_measures` (`code`, `name`, `symbol`, `uom_type`, `ba
 ('pair',  'Pair',              'pr',   'count',     'ea',   2.00000000, 0, 1),
 -- Packaging
 ('bag50', 'Bag (50 kg)',        'bag50','packaging', 'kg',   50.00000000, 0, 1),
+('bag40', 'Bag (40 kg)',        'bag40','packaging', 'kg',   40.00000000, 0, 1),
 ('bag25', 'Bag (25 kg)',        'bag25','packaging', 'kg',   25.00000000, 0, 1),
 ('bag10', 'Bag (10 kg)',        'bag10','packaging', 'kg',   10.00000000, 0, 1),
 ('bag5',  'Bag (5 kg)',         'bag5', 'packaging', 'kg',   5.00000000,  0, 1),
