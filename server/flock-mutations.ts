@@ -6,11 +6,27 @@ import { flocks, reminders, reminderTemplates, vaccines, flockVaccinationSchedul
 import { getFlockPlacementDate } from "../shared/flock-placement";
 import { productionDayDifference } from "../shared/production-report-dates";
 import { VACCINATION_PROTOCOLS } from "./flock-health-protocol";
+import { feedAllocationFields, parseFeedAllocation, type FeedAllocationField } from "../shared/flock-feed-allocation";
 
 // Blank optional controls mean default (create) or preserve (patch). NaN is
 // intentionally NOT blank: malformed numeric input still fails validation.
 const blank = (value: unknown) => value === null || (typeof value === "string" && value.trim() === "") ? undefined : value;
 const optionalNumber = (schema = z.number()) => z.preprocess(blank, schema.optional()).optional();
+const allocationDecimal = z.union([z.string(), z.number()]).transform((value, ctx) => {
+  try { return parseFeedAllocation(value); }
+  catch (error) {
+    ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid feed allocation." });
+    return z.NEVER;
+  }
+});
+const createAllocation = allocationDecimal.nullable().optional();
+const updateAllocation = z.preprocess(blank, allocationDecimal.pipe(z.string()).optional()).optional();
+const createAllocationFields = {
+  starterAllocationKgPerBird: createAllocation, growerAllocationKgPerBird: createAllocation, finisherAllocationKgPerBird: createAllocation,
+};
+const updateAllocationFields = {
+  starterAllocationKgPerBird: updateAllocation, growerAllocationKgPerBird: updateAllocation, finisherAllocationKgPerBird: updateAllocation,
+};
 const vaccinationSelection = z.object({ id: z.number().int().positive().optional(), vaccineId: z.number().int().positive(), scheduledDay: z.number().int().nonnegative() });
 const stressSelection = z.object({ id: z.number().int().positive().optional(), stressPackId: z.number().int().positive(), startDay: z.number().int().nonnegative(), endDay: z.number().int().nonnegative(), dosageStrength: z.enum(["single", "double", "triple"]) }).refine(v => v.endDay >= v.startDay, "Stress-pack end day must follow its start day.");
 const healthFields = {
@@ -28,7 +44,7 @@ export const flockCreateSchema = z.object({
   starterToDay: optionalNumber(z.number().int().nonnegative()), growerFeedType: z.enum(["premium", "value", "econo"]).optional(),
   growerFromDay: optionalNumber(z.number().int().nonnegative()), growerToDay: optionalNumber(z.number().int().nonnegative()),
   finisherFeedType: z.enum(["premium", "value", "econo"]).optional(), finisherFromDay: optionalNumber(z.number().int().nonnegative()), finisherToDay: optionalNumber(z.number().int().nonnegative()),
-  notes: z.string().optional(), ...healthFields,
+  notes: z.string().optional(), ...healthFields, ...createAllocationFields,
   vaccinationProtocol: z.enum(["standard", "premium", "none"]).default("standard"),
 });
 export const flockUpdateSchema = z.object({
@@ -38,7 +54,7 @@ export const flockUpdateSchema = z.object({
   starterFeedType: z.string().optional(), starterFromDay: optionalNumber(z.number().int().nonnegative()), starterToDay: optionalNumber(z.number().int().nonnegative()),
   growerFeedType: z.string().optional(), growerFromDay: optionalNumber(z.number().int().nonnegative()), growerToDay: optionalNumber(z.number().int().nonnegative()),
   finisherFeedType: z.string().optional(), finisherFromDay: optionalNumber(z.number().int().nonnegative()), finisherToDay: optionalNumber(z.number().int().nonnegative()),
-  notes: z.string().optional(), ...healthFields, scheduleRemovalConfirmed: z.boolean().optional(),
+  notes: z.string().optional(), ...healthFields, ...updateAllocationFields, scheduleRemovalConfirmed: z.boolean().optional(),
 });
 export type FlockCreateInput = z.output<typeof flockCreateSchema>;
 export type FlockUpdateInput = z.output<typeof flockUpdateSchema>;
@@ -53,11 +69,16 @@ function relativeDate(value: Date | string, days: number) {
   date.setUTCDate(date.getUTCDate() + days);
   return `${date.toISOString().slice(0, 10)} 00:00:00`;
 }
-function basicFields(input: FlockCreateInput | FlockUpdateInput) {
+function basicFields(input: FlockCreateInput | FlockUpdateInput, mode: "create" | "edit") {
   const { vaccinationProtocol: _protocol, vaccinationSchedules: _vaccinations, stressPackSchedules: _stress, selectedTemplateIds: _templates, ...raw } = input;
   const patch: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(raw)) {
     if (value === undefined || key === "id" || key === "scheduleRemovalConfirmed") continue;
+    if (feedAllocationFields.includes(key as FeedAllocationField)) {
+      const allocation = parseFeedAllocation(value);
+      if (mode === "create" || allocation !== null) patch[key] = allocation;
+      continue;
+    }
     patch[key] = key === "placementDate" ? placementTimestamp(value as Date)
       : ["targetSlaughterWeight", "targetDeliveredWeight", "targetCatchingWeight"].includes(key) ? String(value) : value;
   }
@@ -152,7 +173,10 @@ async function audit(tx: Executor, actorId: number, action: string, flockId: num
 }
 export async function createFlockMutation(database: FlockDatabase, input: FlockCreateInput, actorId: number) {
   return database.transaction(async tx => {
-    const data = { ...basicFields(input), currentCount: input.initialCount, status: "planned", createdBy: actorId } as typeof flocks.$inferInsert;
+    // Explicit NULLs prevent old SQL defaults from inventing an operator plan,
+    // including callers that omit these newly optional fields altogether.
+    const unspecifiedAllocations = Object.fromEntries(feedAllocationFields.map(field => [field, null]));
+    const data = { ...unspecifiedAllocations, ...basicFields(input, "create"), currentCount: input.initialCount, status: "planned", createdBy: actorId } as typeof flocks.$inferInsert;
     const result = await tx.insert(flocks).values(data);
     const flockId = result[0].insertId;
     if (!flockId) throw new Error("Flock insertion was not confirmed.");
@@ -169,7 +193,7 @@ export async function updateFlockMutation(database: FlockDatabase, input: FlockU
   return database.transaction(async tx => {
     const [old] = await tx.select().from(flocks).where(eq(flocks.id, input.id)).limit(1).for("update");
     if (!old) throw new TRPCError({ code: "NOT_FOUND", message: "Flock not found." });
-    const patch = basicFields(input) as Partial<typeof flocks.$inferInsert>;
+    const patch = basicFields(input, "edit") as Partial<typeof flocks.$inferInsert>;
     const flock = { ...old, ...patch } as Flock;
     const daysDiff = productionDayDifference(getFlockPlacementDate(old.placementDate), getFlockPlacementDate(flock.placementDate));
     const feedChanged = ["starterToDay", "growerFromDay", "growerToDay", "finisherFromDay"].some(key => (patch as any)[key] !== undefined && (patch as any)[key] !== (old as any)[key]);

@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
 import { Activity, Calendar, TrendingUp, AlertCircle, Plus, ArrowLeft, RefreshCw, Pencil, Trash2, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import React, { useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -28,6 +28,8 @@ import { buildDailyLossUpdate, emptyDailyLossForm, hydrateDailyLossForm, validat
 import { getFlockPlacementDate, getFlockAgeDays, getFlockRecordDay } from "@shared/flock-placement";
 import { productionToday } from "@shared/production-report-dates";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
+import { RossFlockPerformance } from "@/components/RossFlockPerformance";
+import { formatStoredFeedAllocation, positiveNumber, storedCommercialTargetDifferencePct } from "@/lib/ross-flock-display";
 
 export default function FlockDetail() {
   const { allowed } = useFinancialVisibility();
@@ -50,17 +52,20 @@ export default function FlockDetail() {
 
   // Fetch flock data
   const { data: flock, isLoading: flockLoading } = trpc.flocks.getById.useQuery({ id: flockId });
+  const { data: house } = trpc.houses.getById.useQuery({ id: flock?.houseId ?? 0 }, { enabled: !!flock?.houseId });
+  const isRoss = house?.breed === 'ross_308';
+  const legacyMetricsEnabled = !!house && !isRoss;
   const { data: dailyRecords } = trpc.flocks.getDailyRecords.useQuery({ flockId });
   const { data: healthRecords } = trpc.flocks.getHealthRecords.useQuery({ flockId });
   const { data: vaccinationSchedule } = trpc.flocks.getVaccinationSchedule.useQuery({ flockId });
-  const { data: performanceMetrics } = trpc.flocks.getPerformanceMetrics.useQuery({ flockId });
-  const { data: advancedGrowthMetrics } = trpc.flocks.getAdvancedGrowthMetrics.useQuery({ flockId });
-  const { data: feedEfficiencyMetrics } = trpc.flocks.getFeedEfficiencyMetrics.useQuery({ flockId });
+  const { data: performanceMetrics, isLoading: metricsLoading, isError: metricsError } = trpc.flocks.getPerformanceMetrics.useQuery({ flockId });
+  const { data: advancedGrowthMetrics } = trpc.flocks.getAdvancedGrowthMetrics.useQuery({ flockId }, { enabled: legacyMetricsEnabled });
+  const { data: feedEfficiencyMetrics } = trpc.flocks.getFeedEfficiencyMetrics.useQuery({ flockId }, { enabled: legacyMetricsEnabled });
   const { data: targetGrowthCurve } = trpc.flocks.getTargetGrowthCurve.useQuery({ 
     flockId, 
     startDay: 0, 
     endDay: flock?.growingPeriod || 42 
-  });
+  }, { enabled: legacyMetricsEnabled });
   const { data: vaccinationSchedules } = trpc.flocks.getVaccinationSchedules.useQuery({ flockId });
   const { data: stressPackSchedules } = trpc.flocks.getStressPackSchedules.useQuery({ flockId });
   const { data: preTransportProtocols = [] } = trpc.health.listPreTransportProtocols.useQuery({ flockId });
@@ -75,7 +80,6 @@ export default function FlockDetail() {
   const companyToday = () => productionToday(companyTimezone);
   const { data: harvests } = trpc.harvest.getByFlock.useQuery({ flockId });
   const { data: catchPlan, refetch: refetchCatchPlan } = trpc.catch.getCatchPlan.useQuery({ flockId });
-  const { data: house } = trpc.houses.getById.useQuery({ id: flock?.houseId ?? 0 }, { enabled: !!flock?.houseId });
   const addTemplate = trpc.reminderTemplates.addToFlock.useMutation();
   const removeTemplate = trpc.reminderTemplates.removeFromFlock.useMutation();
   const syncFromTemplate = trpc.reminders.syncFromTemplate.useMutation();
@@ -550,6 +554,9 @@ export default function FlockDetail() {
   let flockAgeDays: number;
   try { flockAgeDays = getFlockAgeDays(flock.placementDate, new Date(), companyTimezone); }
   catch { return <Alert variant="destructive"><AlertDescription>Invalid flock placement date. Correct the placement before adding daily records.</AlertDescription></Alert>; }
+  const commercialPlan = { targetCatchingWeight: flock.targetCatchingWeight, targetDeliveredWeight: flock.targetDeliveredWeight, growingPeriod: flock.growingPeriod };
+  const rossDisplayProps = { metrics: performanceMetrics?.rossMetrics, loading: metricsLoading, error: metricsError, commercialPlan };
+  const rossPlanTargetsAvailable = positiveNumber(flock.targetCatchingWeight) !== null && positiveNumber(flock.targetDeliveredWeight) !== null && storedCommercialTargetDifferencePct(commercialPlan) !== null;
 
   // Prepare chart data - merge actual and target data
   // Treat weight of 0 as "not weighed" (null) so chart skips those days
@@ -573,7 +580,7 @@ export default function FlockDetail() {
   const chartData: Array<{
     day: number;
     actualWeight: number | null;
-    targetWeight: number;
+    targetWeight: number | null;
     farmTargetWeight: number | null;
     feed: number | null;
   }> = [];
@@ -594,7 +601,7 @@ export default function FlockDetail() {
     chartData.push({
       day,
       actualWeight: actual?.actualWeight || null,
-      targetWeight: target?.targetWeight || 0,
+      targetWeight: target?.targetWeight ?? null,
       farmTargetWeight: farmTargetWeightForDay,
       feed: actual?.feed || null,
     });
@@ -606,11 +613,11 @@ export default function FlockDetail() {
 
   // Calculate projected catch date based on ADG
   let projectedCatchDay: number | null = null;
-  if (finalTargetCatchingWeight && advancedGrowthMetrics && advancedGrowthMetrics.avgDailyGain > 0 && latestActual) {
+  if (finalTargetCatchingWeight && advancedGrowthMetrics && (advancedGrowthMetrics.avgDailyGain ?? 0) > 0 && latestActual) {
     const latestWeight = latestActual.actualWeight || 0;
     const latestDay = latestActual.day || 0;
     const remainingWeight = finalTargetCatchingWeight - latestWeight;
-    const avgDailyGainKg = advancedGrowthMetrics.avgDailyGain / 1000; // Convert grams to kg
+    const avgDailyGainKg = (advancedGrowthMetrics.avgDailyGain ?? 0) / 1000; // Convert grams to kg
     const daysToTarget = remainingWeight / avgDailyGainKg;
     projectedCatchDay = Math.round(latestDay + daysToTarget);
     
@@ -627,7 +634,7 @@ export default function FlockDetail() {
   const getPerformanceStatus = (deviation: number) => {
     if (deviation >= 5) return { label: 'Ahead of Target', color: 'text-green-600', bgColor: 'bg-green-50' };
     if (deviation >= -5) return { label: 'On Track', color: 'text-blue-600', bgColor: 'bg-blue-50' };
-    if (deviation >= -10) return { label: 'Behind Target', color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
+    if (deviation > -10) return { label: 'Behind Target', color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
     return { label: 'Critical - Action Required', color: 'text-red-600', bgColor: 'bg-red-50' };
   };
 
@@ -686,24 +693,26 @@ export default function FlockDetail() {
       </div>
 
       {/* Plan Catch Dialog */}
-      {planCatchOpen && (
+      {planCatchOpen && (!isRoss || rossPlanTargetsAvailable) && (
         <PlanCatchDialog
           open={planCatchOpen}
           onOpenChange={setPlanCatchOpen}
           flockId={flockId}
           flockNumber={flock.flockNumber}
           currentCount={flock.currentCount}
-          targetCatchingWeight={parseFloat(flock.targetCatchingWeight ?? "1.905")}
-          targetDeliveredWeight={parseFloat(flock.targetDeliveredWeight ?? "1.800")}
-          shrinkagePct={5.5}
+          targetCatchingWeight={isRoss ? positiveNumber(flock.targetCatchingWeight) ?? 0 : parseFloat(flock.targetCatchingWeight ?? "1.905")}
+          targetDeliveredWeight={isRoss ? positiveNumber(flock.targetDeliveredWeight) ?? 0 : parseFloat(flock.targetDeliveredWeight ?? "1.800")}
+          shrinkagePct={isRoss ? storedCommercialTargetDifferencePct(commercialPlan) ?? 0 : 5.5}
           onPlanSaved={() => {
             toast.success("Catch plan saved successfully");
             utils.catch.getCatchPlan.invalidate({ flockId });
           }}
         />
       )}
+      {planCatchOpen && isRoss && !rossPlanTargetsAvailable && <Alert variant="destructive"><AlertDescription>Catch planning N/A — valid stored catching and delivered targets are required. No default weight or shrinkage is substituted. <Button variant="ghost" onClick={() => setPlanCatchOpen(false)}>Close</Button></AlertDescription></Alert>}
 
       {/* Performance Summary Cards */}
+      {isRoss ? <RossFlockPerformance {...rossDisplayProps} section="summary" /> : (
       <div className="mb-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -758,6 +767,7 @@ export default function FlockDetail() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Active Feed Phase Indicator */}
       {(() => {
@@ -816,9 +826,7 @@ export default function FlockDetail() {
                     {flock.starterFeedType && (
                       <div className="text-xs capitalize">{flock.starterFeedType}</div>
                     )}
-                    {(flock as any).starterAllocationKgPerBird && (
-                      <div className="text-xs text-muted-foreground">{(flock as any).starterAllocationKgPerBird} kg/bird</div>
-                    )}
+                    <div className="text-xs text-muted-foreground">{formatStoredFeedAllocation(flock.starterAllocationKgPerBird)}</div>
                   </div>
                   <div className={`p-2 rounded ${activeFeedPhase === 'grower' ? 'bg-white dark:bg-gray-800 font-semibold' : 'opacity-60'}`}>
                     <div className="text-xs text-muted-foreground">Grower</div>
@@ -830,9 +838,7 @@ export default function FlockDetail() {
                     {flock.growerFeedType && (
                       <div className="text-xs capitalize">{flock.growerFeedType}</div>
                     )}
-                    {(flock as any).growerAllocationKgPerBird && (
-                      <div className="text-xs text-muted-foreground">{(flock as any).growerAllocationKgPerBird} kg/bird</div>
-                    )}
+                    <div className="text-xs text-muted-foreground">{formatStoredFeedAllocation(flock.growerAllocationKgPerBird)}</div>
                   </div>
                   <div className={`p-2 rounded ${activeFeedPhase === 'finisher' ? 'bg-white dark:bg-gray-800 font-semibold' : 'opacity-60'}`}>
                     <div className="text-xs text-muted-foreground">Finisher</div>
@@ -844,9 +850,7 @@ export default function FlockDetail() {
                     {flock.finisherFeedType && (
                       <div className="text-xs capitalize">{flock.finisherFeedType}</div>
                     )}
-                    {(flock as any).finisherAllocationKgPerBird && (
-                      <div className="text-xs text-muted-foreground">{(flock as any).finisherAllocationKgPerBird} kg/bird</div>
-                    )}
+                    <div className="text-xs text-muted-foreground">{formatStoredFeedAllocation(flock.finisherAllocationKgPerBird)}</div>
                   </div>
                 </div>
               </CardContent>
@@ -856,8 +860,17 @@ export default function FlockDetail() {
         return null;
       })()}
 
+      <Card className="mb-6">
+        <CardHeader><CardTitle>Per-flock feed allocation (kg/bird)</CardTitle><CardDescription>Saved farm planning allocations — not biological intake objectives, actual consumption or automatic feed orders.</CardDescription></CardHeader>
+        <CardContent><div className="grid gap-4 md:grid-cols-3">
+          <div><p className="text-sm text-muted-foreground">Starter</p><p className="text-xl font-semibold">{formatStoredFeedAllocation(flock.starterAllocationKgPerBird)}</p></div>
+          <div><p className="text-sm text-muted-foreground">Grower</p><p className="text-xl font-semibold">{formatStoredFeedAllocation(flock.growerAllocationKgPerBird)}</p></div>
+          <div><p className="text-sm text-muted-foreground">Finisher</p><p className="text-xl font-semibold">{formatStoredFeedAllocation(flock.finisherAllocationKgPerBird)}</p></div>
+        </div><p className="text-xs text-muted-foreground mt-3">All phases shown regardless of current age. Values remain kg/bird, including when weighing uses grams; unspecified values have no substituted defaults. Configure these per flock using Create or Edit in Flocks.</p></CardContent>
+      </Card>
+
       {/* Ready for Harvest Indicator */}
-      {(() => {
+      {isRoss ? <RossFlockPerformance {...rossDisplayProps} section="readiness" /> : (() => {
         const latestRecord = dailyRecords?.[dailyRecords.length - 1];
         const currentWeight = latestRecord?.averageWeight ? parseFloat(latestRecord.averageWeight.toString()) : 0;
         const targetDeliveredWeight = flock.targetDeliveredWeight ? parseFloat(flock.targetDeliveredWeight.toString()) : 0;
@@ -957,6 +970,7 @@ export default function FlockDetail() {
         {/* Daily Records Tab */}
         <TabsContent value="daily" className="space-y-4">
           {/* Summary Cards */}
+          {isRoss ? <RossFlockPerformance {...rossDisplayProps} section="daily" /> : <>
           <div className="grid gap-4 md:grid-cols-4">
             <Card>
               <CardHeader className="pb-2">
@@ -1228,6 +1242,7 @@ export default function FlockDetail() {
               </div>
             );
           })()}
+          </>}
 
           {/* Add Record Button and Dialog */}
           <Card>
@@ -1485,7 +1500,7 @@ export default function FlockDetail() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {[...dailyRecords].sort((a, b) => new Date(b.recordDate).getTime() - new Date(a.recordDate).getTime()).map((record) => (
+                      {[...dailyRecords].sort((a, b) => new Date(a.recordDate).getTime() - new Date(b.recordDate).getTime()).map((record) => (
                         <TableRow key={record.id}>
                           <TableCell>{format(new Date(record.recordDate), "dd MMM yyyy")}</TableCell>
                           <TableCell>{record.dayNumber}</TableCell>
@@ -1705,6 +1720,7 @@ export default function FlockDetail() {
 
         {/* Growth Performance Tab */}
         <TabsContent value="growth" className="space-y-4">
+          {isRoss ? <RossFlockPerformance {...rossDisplayProps} section="growth" /> : <>
           {/* Performance Status Card */}
           {latestActual && (
             <Card className={performanceStatus.bgColor}>
@@ -1765,7 +1781,7 @@ export default function FlockDetail() {
                 <CardContent>
                   <div className="text-2xl font-bold">{advancedGrowthMetrics.epi}</div>
                   <p className="text-xs text-muted-foreground">
-                    {advancedGrowthMetrics.epi >= 350 ? "Excellent" : advancedGrowthMetrics.epi >= 300 ? "Good" : advancedGrowthMetrics.epi >= 250 ? "Average" : "Below target"}
+                    {(advancedGrowthMetrics.epi ?? 0) >= 350 ? "Excellent" : (advancedGrowthMetrics.epi ?? 0) >= 300 ? "Good" : (advancedGrowthMetrics.epi ?? 0) >= 250 ? "Average" : "Below target"}
                   </p>
                 </CardContent>
               </Card>
@@ -1774,7 +1790,7 @@ export default function FlockDetail() {
                   <CardTitle className="text-sm font-medium">Livability</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{advancedGrowthMetrics.livability.toFixed(2)}%</div>
+                  <div className="text-2xl font-bold">{(advancedGrowthMetrics.livability ?? 0).toFixed(2)}%</div>
                   <p className="text-xs text-muted-foreground">Survival rate</p>
                 </CardContent>
               </Card>
@@ -1800,7 +1816,7 @@ export default function FlockDetail() {
                 <CardContent>
                   <div className="text-2xl font-bold">{feedEfficiencyMetrics.avgWaterFeedRatio}:1</div>
                   <p className="text-xs text-muted-foreground">
-                    {feedEfficiencyMetrics.avgWaterFeedRatio >= 1.8 && feedEfficiencyMetrics.avgWaterFeedRatio <= 2.2 ? "Normal range" : "Check water system"}
+                    {(feedEfficiencyMetrics.avgWaterFeedRatio ?? 0) >= 1.8 && (feedEfficiencyMetrics.avgWaterFeedRatio ?? 0) <= 2.2 ? "Normal range" : "Check water system"}
                   </p>
                 </CardContent>
               </Card>
@@ -2115,6 +2131,7 @@ export default function FlockDetail() {
               </Card>
             </div>
           )}
+          </>}
         </TabsContent>
 
         {/* Health Records Tab */}
