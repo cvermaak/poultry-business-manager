@@ -12,9 +12,29 @@ import { executeInventoryItemCreate, type CreateInventoryItemInput } from "./inv
 /**
  * List all active units of measure from the master table.
  */
+let standardUnitsEnsured = false;
+
+/**
+ * Idempotently seed standard packaging units. Migrations are run manually in
+ * this project, so this guarantees the units exist without a manual step.
+ */
+async function ensureStandardUnits(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+  if (standardUnitsEnsured) return;
+  try {
+    await db.execute(sql`
+      INSERT IGNORE INTO unit_of_measures (code, name, symbol, uom_type, base_uom_code, conversion_factor, is_base, is_active)
+      VALUES ('bag40', 'Bag (40 kg)', 'bag40', 'packaging', 'kg', 40.00000000, 0, 1)
+    `);
+    standardUnitsEnsured = true;
+  } catch (err) {
+    console.error("[uom] failed to seed standard units", err);
+  }
+}
+
 export async function listUnitsOfMeasure() {
   const db = await getDb();
   if (!db) return [];
+  await ensureStandardUnits(db);
   const rows = await db.execute(sql`
     SELECT code, name, symbol, uom_type, base_uom_code, conversion_factor, is_base, is_active
     FROM unit_of_measures
