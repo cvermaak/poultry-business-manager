@@ -204,6 +204,13 @@
       "when": 1790568359708,
       "tag": "0057_company_settings_timezone_compatibility",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1790654759708,
+      "tag": "0058_add_bag40_unit",
+      "breakpoints": true
     }
   ]
 }
