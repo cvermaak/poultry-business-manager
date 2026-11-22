@@ -1,6 +1,7 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
+import { DailyLossHistoryCells } from "@/components/DailyLossFields";
 const state = vi.hoisted(() => ({ breed: "ross_308", calls: [] as { name: string; enabled: boolean | undefined }[], daily: [] as Record<string, unknown>[] }));
 vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ user: { id: 1, role: "farm_manager" } }) }));
 vi.mock("@/hooks/useFinancialVisibility", () => ({ useFinancialVisibility: () => ({ allowed: false }) }));
@@ -42,4 +43,40 @@ it("renders actual daily history chronologically by date even when supplied in r
   const markup = renderToStaticMarkup(React.createElement(FlockDetail));
   expect(markup).toContain("chronology-early-marker"); expect(markup).toContain("chronology-late-marker");
   expect(markup.indexOf("chronology-early-marker")).toBeLessThan(markup.indexOf("chronology-late-marker"));
+});
+
+it.each(["ross_308", "cobb_500"])("keeps complete wrapped history text and readable numeric values for %s", breed => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
+  vi.stubGlobal("window", { location: { search: "?tab=daily" } });
+  state.breed = breed;
+  const cullReason = "Synthetic recorded culling reason ".repeat(12).trim();
+  const notes = "Synthetic unbroken note ".repeat(20).trim();
+  state.daily = [{ id: 1, flockId: 1, recordDate: "2026-10-08", dayNumber: 7,
+    mortality: 3, culls: 1, cullReason, feedConsumed: "21.500", waterConsumed: "35.800",
+    feedType: "starter", averageWeight: "0.200", temperature: "25.100", humidity: "55", notes }];
+  const html = renderToStaticMarkup(React.createElement(FlockDetail));
+  expect(html).toContain('aria-label="Daily record history"');
+  expect(html).toContain('tabindex="0"');
+  expect(html).toContain("overflow-x-auto");
+  expect(html).toContain("min-w-[1900px]");
+  expect(html).toContain("tabular-nums");
+  expect(html).toContain("whitespace-pre-wrap [overflow-wrap:anywhere]");
+  expect(html).toContain("w-[196px]"); expect(html).toContain("w-[216px]");
+  expect(html).toContain(cullReason); expect(html).toContain(notes);
+  expect(html).toContain("21.5"); expect(html).toContain("35.8"); expect(html).toContain("0.200");
+  expect(html).toContain("Separately recorded");
+});
+
+it.each([
+  { mortality: 3, culls: 1, cullReason: "Synthetic reason", expected: "Separately recorded" },
+  { mortality: 3, culls: null, expected: "Combined losses — mortality/cull breakdown unavailable" },
+  { mortality: 1, culls: 2, expected: "Invalid stored losses — review required" },
+])("preserves the loss-history state while wrapping its text: $expected", record => {
+  const html = renderToStaticMarkup(React.createElement("table", null,
+    React.createElement("tbody", null, React.createElement("tr", null,
+      React.createElement(DailyLossHistoryCells, { record })))));
+  expect(html).toContain(record.expected);
+  expect(html).toContain("w-[156px]"); expect(html).toContain("w-[196px]");
+  expect(html).toContain("[overflow-wrap:anywhere]");
+  if (record.culls !== 1) expect(html).toContain("Unavailable");
 });

@@ -1478,8 +1478,8 @@ export default function FlockDetail() {
             </CardHeader>
             <CardContent>
               {dailyRecords && dailyRecords.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <Table>
+                <div className="max-w-full overflow-x-auto [&>div]:overflow-visible" tabIndex={0} role="region" aria-label="Daily record history">
+                  <Table className="min-w-[1900px] [&_th]:whitespace-nowrap [&_td]:align-top [&_td]:tabular-nums">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Date</TableHead>
@@ -1502,23 +1502,23 @@ export default function FlockDetail() {
                     <TableBody>
                       {[...dailyRecords].sort((a, b) => new Date(a.recordDate).getTime() - new Date(b.recordDate).getTime()).map((record) => (
                         <TableRow key={record.id}>
-                          <TableCell>{format(new Date(record.recordDate), "dd MMM yyyy")}</TableCell>
-                          <TableCell>{record.dayNumber}</TableCell>
+                          <TableCell className="whitespace-nowrap">{format(new Date(record.recordDate), "dd MMM yyyy")}</TableCell>
+                          <TableCell className="whitespace-nowrap">{record.dayNumber}</TableCell>
                           <DailyLossHistoryCells record={record} />
-                          <TableCell>{record.feedConsumed ? parseFloat(record.feedConsumed.toString()).toFixed(1) : "-"}</TableCell>
+                          <TableCell className="whitespace-nowrap">{record.feedConsumed ? parseFloat(record.feedConsumed.toString()).toFixed(1) : "-"}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className="capitalize">{record.feedType || "-"}</Badge>
                           </TableCell>
-                          <TableCell>{record.waterConsumed ? parseFloat(record.waterConsumed.toString()).toFixed(1) : "-"}</TableCell>
-                          <TableCell>
+                          <TableCell className="whitespace-nowrap">{record.waterConsumed ? parseFloat(record.waterConsumed.toString()).toFixed(1) : "-"}</TableCell>
+                          <TableCell className="whitespace-nowrap">
                             {record.averageWeight && parseFloat(record.averageWeight.toString()) > 0 
                               ? parseFloat(record.averageWeight.toString()).toFixed(3) 
                               : "-"}
                           </TableCell>
-                          <TableCell>{record.temperature ? parseFloat(record.temperature.toString()).toFixed(1) : "-"}</TableCell>
-                          <TableCell>{record.humidity ? parseFloat(record.humidity.toString()).toFixed(0) : "-"}</TableCell>
-                          <TableCell className="max-w-[200px] truncate" title={record.notes || ""}>
-                            {record.notes || "-"}
+                          <TableCell className="whitespace-nowrap">{record.temperature ? parseFloat(record.temperature.toString()).toFixed(1) : "-"}</TableCell>
+                          <TableCell className="whitespace-nowrap">{record.humidity ? parseFloat(record.humidity.toString()).toFixed(0) : "-"}</TableCell>
+                          <TableCell className="w-[240px] min-w-[240px] max-w-[240px]" title={record.notes || ""}>
+                            <div className="w-[216px] whitespace-pre-wrap [overflow-wrap:anywhere]">{record.notes || "-"}</div>
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">
