@@ -24,6 +24,7 @@ import { normalizeHealthRecordNotes } from "@/lib/health-record-notes";
 import { PlanCatchDialog } from "@/components/PlanCatchDialog";
 import { AuditTimestamp } from "@/components/AuditTimestamp";
 import { DailyLossFields, DailyLossHistoryCells } from "@/components/DailyLossFields";
+import { DailyRecordText } from "@/components/DailyRecordText";
 import { buildDailyLossUpdate, emptyDailyLossForm, hydrateDailyLossForm, validateDailyLossForm } from "@/lib/daily-loss-form";
 import { getFlockPlacementDate, getFlockAgeDays, getFlockRecordDay } from "@shared/flock-placement";
 import { productionToday } from "@shared/production-report-dates";
@@ -1517,8 +1518,8 @@ export default function FlockDetail() {
                           </TableCell>
                           <TableCell className="whitespace-nowrap">{record.temperature ? parseFloat(record.temperature.toString()).toFixed(1) : "-"}</TableCell>
                           <TableCell className="whitespace-nowrap">{record.humidity ? parseFloat(record.humidity.toString()).toFixed(0) : "-"}</TableCell>
-                          <TableCell className="w-[240px] min-w-[240px] max-w-[240px]" title={record.notes || ""}>
-                            <div className="w-[216px] whitespace-pre-wrap [overflow-wrap:anywhere]">{record.notes || "-"}</div>
+                          <TableCell className="w-[240px] min-w-[240px] max-w-[240px]">
+                            <div className="w-[216px]"><DailyRecordText text={record.notes} label={`Notes · Day ${record.dayNumber}`} emptyText="-" /></div>
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-1">

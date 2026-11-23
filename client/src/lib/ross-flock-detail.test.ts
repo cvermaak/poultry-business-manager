@@ -45,7 +45,7 @@ it("renders actual daily history chronologically by date even when supplied in r
   expect(markup.indexOf("chronology-early-marker")).toBeLessThan(markup.indexOf("chronology-late-marker"));
 });
 
-it.each(["ross_308", "cobb_500"])("keeps complete wrapped history text and readable numeric values for %s", breed => {
+it.each(["ross_308", "cobb_500"])("keeps complete history text in compact previews and readable numeric values for %s", breed => {
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
   vi.stubGlobal("window", { location: { search: "?tab=daily" } });
   state.breed = breed;
@@ -60,7 +60,10 @@ it.each(["ross_308", "cobb_500"])("keeps complete wrapped history text and reada
   expect(html).toContain("overflow-x-auto");
   expect(html).toContain("min-w-[1900px]");
   expect(html).toContain("tabular-nums");
-  expect(html).toContain("whitespace-pre-wrap [overflow-wrap:anywhere]");
+  expect(html.match(/data-daily-text-preview=/g)).toHaveLength(2);
+  expect(html).toContain("line-clamp-2 max-h-10 overflow-hidden whitespace-normal leading-5 [overflow-wrap:anywhere]");
+  expect(html).toContain('aria-label="View full text: Notes · Day 7"');
+  expect(html).toContain('aria-label="View full text: Culling reason · Day 7"');
   expect(html).toContain("w-[196px]"); expect(html).toContain("w-[216px]");
   expect(html).toContain(cullReason); expect(html).toContain(notes);
   expect(html).toContain("21.5"); expect(html).toContain("35.8"); expect(html).toContain("0.200");
@@ -68,7 +71,7 @@ it.each(["ross_308", "cobb_500"])("keeps complete wrapped history text and reada
 });
 
 it.each([
-  { mortality: 3, culls: 1, cullReason: "Synthetic reason", expected: "Separately recorded" },
+  { mortality: 3, culls: 1, cullReason: "  Synthetic reason\n\nSecond line  ", expected: "Separately recorded" },
   { mortality: 3, culls: null, expected: "Combined losses — mortality/cull breakdown unavailable" },
   { mortality: 1, culls: 2, expected: "Invalid stored losses — review required" },
 ])("preserves the loss-history state while wrapping its text: $expected", record => {
@@ -79,4 +82,5 @@ it.each([
   expect(html).toContain("w-[156px]"); expect(html).toContain("w-[196px]");
   expect(html).toContain("[overflow-wrap:anywhere]");
   if (record.culls !== 1) expect(html).toContain("Unavailable");
+  else expect(html).toContain(record.cullReason!);
 });

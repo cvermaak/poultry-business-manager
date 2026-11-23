@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { TableCell } from "@/components/ui/table";
+import { DailyRecordText } from "@/components/DailyRecordText";
 import { describeDailyLosses } from "@shared/daily-losses";
 import {
   changeDailyLossField,
@@ -119,7 +120,7 @@ export function DailyLossFields({ value, onChange, currentCount, idPrefix }: {
 }
 
 export function DailyLossHistoryCells({ record }: {
-  record: { mortality: unknown; culls?: unknown; cullReason?: unknown };
+  record: { mortality: unknown; culls?: unknown; cullReason?: unknown; dayNumber?: number };
 }) {
   const losses = describeDailyLosses(record);
   return (
@@ -134,8 +135,10 @@ export function DailyLossHistoryCells({ record }: {
       <TableCell className="w-[180px] min-w-[180px] max-w-[180px]" title={losses.issue || undefined}>
         <div className="w-[156px] whitespace-normal [overflow-wrap:anywhere]">{losses.mode === "split" ? "Separately recorded" : losses.mode === "legacy" ? "Combined losses — mortality/cull breakdown unavailable" : "Invalid stored losses — review required"}</div>
       </TableCell>
-      <TableCell className="w-[220px] min-w-[220px] max-w-[220px]" title={losses.cullReason || undefined}>
-        <div className="w-[196px] whitespace-pre-wrap [overflow-wrap:anywhere]">{losses.mode === "split" ? losses.cullReason || "—" : "Unavailable"}</div>
+      <TableCell className="w-[220px] min-w-[220px] max-w-[220px]">
+        <div className="w-[196px]">
+          {losses.mode === "split" ? <DailyRecordText text={typeof record.cullReason === "string" ? record.cullReason : losses.cullReason} label={`Culling reason${record.dayNumber == null ? "" : ` · Day ${record.dayNumber}`}`} /> : "Unavailable"}
+        </div>
       </TableCell>
     </>
   );
