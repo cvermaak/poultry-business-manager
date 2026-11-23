@@ -1,150 +1,87 @@
 import { describe, expect, it } from "vitest";
-import { getTargetWeight, getTargetGrowthCurve, calculatePerformanceDeviation, getPerformanceStatus } from "./db";
+import { getTargetWeight, getTargetGrowthCurve, calculatePerformanceDeviation, getPerformanceStatus, validateTargetWeight } from "../shared/breed-growth";
 
-describe("Breed-Specific Growth Curves", () => {
-  describe("Ross 308", () => {
-    it("should return correct target weights for key days", () => {
-      expect(getTargetWeight(0, 'ross_308')).toBe(0.042);
-      expect(getTargetWeight(7, 'ross_308')).toBe(0.170);
-      expect(getTargetWeight(14, 'ross_308')).toBe(0.465);
-      expect(getTargetWeight(21, 'ross_308')).toBe(0.925);
-      expect(getTargetWeight(28, 'ross_308')).toBe(1.505);
-      expect(getTargetWeight(35, 'ross_308')).toBe(2.180);
-      expect(getTargetWeight(42, 'ross_308')).toBe(2.950);
-      expect(getTargetWeight(49, 'ross_308')).toBe(3.790);
-    });
+const rossAnchors = [[0, .044], [7, .213], [14, .533], [21, 1.012], [28, 1.616], [35, 2.296], [42, 2.998], [49, 3.681], [56, 4.318]] as const;
+const legacy = {
+  cobb_500: { 0: .042, 7: .175, 14: .480, 21: .950, 28: 1.540, 35: 2.215, 42: 2.970, 49: 3.800 },
+  arbor_acres: { 0: .042, 7: .168, 14: .458, 21: .910, 28: 1.480, 35: 2.145, 42: 2.900, 49: 3.720 },
+} as const;
+function originalWeight(day: number, curve: Record<number, number>) {
+  if (curve[day] !== undefined) return curve[day];
+  const days = Object.keys(curve).map(Number).sort((a, b) => a - b);
+  if (day < days[0]) return curve[days[0]];
+  if (day > days[days.length - 1]) {
+    const last = days[days.length - 1], prior = days[days.length - 2];
+    const gain = (curve[last] - curve[prior]) / (last - prior);
+    return curve[last] + (day - last) * gain;
+  }
+  for (let i = 0; i < days.length - 1; i++) {
+    const low = days[i], high = days[i + 1];
+    if (day >= low && day <= high) {
+      const fraction = (day - low) / (high - low);
+      return curve[low] + (curve[high] - curve[low]) * fraction;
+    }
+  }
+  return .042;
+}
 
-    it("should interpolate weights for intermediate days", () => {
-      const day10 = getTargetWeight(10, 'ross_308');
-      expect(day10).toBeGreaterThan(0.170); // After day 7
-      expect(day10).toBeLessThan(0.465); // Before day 14
-    });
+describe("Ross lookup and retained other-breed behaviour", () => {
+  it.each(rossAnchors)("uses the published Ross Day %s reference %s kg", (day, weight) => {
+    expect(getTargetWeight(day, "ross_308")).toBe(weight);
   });
-
-  describe("Cobb 500", () => {
-    it("should return correct target weights for key days", () => {
-      expect(getTargetWeight(0, 'cobb_500')).toBe(0.042);
-      expect(getTargetWeight(7, 'cobb_500')).toBe(0.175);
-      expect(getTargetWeight(14, 'cobb_500')).toBe(0.480);
-      expect(getTargetWeight(21, 'cobb_500')).toBe(0.950);
-      expect(getTargetWeight(28, 'cobb_500')).toBe(1.540);
-      expect(getTargetWeight(35, 'cobb_500')).toBe(2.215);
-      expect(getTargetWeight(42, 'cobb_500')).toBe(2.970);
-      expect(getTargetWeight(49, 'cobb_500')).toBe(3.800);
-    });
-
-    it("should have higher targets than Ross 308 at day 42", () => {
-      const cobb42 = getTargetWeight(42, 'cobb_500');
-      const ross42 = getTargetWeight(42, 'ross_308');
-      expect(cobb42).toBeGreaterThan(ross42);
-    });
+  it("uses the published Day 10 row rather than interpolation", () => {
+    expect(getTargetWeight(10, "ross_308")).toBe(.330);
   });
-
-  describe("Arbor Acres", () => {
-    it("should return correct target weights for key days", () => {
-      expect(getTargetWeight(0, 'arbor_acres')).toBe(0.042);
-      expect(getTargetWeight(7, 'arbor_acres')).toBe(0.168);
-      expect(getTargetWeight(14, 'arbor_acres')).toBe(0.458);
-      expect(getTargetWeight(21, 'arbor_acres')).toBe(0.910);
-      expect(getTargetWeight(28, 'arbor_acres')).toBe(1.480);
-      expect(getTargetWeight(35, 'arbor_acres')).toBe(2.145);
-      expect(getTargetWeight(42, 'arbor_acres')).toBe(2.900);
-      expect(getTargetWeight(49, 'arbor_acres')).toBe(3.720);
-    });
-
-    it("should have lower targets than Cobb 500 at day 42", () => {
-      const arbor42 = getTargetWeight(42, 'arbor_acres');
-      const cobb42 = getTargetWeight(42, 'cobb_500');
-      expect(arbor42).toBeLessThan(cobb42);
-    });
+  it.each([-1, 57, 90, 7.5, NaN, Infinity])("withholds unsupported Ross age %s", day => {
+    expect(getTargetWeight(day, "ross_308")).toBeNull();
+    expect(calculatePerformanceDeviation(2.998, day, "ross_308")).toBeNull();
   });
-
-  describe("Growth Curve Generation", () => {
-    it("should generate correct number of data points", () => {
-      const curve = getTargetGrowthCurve(0, 42, 'ross_308');
-      expect(curve).toHaveLength(43); // Days 0-42 inclusive
-    });
-
-    it("should generate breed-specific curves", () => {
-      const rossCurve = getTargetGrowthCurve(0, 42, 'ross_308');
-      const cobbCurve = getTargetGrowthCurve(0, 42, 'cobb_500');
-      
-      // At day 42, Cobb should be heavier
-      const rossDay42 = rossCurve.find(p => p.day === 42);
-      const cobbDay42 = cobbCurve.find(p => p.day === 42);
-      
-      expect(cobbDay42!.targetWeight).toBeGreaterThan(rossDay42!.targetWeight);
-    });
+  it.each(["cobb_500", "arbor_acres"] as const)("retains every %s legacy half-day result including extrapolation", breed => {
+    for (let day = -1; day <= 90; day += .5) expect(getTargetWeight(day, breed)).toBe(originalWeight(day, legacy[breed]));
   });
-
-  describe("Performance Deviation Calculation", () => {
-    it("should calculate positive deviation when ahead of target", () => {
-      const deviation = calculatePerformanceDeviation(3.0, 42, 'ross_308');
-      expect(deviation).toBeGreaterThan(0);
-      expect(deviation).toBeCloseTo(1.7, 1); // ~1.7% ahead
-    });
-
-    it("should calculate negative deviation when behind target", () => {
-      const deviation = calculatePerformanceDeviation(2.8, 42, 'ross_308');
-      expect(deviation).toBeLessThan(0);
-      expect(deviation).toBeCloseTo(-5.1, 1); // ~5.1% behind
-    });
-
-    it("should be breed-specific", () => {
-      const actualWeight = 2.9;
-      const day = 42;
-      
-      const rossDeviation = calculatePerformanceDeviation(actualWeight, day, 'ross_308');
-      const cobbDeviation = calculatePerformanceDeviation(actualWeight, day, 'cobb_500');
-      
-      // Same actual weight but different targets means different deviations
-      expect(rossDeviation).not.toBe(cobbDeviation);
-      expect(rossDeviation).toBeGreaterThan(cobbDeviation); // Ross target is lower, so deviation is more positive
-    });
+  it("uses the corrected Ross order without upgrading other-breed references", () => {
+    expect(getTargetWeight(42, "ross_308")).toBeGreaterThan(getTargetWeight(42, "cobb_500")!);
+    expect(getTargetWeight(42, "cobb_500")).toBeGreaterThan(getTargetWeight(42, "arbor_acres")!);
   });
-
-  describe("Performance Status", () => {
-    it("should return 'ahead' for +5% or more", () => {
-      expect(getPerformanceStatus(5)).toBe('ahead');
-      expect(getPerformanceStatus(10)).toBe('ahead');
-    });
-
-    it("should return 'on-track' for ±5%", () => {
-      expect(getPerformanceStatus(4)).toBe('on-track');
-      expect(getPerformanceStatus(0)).toBe('on-track');
-      expect(getPerformanceStatus(-4)).toBe('on-track');
-    });
-
-    it("should return 'behind' for -5% to -10%", () => {
-      expect(getPerformanceStatus(-6)).toBe('behind');
-      expect(getPerformanceStatus(-9)).toBe('behind');
-    });
-
-    it("should return 'critical' for -10% or worse", () => {
-      expect(getPerformanceStatus(-10)).toBe('critical');
-      expect(getPerformanceStatus(-15)).toBe('critical');
-    });
+  it("returns all requested chart ages and null beyond publication", () => {
+    const curve = getTargetGrowthCurve(0, 60, "ross_308");
+    expect(curve).toHaveLength(61);
+    expect(curve[42].targetWeight).toBe(2.998);
+    expect(curve[56].targetWeight).toBe(4.318);
+    expect(curve.slice(57).every(row => row.targetWeight === null)).toBe(true);
   });
-
-  describe("Breed Comparison at Day 42", () => {
-    it("should rank breeds by target weight correctly", () => {
-      const ross = getTargetWeight(42, 'ross_308');
-      const cobb = getTargetWeight(42, 'cobb_500');
-      const arbor = getTargetWeight(42, 'arbor_acres');
-      
-      // Cobb 500 > Ross 308 > Arbor Acres
-      expect(cobb).toBeGreaterThan(ross);
-      expect(ross).toBeGreaterThan(arbor);
-    });
-
-    it("should show realistic weight differences", () => {
-      const ross = getTargetWeight(42, 'ross_308');
-      const cobb = getTargetWeight(42, 'cobb_500');
-      const arbor = getTargetWeight(42, 'arbor_acres');
-      
-      // Differences should be in grams range (0.02-0.07 kg)
-      expect(cobb - ross).toBeLessThan(0.1);
-      expect(ross - arbor).toBeLessThan(0.1);
-    });
+  it.each([[2, 1], [0, 1001], [.5, 42], [0, Infinity]])("rejects invalid chart range %s..%s", (start, end) => {
+    expect(getTargetGrowthCurve(start, end)).toEqual([]);
+  });
+  it("calculates signed actual-versus-objective deviation", () => {
+    expect(calculatePerformanceDeviation(2.998, 42)).toBe(0);
+    expect(calculatePerformanceDeviation(3.2, 42)).toBeGreaterThan(0);
+    expect(calculatePerformanceDeviation(2.8, 42)).toBeLessThan(0);
+    expect(calculatePerformanceDeviation(2.9, 42, "ross_308")).toBeLessThan(calculatePerformanceDeviation(2.9, 42, "cobb_500")!);
+  });
+  it.each([0, -1, NaN, Infinity])("withholds invalid actual weight %s", value => {
+    expect(calculatePerformanceDeviation(value, 42)).toBeNull();
+  });
+  it.each([[5, "ahead"], [4, "on-track"], [-5, "on-track"], [-5.1, "behind"], [-9.9, "behind"], [-10, "critical"], [-15, "critical"], [null, "unavailable"], [NaN, "unavailable"]] as const)("uses the disclosed policy boundary %s → %s", (value, expected) => {
+    expect(getPerformanceStatus(value)).toBe(expected);
+  });
+  it("does not reject a valid lower commercial Ross target using the old ±15% policy", () => {
+    const result = validateTargetWeight("ross_308", 42, 1.9);
+    expect(result.isRealistic).toBe(true);
+    expect(result.expectedWeight).toBe(2.998);
+    expect(result.message).toContain("informational application policy");
+  });
+  it("does not invent an objective for a valid market plan beyond Day 56", () => {
+    const result = validateTargetWeight("ross_308", 60, 2.2);
+    expect(result.isRealistic).toBe(true);
+    expect(result.expectedWeight).toBeNull();
+    expect(result.message).toContain("unavailable");
+  });
+  it.each([[0, 42], [-1, 42], [1.9, 0], [1.9, 42.5], [NaN, 42]])("rejects invalid Ross target/period %s/%s", (weight, age) => {
+    expect(validateTargetWeight("ross_308", age, weight).isRealistic).toBe(false);
+  });
+  it("retains the other-breed advisory validation", () => {
+    expect(validateTargetWeight("cobb_500", 42, 2.97).isRealistic).toBe(true);
+    expect(validateTargetWeight("arbor_acres", 42, 1.9).isRealistic).toBe(false);
   });
 });

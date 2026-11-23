@@ -75,6 +75,7 @@ import "../drizzle/relations";
 import { ENV } from "./_core/env";
 import { normalizeAuditEpochMs } from "./audit-time";
 import { getFlockAgeDays } from "../shared/flock-placement";
+import { computeRossFlockMetrics, type RossFlockMetrics } from "../shared/ross-flock-metrics";
 import { createFlockMutation, updateFlockMutation, type FlockCreateInput, type FlockUpdateInput } from "./flock-mutations";
 import {
   createDailyRecordMutation, updateDailyRecordMutation, deleteDailyRecordMutation,
@@ -2488,6 +2489,32 @@ export async function getMortalityRecords(flockId: number) {
     .orderBy(asc(mortalityRecords.recordDate));
 }
 
+/** Only operational load columns are read; unknown houses never default to Ross. */
+async function getRossMetrics(
+  db: AppDatabase,
+  flock: typeof flocks.$inferSelect,
+  dailyRecords: readonly (typeof flockDailyRecords.$inferSelect)[],
+  company?: { timezone: string; now: Date; ageDays: number },
+): Promise<RossFlockMetrics | null> {
+  const house = await getHouseById(flock.houseId);
+  if (house?.breed !== "ross_308") return null;
+  const timezone = company?.timezone ?? await getDisplayTimezone();
+  const now = company?.now ?? new Date();
+  // Query failure propagates: it must never masquerade as an available empty harvest source.
+  const loadRecords = await db.select({
+    id: harvestRecords.id,
+    flockId: harvestRecords.flockId,
+    harvestDate: harvestRecords.harvestDate,
+    chickenCountLoaded: harvestRecords.chickenCountLoaded,
+    totalLoadedWeightKg: harvestRecords.totalLoadedWeightKg,
+  }).from(harvestRecords).where(eq(harvestRecords.flockId, flock.id));
+  return computeRossFlockMetrics({
+    houseBreed: house.breed, flock, dailyRecords,
+    harvestLoads: { status: "available", records: loadRecords },
+    company: { timezone, now, ageDays: company?.ageDays },
+  });
+}
+
 // Advanced Growth Metrics Calculation
 export async function getAdvancedGrowthMetrics(flockId: number) {
   const db = await getDb();
@@ -2497,6 +2524,27 @@ export async function getAdvancedGrowthMetrics(flockId: number) {
   if (!flock) return null;
 
   const dailyRecords = await getFlockDailyRecords(flockId);
+  const rossMetrics = await getRossMetrics(db, flock, dailyRecords);
+  if (rossMetrics) {
+    return {
+      avgDailyGain: rossMetrics.growth.adgG.value,
+      adgData: rossMetrics.growth.intervals.map(interval => ({
+        day: interval.endDay, dailyGain: interval.adgG,
+        weight: rossMetrics.growth.samples.find(sample => sample.day === interval.endDay)!.weightKg,
+        referenceDailyGain: interval.referenceAdgG,
+      })),
+      uniformityIndex: rossMetrics.uniformity.latest?.within10Pct.value ?? null,
+      uniformityCvPct: rossMetrics.uniformity.latest?.cvPct.value ?? null,
+      uniformitySampleCount: rossMetrics.uniformity.latest?.sampleCount ?? null,
+      uniformityReason: rossMetrics.uniformity.latest?.reason ?? "No individual weight samples.",
+      projectedFinalWeight: rossMetrics.summary.projectedWeightKg.value,
+      epi: rossMetrics.summary.epef.value,
+      livability: rossMetrics.birdBalances.fcrEndpoint.livabilityPct.value,
+      currentDay: rossMetrics.asOf.weightDay,
+      latestWeight: rossMetrics.summary.averageWeightKg.value,
+      rossMetrics,
+    };
+  }
   if (!dailyRecords || dailyRecords.length === 0) return null;
 
   // Filter records with weight data and sort by day
@@ -2573,7 +2621,8 @@ export async function getAdvancedGrowthMetrics(flockId: number) {
     epi: parseFloat(epi.toFixed(2)),
     livability: parseFloat(livability.toFixed(2)),
     currentDay,
-    latestWeight
+    latestWeight,
+    rossMetrics: null as RossFlockMetrics | null,
   };
 }
 
@@ -2586,6 +2635,34 @@ export async function getFeedEfficiencyMetrics(flockId: number) {
   if (!flock) return null;
 
   const dailyRecords = await getFlockDailyRecords(flockId);
+  const rossMetrics = await getRossMetrics(db, flock, dailyRecords);
+  if (rossMetrics) {
+    const feedIntakeData = rossMetrics.dailyConsumption.map(record => ({
+      day: record.day, feedPerBird: record.feedGPerBird.value,
+      feedType: dailyRecords.find(source => source.dayNumber === record.day)?.feedType ?? "unknown",
+      reason: record.feedGPerBird.reason,
+    }));
+    const observed = feedIntakeData.filter(record => record.feedPerBird !== null);
+    return {
+      avgFeedPerBird: observed.length
+        ? observed.reduce((sum, record) => sum + record.feedPerBird!, 0) / observed.length : null,
+      feedIntakeData,
+      feedTypePerformance: rossMetrics.phases.map(phase => ({
+        feedType: phase.phase, totalFeed: phase.feedKg.value,
+        days: phase.endDay !== null && phase.configuredFromDay !== null && phase.endDay >= phase.configuredFromDay
+          ? phase.endDay - phase.configuredFromDay + 1 : null,
+        weightGain: phase.weightGainKgPerBird.value === null ? null : phase.weightGainKgPerBird.value * 1000,
+        fcr: phase.feedToGainRatio.value,
+        reason: phase.feedToGainRatio.reason, reference: phase.reference,
+      })),
+      avgWaterFeedRatio: rossMetrics.water.ratioLitresPerKg.value,
+      waterFeedRatioData: rossMetrics.dailyConsumption.map(record => ({
+        day: record.day, ratio: record.waterFeedLitresPerKg.value,
+        reason: record.waterFeedLitresPerKg.reason,
+      })),
+      rossMetrics,
+    };
+  }
   if (!dailyRecords || dailyRecords.length === 0) return null;
 
   const totalMortality = dailyRecords.reduce((sum, r) => sum + (r.mortality || 0), 0);
@@ -2697,7 +2774,8 @@ export async function getFeedEfficiencyMetrics(flockId: number) {
     feedIntakeData,
     feedTypePerformance,
     avgWaterFeedRatio: parseFloat(avgWaterFeedRatio.toFixed(2)),
-    waterFeedRatioData
+    waterFeedRatioData,
+    rossMetrics: null as RossFlockMetrics | null,
   };
 }
 
@@ -2741,7 +2819,10 @@ export async function getFlockPerformanceMetrics(flockId: number) {
     : 0;
 
   // Company-calendar age, shared with clients; placement day is Day 0.
-  const ageInDays = getFlockAgeDays(flock.placementDate, new Date(), await getDisplayTimezone());
+  const now = new Date();
+  const timezone = await getDisplayTimezone();
+  const ageInDays = getFlockAgeDays(flock.placementDate, now, timezone);
+  const rossMetrics = await getRossMetrics(db, flock, dailyRecords, { timezone, now, ageDays: ageInDays });
 
   const targetWeight = flock.targetSlaughterWeight ? parseFloat(flock.targetSlaughterWeight) : 0;
   const growingPeriod = flock.growingPeriod || 42;
@@ -2750,16 +2831,18 @@ export async function getFlockPerformanceMetrics(flockId: number) {
     flockId: flock.id,
     flockNumber: flock.flockNumber,
     ageInDays,
-    currentCount: calculatedCurrentCount,
+    currentCount: rossMetrics ? rossMetrics.birdBalances.latest.physicalRemaining : calculatedCurrentCount,
     initialCount: flock.initialCount,
-    totalMortality,
-    mortalityRate: parseFloat(mortalityRate.toFixed(2)),
-    totalFeedConsumed: parseFloat(totalFeedConsumed.toFixed(2)),
-    averageWeight: parseFloat(averageWeight.toFixed(3)),
-    fcr: parseFloat(fcr.toFixed(2)),
+    totalMortality: rossMetrics ? rossMetrics.birdBalances.latest.totalOnFarmLosses : totalMortality,
+    // Compatibility name: mortalityRate historically means total on-farm losses, including culls.
+    mortalityRate: rossMetrics ? rossMetrics.birdBalances.latest.totalLossPct.value : parseFloat(mortalityRate.toFixed(2)),
+    totalFeedConsumed: rossMetrics ? rossMetrics.summary.fcrFeedKg.value : parseFloat(totalFeedConsumed.toFixed(2)),
+    averageWeight: rossMetrics ? rossMetrics.summary.averageWeightKg.value : parseFloat(averageWeight.toFixed(3)),
+    fcr: rossMetrics ? rossMetrics.summary.cumulativeFcr.value : parseFloat(fcr.toFixed(2)),
     targetWeight,
     growingPeriod,
     daysRemaining: growingPeriod - ageInDays,
+    rossMetrics,
   };
 }
 
@@ -2768,145 +2851,11 @@ export async function getFlockPerformanceMetrics(flockId: number) {
 // Breed-Specific Target Growth Curve Functions
 // ============================================================================
 
-type BreedType = 'ross_308' | 'cobb_500' | 'arbor_acres';
-
-/**
- * Breed-specific growth curves based on official performance objectives (2022)
- * All weights in kg
- */
-const BREED_GROWTH_CURVES: Record<BreedType, Record<number, number>> = {
-  ross_308: {
-    0: 0.042, 7: 0.170, 14: 0.465, 21: 0.925, 28: 1.505, 35: 2.180, 42: 2.950, 49: 3.790,
-  },
-  cobb_500: {
-    0: 0.042, 7: 0.175, 14: 0.480, 21: 0.950, 28: 1.540, 35: 2.215, 42: 2.970, 49: 3.800,
-  },
-  arbor_acres: {
-    0: 0.042, 7: 0.168, 14: 0.458, 21: 0.910, 28: 1.480, 35: 2.145, 42: 2.900, 49: 3.720,
-  },
-};
-
-/**
- * Get target weight for a specific breed and day
- * Uses linear interpolation for days between defined points
- * Uses linear extrapolation for days beyond 49
- */
-export function getTargetWeight(dayNumber: number, breed: BreedType = 'ross_308'): number {
-  const growthCurve = BREED_GROWTH_CURVES[breed];
-  
-  // If exact day exists, return it
-  if (growthCurve[dayNumber] !== undefined) {
-    return growthCurve[dayNumber]!;
-  }
-  
-  // Get sorted day keys
-  const days = Object.keys(growthCurve).map(Number).sort((a, b) => a - b);
-  
-  // For days before first defined point
-  if (dayNumber < days[0]!) {
-    return growthCurve[days[0]!]!;
-  }
-  
-  // For days beyond last defined point, use linear extrapolation
-  if (dayNumber > days[days.length - 1]!) {
-    const lastDay = days[days.length - 1]!;
-    const secondLastDay = days[days.length - 2]!;
-    const dailyGain = (growthCurve[lastDay]! - growthCurve[secondLastDay]!) / (lastDay - secondLastDay);
-    return growthCurve[lastDay]! + (dayNumber - lastDay) * dailyGain;
-  }
-  
-  // For days between defined points, use linear interpolation
-  for (let i = 0; i < days.length - 1; i++) {
-    const lowerDay = days[i]!;
-    const upperDay = days[i + 1]!;
-    
-    if (dayNumber >= lowerDay && dayNumber <= upperDay) {
-      const fraction = (dayNumber - lowerDay) / (upperDay - lowerDay);
-      return growthCurve[lowerDay]! + (growthCurve[upperDay]! - growthCurve[lowerDay]!) * fraction;
-    }
-  }
-  
-  // Fallback
-  return 0.042;
-}
-
-/**
- * Legacy function for backward compatibility - defaults to Ross 308
- * @deprecated Use getTargetWeight(dayNumber, breed) instead
- */
-function getTargetWeightLegacy(dayNumber: number): number {
-  return getTargetWeight(dayNumber, 'ross_308');
-}
-
-/**
- * Get target growth curve data for charting (breed-specific)
- * Returns array of {day, targetWeight} for the specified day range
- */
-export function getTargetGrowthCurve(startDay: number = 0, endDay: number = 42, breed: BreedType = 'ross_308'): Array<{ day: number; targetWeight: number }> {
-  const curve: Array<{ day: number; targetWeight: number }> = [];
-  
-  for (let day = startDay; day <= endDay; day++) {
-    curve.push({
-      day,
-      targetWeight: getTargetWeight(day, breed),
-    });
-  }
-  
-  return curve;
-}
-
-/**
- * Calculate performance deviation from target (breed-specific)
- * Returns percentage deviation (positive = ahead of target, negative = behind target)
- */
-export function calculatePerformanceDeviation(actualWeight: number, dayNumber: number, breed: BreedType = 'ross_308'): number {
-  const targetWeight = getTargetWeight(dayNumber, breed);
-  if (targetWeight === 0) return 0;
-  
-  const deviation = ((actualWeight - targetWeight) / targetWeight) * 100;
-  return Math.round(deviation * 10) / 10; // Round to 1 decimal place
-}
-
-/**
- * Get performance status based on deviation from target
- * Returns: 'ahead' | 'on-track' | 'behind' | 'critical'
- */
-export function getPerformanceStatus(deviation: number): 'ahead' | 'on-track' | 'behind' | 'critical' {
-  if (deviation >= 5) return 'ahead';           // 5% or more ahead
-  if (deviation >= -5) return 'on-track';       // Within ±5%
-  if (deviation > -10) return 'behind';         // 5-10% behind (not including -10%)
-  return 'critical';                             // -10% or more behind
-}
-
-
-/**
- * Validate if target weight is realistic for given breed and growing period
- * Returns { isRealistic: boolean, expectedWeight: number, message: string }
- */
-export function validateTargetWeight(
-  breed: "ross_308" | "cobb_500" | "arbor_acres",
-  growingPeriod: number,
-  targetWeight: number
-): { isRealistic: boolean; expectedWeight: number; message: string } {
-  const expectedWeight = getTargetWeight(growingPeriod, breed);
-  const deviation = ((targetWeight - expectedWeight) / expectedWeight) * 100;
-  
-  // Allow ±15% deviation from expected weight
-  const isRealistic = Math.abs(deviation) <= 15;
-  
-  let message = "";
-  if (!isRealistic) {
-    if (deviation > 15) {
-      message = `Target weight (${targetWeight.toFixed(2)}kg) is ${deviation.toFixed(1)}% higher than expected ${expectedWeight.toFixed(2)}kg for ${breed.replace("_", " ")} at day ${growingPeriod}. This may be unrealistic.`;
-    } else {
-      message = `Target weight (${targetWeight.toFixed(2)}kg) is ${Math.abs(deviation).toFixed(1)}% lower than expected ${expectedWeight.toFixed(2)}kg for ${breed.replace("_", " ")} at day ${growingPeriod}. This may indicate poor performance.`;
-    }
-  } else {
-    message = `Target weight is realistic for ${breed.replace("_", " ")} at day ${growingPeriod} (expected: ${expectedWeight.toFixed(2)}kg)`;
-  }
-  
-  return { isRealistic, expectedWeight, message };
-}
+// Pure lookups keep the Ross publication range explicit and preserve other-breed curves.
+export {
+  getTargetWeight, getTargetGrowthCurve, calculatePerformanceDeviation,
+  getPerformanceStatus, validateTargetWeight,
+} from "../shared/breed-growth";
 
 
 // ============================================================================

@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { formatWeight, convertToKg } from "@/lib/weightUtils";
 import { getFlockPlacementDate, getFlockAgeDays } from "@shared/flock-placement";
+import { allocationPayload, blankFeedAllocationForm, feedAllocationFields, FEED_ALLOCATION_HINT, hydrateFeedAllocationForm } from "@shared/flock-feed-allocation";
 
 // These are the existing form defaults (also 42 in the create parser/schema).
 const FLOCK_FORM_DEFAULTS = { growingPeriod: 42, starterToDay: 10, growerToDay: 24 };
@@ -88,6 +89,7 @@ export default function Flocks() {
     growerToDay: "24",
     finisherFeedType: "premium" as "premium" | "value" | "econo",
     finisherFromDay: "25",
+    ...blankFeedAllocationForm(),
     notes: "",
     vaccinationProtocol: "standard" as "standard" | "premium" | "none",
     vaccinationSchedules: [] as Array<{ vaccineId: number; scheduledDay: number }>,
@@ -219,6 +221,7 @@ export default function Flocks() {
       growerToDay: "24",
       finisherFeedType: "premium",
       finisherFromDay: "25",
+      ...blankFeedAllocationForm(),
       notes: "",
       vaccinationProtocol: "standard",
       vaccinationSchedules: [],
@@ -285,6 +288,7 @@ export default function Flocks() {
         updateFlock.mutate({
           ...payload,
           id: editingFlockId,
+          ...allocationPayload(formData, "edit"),
           ...(vaccinesChanged ? { vaccinationSchedules: formData.vaccinationSchedules } : {}),
           ...(stressChanged ? { stressPackSchedules: formData.stressPackSchedules } : {}),
           ...(templatesChanged ? { selectedTemplateIds: formData.selectedTemplateIds } : {}),
@@ -295,6 +299,7 @@ export default function Flocks() {
       createFlock.mutate({
         ...payload,
         starterFromDay: 0,
+        ...allocationPayload(formData, "create"),
         vaccinationProtocol: formData.vaccinationProtocol,
         vaccinationSchedules: formData.vaccinationSchedules,
         stressPackSchedules: formData.stressPackSchedules,
@@ -347,6 +352,7 @@ export default function Flocks() {
         growerToDay: flock.growerToDay?.toString() || "24",
         finisherFeedType: flock.finisherFeedType || "premium",
         finisherFromDay: flock.finisherFromDay?.toString() || "25",
+        ...hydrateFeedAllocationForm(flock),
         notes: flock.notes || "",
         vaccinationProtocol: "none",
         vaccinationSchedules,
@@ -688,6 +694,24 @@ export default function Flocks() {
                       </div>
                     </div>
                   </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+                    {feedAllocationFields.map((field, index) => (
+                      <div className="space-y-2" key={field}>
+                        <Label htmlFor={field}>{["Starter", "Grower", "Finisher"][index]} allocation (kg per bird)</Label>
+                        <Input
+                          id={field}
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          max="999.999"
+                          aria-describedby="feed-allocation-hint"
+                          value={formData[field]}
+                          onChange={(e) => setFormData({ ...formData, [field]: e.target.value })}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p id="feed-allocation-hint" className="text-xs text-muted-foreground mt-2">{FEED_ALLOCATION_HINT}</p>
                 </div>
 
                 {/* Health Management Section */}
@@ -1141,6 +1165,7 @@ export default function Flocks() {
                                 growerToDay: flock.growerToDay?.toString() || "24",
                                 finisherFeedType: flock.finisherFeedType || "premium",
                                 finisherFromDay: flock.finisherFromDay?.toString() || "25",
+                                ...hydrateFeedAllocationForm(flock),
                                 notes: flock.notes || "",
                                 vaccinationProtocol: "standard",
                                 vaccinationSchedules: [],
